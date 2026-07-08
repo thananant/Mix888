@@ -110,9 +110,29 @@ h2{font-size:16px;font-weight:700;margin-bottom:12px}
   <div class="card">
     <h2 id="cust-form-title">เพิ่มลูกค้า</h2>
     <div class="row">
-      <div><label>รหัสลูกค้า</label><input id="c-code" style="width:100px" placeholder="C001"></div>
-      <div style="flex:1;min-width:180px"><label>ชื่อลูกค้า / ร้าน</label><input id="c-name" style="width:100%"></div>
-      <div style="flex:1;min-width:220px"><label>LINE Group ID (ไว้ส่งบิล)</label><input id="c-line" style="width:100%" placeholder="Cxxxxxxxx… (ใส่ทีหลังได้)"></div>
+      <div id="c-prefix-wrap"><label>รหัสนำหน้า (อังกฤษ 3 ตัว)</label><input id="c-prefix" style="width:130px;text-transform:uppercase" maxlength="3" placeholder="AAA"></div>
+      <div id="c-code-wrap" style="display:none"><label>รหัสลูกค้า</label><input id="c-code" style="width:130px;background:#f5f0ea" readonly></div>
+      <div style="flex:1;min-width:170px"><label>ชื่อร้าน</label><input id="c-name" style="width:100%"></div>
+      <div style="min-width:140px"><label>เซลล์ที่ดูแล</label><input id="c-sale" list="sale-list" style="width:100%" placeholder="ชื่อเซลล์"><datalist id="sale-list"></datalist></div>
+      <div style="flex:1;min-width:200px"><label>LINE Group ID (ไว้ส่งบิล)</label><input id="c-line" style="width:100%" placeholder="ใส่ทีหลังได้"></div>
+    </div>
+    <p class="hint">รหัสลูกค้าระบบรันเลขให้อัตโนมัติจากตัวนำหน้า เช่น ใส่ AAA → ได้ AAA00001, AAA00002 ต่อกันไปเรื่อย ๆ</p>
+
+    <h2 style="margin-top:16px">🧾 ข้อมูลออกบิล</h2>
+    <div class="row">
+      <div style="flex:1;min-width:160px"><label>ชื่อลูกค้า (ผู้ติดต่อ)</label><input id="c-contact" style="width:100%"></div>
+      <div><label>เบอร์โทร (10 หลัก)</label><input id="c-phone" inputmode="numeric" maxlength="10" style="width:140px" placeholder="0812345678" oninput="this.value=this.value.replace(/\D/g,'')"></div>
+      <div style="flex:2;min-width:240px"><label>ที่อยู่ออกบิล</label><input id="c-billaddr" style="width:100%"></div>
+    </div>
+
+    <h2 style="margin-top:16px">🚚 ข้อมูลจัดส่ง <button class="btn-g mini" style="margin-left:8px;vertical-align:middle" onclick="copyBillToShip()">คัดลอกจากข้อมูลบิล</button></h2>
+    <div class="row">
+      <div style="flex:1;min-width:150px"><label>ชื่อร้าน (จุดส่ง)</label><input id="c-shipshop" style="width:100%"></div>
+      <div style="flex:1;min-width:150px"><label>ชื่อผู้รับของ</label><input id="c-receiver" style="width:100%"></div>
+      <div><label>เบอร์ผู้รับ (10 หลัก)</label><input id="c-shipphone" inputmode="numeric" maxlength="10" style="width:140px" placeholder="0812345678" oninput="this.value=this.value.replace(/\D/g,'')"></div>
+      <div style="flex:2;min-width:240px"><label>ที่อยู่ส่งสินค้า</label><input id="c-shipaddr" style="width:100%"></div>
+    </div>
+    <div class="row" style="margin-top:14px">
       <button class="btn-p" id="c-save" onclick="saveCustomer()">บันทึก</button>
       <button class="btn-g" onclick="resetCustomerForm()">ล้าง</button>
     </div>
@@ -124,7 +144,7 @@ h2{font-size:16px;font-weight:700;margin-bottom:12px}
     </div>
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th>รหัส</th><th>ชื่อ</th><th>LINE Group</th><th class="num">สินค้าที่เห็น</th><th></th></tr></thead>
+      <thead><tr><th>รหัส</th><th>ชื่อร้าน</th><th>เซลล์</th><th>เบอร์</th><th>LINE Group</th><th class="num">สินค้าที่เห็น</th><th></th></tr></thead>
       <tbody id="c-body"></tbody>
     </table>
     </div>
@@ -161,8 +181,8 @@ h2{font-size:16px;font-weight:700;margin-bottom:12px}
 
 <script>
 /* ================= ตั้งค่า — แก้ 2 บรรทัดนี้ ================= */
-const SUPABASE_URL = 'https://eqbzpgynzgdwvouuzfwt.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_HqLNQDwR4omYcb7BNUEKIw_vyHCo4N-';
+const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+const SUPABASE_KEY = 'YOUR-ANON-KEY';
 /* ============================================================ */
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -296,8 +316,11 @@ function renderCustomers(){
   const q=(document.getElementById('c-search').value||'').toLowerCase();
   const list=customers.filter(c=>!q||c.name.toLowerCase().includes(q)||c.code.toLowerCase().includes(q));
   document.getElementById('c-count').textContent=list.length+' ราย';
+  document.getElementById('sale-list').innerHTML=[...new Set(customers.map(c=>c.sale_name).filter(Boolean))].map(s=>`<option value="${esc(s)}">`).join('');
   document.getElementById('c-body').innerHTML=list.map(c=>`<tr>
     <td><b>${esc(c.code)}</b></td><td>${esc(c.name)}</td>
+    <td>${c.sale_name?esc(c.sale_name):'<span style="color:var(--muted)">—</span>'}</td>
+    <td style="font-variant-numeric:tabular-nums">${c.phone?esc(c.phone):'<span style="color:var(--muted)">—</span>'}</td>
     <td style="font-size:12.5px;color:var(--muted)">${c.line_group_id?esc(c.line_group_id.slice(0,14))+'…':'<span class="tag tag-low">ยังไม่ผูก</span>'}</td>
     <td class="num">${priceCounts[c.id]?'<span class="tag tag-ov">'+priceCounts[c.id]+' รายการ</span>':'<span class="tag tag-out">ยังไม่จัด</span>'}</td>
     <td style="white-space:nowrap">
@@ -309,26 +332,73 @@ function editCustomer(id){
   const c=customers.find(x=>x.id===id);if(!c)return;
   editCustomerId=id;
   document.getElementById('cust-form-title').textContent='แก้ไข: '+c.name;
+  document.getElementById('c-prefix-wrap').style.display='none';
+  document.getElementById('c-code-wrap').style.display='';
   document.getElementById('c-code').value=c.code;
   document.getElementById('c-name').value=c.name;
+  document.getElementById('c-sale').value=c.sale_name||'';
   document.getElementById('c-line').value=c.line_group_id||'';
+  document.getElementById('c-contact').value=c.contact_name||'';
+  document.getElementById('c-phone').value=c.phone||'';
+  document.getElementById('c-billaddr').value=c.billing_address||'';
+  document.getElementById('c-shipshop').value=c.ship_shop_name||'';
+  document.getElementById('c-receiver').value=c.ship_receiver||'';
+  document.getElementById('c-shipphone').value=c.ship_phone||'';
+  document.getElementById('c-shipaddr').value=c.ship_address||'';
   window.scrollTo({top:0,behavior:'smooth'});
 }
 function resetCustomerForm(){
   editCustomerId=null;
   document.getElementById('cust-form-title').textContent='เพิ่มลูกค้า';
-  ['c-code','c-name','c-line'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('c-prefix-wrap').style.display='';
+  document.getElementById('c-code-wrap').style.display='none';
+  ['c-prefix','c-code','c-name','c-sale','c-line','c-contact','c-phone','c-billaddr',
+   'c-shipshop','c-receiver','c-shipphone','c-shipaddr'].forEach(id=>document.getElementById(id).value='');
+}
+function copyBillToShip(){
+  document.getElementById('c-shipshop').value=document.getElementById('c-name').value;
+  document.getElementById('c-receiver').value=document.getElementById('c-contact').value;
+  document.getElementById('c-shipphone').value=document.getElementById('c-phone').value;
+  document.getElementById('c-shipaddr').value=document.getElementById('c-billaddr').value;
 }
 async function saveCustomer(){
-  const rec={code:document.getElementById('c-code').value.trim(),
+  const phone=document.getElementById('c-phone').value.trim();
+  const shipPhone=document.getElementById('c-shipphone').value.trim();
+  const rec={
     name:document.getElementById('c-name').value.trim(),
-    line_group_id:document.getElementById('c-line').value.trim()||null};
-  if(!rec.code||!rec.name){toast('กรอกรหัสและชื่อลูกค้าก่อน');return;}
+    sale_name:document.getElementById('c-sale').value.trim()||null,
+    line_group_id:document.getElementById('c-line').value.trim()||null,
+    contact_name:document.getElementById('c-contact').value.trim()||null,
+    phone:phone||null,
+    billing_address:document.getElementById('c-billaddr').value.trim()||null,
+    ship_shop_name:document.getElementById('c-shipshop').value.trim()||null,
+    ship_receiver:document.getElementById('c-receiver').value.trim()||null,
+    ship_phone:shipPhone||null,
+    ship_address:document.getElementById('c-shipaddr').value.trim()||null};
+  if(!rec.name){toast('กรอกชื่อร้านก่อน');return;}
+  if(phone&&!/^[0-9]{10}$/.test(phone)){toast('เบอร์โทรออกบิลต้องเป็นตัวเลข 10 หลักเท่านั้น');return;}
+  if(shipPhone&&!/^[0-9]{10}$/.test(shipPhone)){toast('เบอร์ผู้รับของต้องเป็นตัวเลข 10 หลักเท่านั้น');return;}
+
+  if(!editCustomerId){
+    // รันรหัสอัตโนมัติ: prefix 3 ตัว + เลข 5 หลัก
+    const prefix=document.getElementById('c-prefix').value.trim().toUpperCase();
+    if(!/^[A-Z]{3}$/.test(prefix)){toast('รหัสนำหน้าต้องเป็นอังกฤษ 3 ตัว เช่น AAA');return;}
+    const {data,error:e1}=await db.from('customers').select('code')
+      .like('code',prefix+'%').order('code',{ascending:false}).limit(1);
+    if(e1){toast('เช็ครหัสไม่ได้: '+e1.message);return;}
+    let n=1;
+    if(data&&data.length){
+      const last=parseInt(data[0].code.slice(3),10);
+      if(!isNaN(last)) n=last+1;
+    }
+    rec.code=prefix+String(n).padStart(5,'0');
+  }
+
   const q=editCustomerId?db.from('customers').update(rec).eq('id',editCustomerId)
                         :db.from('customers').insert(rec);
   const {error}=await q;
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
-  toast(editCustomerId?'อัพเดตลูกค้าแล้ว':'เพิ่มลูกค้าแล้ว');
+  toast(editCustomerId?'อัพเดตลูกค้าแล้ว':'เพิ่มลูกค้า '+rec.code+' แล้ว');
   resetCustomerForm(); loadCustomers();
 }
 function gotoPricing(id){
