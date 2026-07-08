@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>แอดมิน — ระบบสั่งสินค้า</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --ink:#1a2b28; --muted:#5c6f6b; --line:#dbe4e1; --bg:#f3f6f5; --card:#ffffff;
+  --accent:#0f6e56; --accent-soft:#e1f5ee; --warn:#ba7517; --warn-soft:#faeeda;
+  --danger:#a32d2d; --danger-soft:#fcebeb; --radius:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans Thai',sans-serif;background:var(--bg);color:var(--ink);font-size:15px}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;position:sticky;top:0;z-index:10}
+header h1{font-size:18px;font-weight:700}
+header h1 span{color:var(--accent)}
+.tabs{display:flex;gap:4px;margin-left:auto}
+.tab{padding:8px 18px;border:none;background:none;font:inherit;font-weight:500;color:var(--muted);cursor:pointer;border-radius:var(--radius)}
+.tab.active{background:var(--accent);color:#fff}
+main{max-width:1100px;margin:20px auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:16px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px;font-weight:500}
+input,select{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;min-width:0}
+input:focus,select:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+button{font:inherit;font-weight:600;padding:9px 18px;border:none;border-radius:8px;cursor:pointer}
+.btn-p{background:var(--accent);color:#fff}
+.btn-s{background:var(--accent-soft);color:var(--accent)}
+.btn-g{background:#eef1f0;color:var(--ink)}
+.btn-d{background:var(--danger-soft);color:var(--danger)}
+button:disabled{opacity:.5;cursor:not-allowed}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;padding:9px 10px;color:var(--muted);font-size:12.5px;font-weight:600;border-bottom:2px solid var(--line);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:hover td{background:#fafcfb}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.tag{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600}
+.tag-ok{background:var(--accent-soft);color:var(--accent)}
+.tag-low{background:var(--warn-soft);color:var(--warn)}
+.tag-out{background:var(--danger-soft);color:var(--danger)}
+.tag-ov{background:#eeedfe;color:#534ab7}
+.mini{padding:4px 12px;font-size:13px;font-weight:500}
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 22px;border-radius:99px;font-weight:500;opacity:0;transition:opacity .25s;pointer-events:none;z-index:50;max-width:90vw}
+#toast.show{opacity:1}
+.hint{font-size:13px;color:var(--muted);margin-top:8px;line-height:1.6}
+.count{font-size:13px;color:var(--muted);font-weight:500}
+.price-in{width:110px;text-align:right}
+.changed{border-color:var(--warn);background:var(--warn-soft)}
+h2{font-size:16px;font-weight:700;margin-bottom:12px}
+.page{display:none}.page.active{display:block}
+@media(max-width:640px){header{padding:10px 12px}.tabs{width:100%;margin-left:0}.tab{flex:1;padding:8px 6px;font-size:14px}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📦 ระบบสั่งสินค้า <span>· แอดมิน</span></h1>
+  <div class="tabs">
+    <button class="tab active" data-page="products" onclick="showPage('products')">สินค้า</button>
+    <button class="tab" data-page="customers" onclick="showPage('customers')">ลูกค้า</button>
+    <button class="tab" data-page="pricing" onclick="showPage('pricing')">ตั้งราคา</button>
+  </div>
+</header>
+
+<main>
+
+<!-- ============ สินค้า ============ -->
+<div class="page active" id="page-products">
+  <div class="card">
+    <h2 id="prod-form-title">เพิ่มสินค้า</h2>
+    <div class="row">
+      <div><label>รหัส (SKU)</label><input id="p-sku" style="width:110px" placeholder="P001"></div>
+      <div style="flex:1;min-width:180px"><label>ชื่อสินค้า</label><input id="p-name" style="width:100%"></div>
+      <div><label>หน่วย</label><input id="p-unit" style="width:80px" value="ชิ้น"></div>
+      <div><label>ราคากลาง</label><input id="p-price" type="number" step="0.01" style="width:110px" class="num"></div>
+      <div><label>สต๊อกเริ่มต้น</label><input id="p-stock" type="number" step="1" style="width:100px" class="num" value="0"></div>
+      <div><label>เตือนใกล้หมด</label><input id="p-alert" type="number" step="1" style="width:100px" class="num" value="10"></div>
+      <button class="btn-p" id="p-save" onclick="saveProduct()">บันทึก</button>
+      <button class="btn-g" onclick="resetProductForm()">ล้าง</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="margin-bottom:12px;align-items:center">
+      <input id="p-search" placeholder="ค้นหาชื่อ / SKU…" style="flex:1;min-width:200px" oninput="renderProducts()">
+      <span class="count" id="p-count"></span>
+      <button class="btn-s" onclick="document.getElementById('csv-file').click()">นำเข้า CSV</button>
+      <input type="file" id="csv-file" accept=".csv" style="display:none" onchange="importCSV(this)">
+      <button class="btn-g" onclick="exportCSV()">ส่งออก CSV</button>
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>SKU</th><th>ชื่อสินค้า</th><th>หน่วย</th><th class="num">ราคากลาง</th><th class="num">สต๊อก</th><th>สถานะ</th><th></th></tr></thead>
+      <tbody id="p-body"></tbody>
+    </table>
+    </div>
+    <p class="hint">รูปแบบ CSV: <b>sku,name,unit,base_price,stock_qty</b> (บรรทัดแรกเป็นหัวตาราง) — SKU ซ้ำจะอัพเดตทับของเดิม รองรับ 500+ รายการในไฟล์เดียว</p>
+  </div>
+</div>
+
+<!-- ============ ลูกค้า ============ -->
+<div class="page" id="page-customers">
+  <div class="card">
+    <h2 id="cust-form-title">เพิ่มลูกค้า</h2>
+    <div class="row">
+      <div><label>รหัสลูกค้า</label><input id="c-code" style="width:100px" placeholder="C001"></div>
+      <div style="flex:1;min-width:180px"><label>ชื่อลูกค้า / ร้าน</label><input id="c-name" style="width:100%"></div>
+      <div style="flex:1;min-width:220px"><label>LINE Group ID (ไว้ส่งบิล)</label><input id="c-line" style="width:100%" placeholder="Cxxxxxxxx… (ใส่ทีหลังได้)"></div>
+      <button class="btn-p" id="c-save" onclick="saveCustomer()">บันทึก</button>
+      <button class="btn-g" onclick="resetCustomerForm()">ล้าง</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row" style="margin-bottom:12px;align-items:center">
+      <input id="c-search" placeholder="ค้นหาลูกค้า…" style="flex:1;min-width:200px" oninput="renderCustomers()">
+      <span class="count" id="c-count"></span>
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>รหัส</th><th>ชื่อ</th><th>LINE Group</th><th class="num">ราคาพิเศษ (รายการ)</th><th></th></tr></thead>
+      <tbody id="c-body"></tbody>
+    </table>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ตั้งราคา ============ -->
+<div class="page" id="page-pricing">
+  <div class="card">
+    <div class="row" style="align-items:center">
+      <div style="flex:1;min-width:220px"><label>เลือกลูกค้า</label><select id="pr-customer" style="width:100%" onchange="loadPricing()"></select></div>
+      <input id="pr-search" placeholder="ค้นหาสินค้า…" style="flex:1;min-width:180px" oninput="renderPricing()">
+      <button class="btn-p" id="pr-save" onclick="savePricing()" disabled>บันทึกราคา (<span id="pr-changes">0</span>)</button>
+    </div>
+    <p class="hint">ใส่ราคาเฉพาะตัวที่ <b>ต่างจากราคากลาง</b> เท่านั้น — เว้นว่าง = ใช้ราคากลางอัตโนมัติ · ลบราคาพิเศษ = ล้างช่องให้ว่างแล้วบันทึก</p>
+  </div>
+  <div class="card">
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>SKU</th><th>ชื่อสินค้า</th><th class="num">ราคากลาง</th><th class="num">ราคาลูกค้ารายนี้</th><th></th></tr></thead>
+      <tbody id="pr-body"></tbody>
+    </table>
+    </div>
+  </div>
+</div>
+
+</main>
+<div id="toast"></div>
+
+<script>
+/* ================= ตั้งค่า — แก้ 2 บรรทัดนี้ ================= */
+const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+const SUPABASE_KEY = 'YOUR-ANON-KEY';
+/* ============================================================ */
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+let products = [], customers = [], overrides = {}, priceCounts = {};
+let editProductId = null, editCustomerId = null, pendingPrices = {};
+
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
+function showPage(p){
+  document.querySelectorAll('.page').forEach(e=>e.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('active',e.dataset.page===p));
+  document.getElementById('page-'+p).classList.add('active');
+  if(p==='pricing') fillCustomerSelect();
+}
+const fmt = n => Number(n).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ---------- สินค้า ---------- */
+async function loadProducts(){
+  const {data,error} = await db.from('products').select('*').order('sku');
+  if(error){toast('โหลดสินค้าไม่ได้: '+error.message);return;}
+  products = data||[]; renderProducts();
+}
+function renderProducts(){
+  const q=(document.getElementById('p-search').value||'').toLowerCase();
+  const list=products.filter(p=>!q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q));
+  document.getElementById('p-count').textContent=list.length+' รายการ';
+  document.getElementById('p-body').innerHTML=list.map(p=>{
+    let tag = p.stock_qty<=0 ? '<span class="tag tag-out">หมด</span>'
+            : p.stock_qty<= (p.low_stock_alert??10) ? '<span class="tag tag-low">ใกล้หมด</span>'
+            : '<span class="tag tag-ok">มีของ</span>';
+    return `<tr>
+      <td><b>${esc(p.sku)}</b></td><td>${esc(p.name)}</td><td>${esc(p.unit)}</td>
+      <td class="num">${fmt(p.base_price)}</td><td class="num"><b>${Number(p.stock_qty)}</b></td><td>${tag}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-s mini" onclick="editProduct(${p.id})">แก้ไข</button>
+        <button class="btn-d mini" onclick="delProduct(${p.id})">ลบ</button>
+      </td></tr>`;
+  }).join('');
+}
+function editProduct(id){
+  const p=products.find(x=>x.id===id); if(!p)return;
+  editProductId=id;
+  document.getElementById('prod-form-title').textContent='แก้ไข: '+p.name;
+  ['sku','name','unit'].forEach(k=>document.getElementById('p-'+k).value=p[k]);
+  document.getElementById('p-price').value=p.base_price;
+  document.getElementById('p-stock').value=p.stock_qty;
+  document.getElementById('p-alert').value=p.low_stock_alert??10;
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function resetProductForm(){
+  editProductId=null;
+  document.getElementById('prod-form-title').textContent='เพิ่มสินค้า';
+  ['p-sku','p-name','p-price'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('p-unit').value='ชิ้น';
+  document.getElementById('p-stock').value='0';
+  document.getElementById('p-alert').value='10';
+}
+async function saveProduct(){
+  const rec={
+    sku:document.getElementById('p-sku').value.trim(),
+    name:document.getElementById('p-name').value.trim(),
+    unit:document.getElementById('p-unit').value.trim()||'ชิ้น',
+    base_price:parseFloat(document.getElementById('p-price').value)||0,
+    stock_qty:parseFloat(document.getElementById('p-stock').value)||0,
+    low_stock_alert:parseFloat(document.getElementById('p-alert').value)||10
+  };
+  if(!rec.sku||!rec.name){toast('กรอก SKU และชื่อสินค้าก่อน');return;}
+  const q = editProductId ? db.from('products').update(rec).eq('id',editProductId)
+                          : db.from('products').insert(rec);
+  const {error}=await q;
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  toast(editProductId?'อัพเดตสินค้าแล้ว':'เพิ่มสินค้าแล้ว');
+  resetProductForm(); loadProducts();
+}
+async function delProduct(id){
+  const p=products.find(x=>x.id===id);
+  if(!confirm('ลบ "'+p.name+'" ? (ประวัติออเดอร์เดิมยังอยู่)'))return;
+  const {error}=await db.from('products').update({active:false}).eq('id',id);
+  if(error){toast('ลบไม่สำเร็จ: '+error.message);return;}
+  const {error:e2}=await db.from('products').delete().eq('id',id);
+  if(e2) toast('ปิดการขายแล้ว (ลบถาวรไม่ได้เพราะมีประวัติ)'); else toast('ลบแล้ว');
+  loadProducts();
+}
+function importCSV(input){
+  const f=input.files[0]; if(!f)return;
+  const reader=new FileReader();
+  reader.onload=async e=>{
+    const lines=e.target.result.split(/\r?\n/).filter(l=>l.trim());
+    const rows=[];
+    for(let i=1;i<lines.length;i++){
+      const c=lines[i].split(',');
+      if(c.length<2)continue;
+      rows.push({sku:c[0].trim(),name:c[1].trim(),unit:(c[2]||'ชิ้น').trim(),
+        base_price:parseFloat(c[3])||0,stock_qty:parseFloat(c[4])||0});
+    }
+    if(!rows.length){toast('ไม่พบข้อมูลในไฟล์');return;}
+    const {error}=await db.from('products').upsert(rows,{onConflict:'sku'});
+    if(error){toast('นำเข้าไม่สำเร็จ: '+error.message);return;}
+    toast('นำเข้า '+rows.length+' รายการเรียบร้อย');
+    loadProducts();
+  };
+  reader.readAsText(f,'UTF-8'); input.value='';
+}
+function exportCSV(){
+  const head='sku,name,unit,base_price,stock_qty\n';
+  const body=products.map(p=>[p.sku,p.name,p.unit,p.base_price,p.stock_qty].join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['\uFEFF'+head+body],{type:'text/csv;charset=utf-8'}));
+  a.download='products.csv'; a.click();
+}
+
+/* ---------- ลูกค้า ---------- */
+async function loadCustomers(){
+  const {data,error}=await db.from('customers').select('*').order('code');
+  if(error){toast('โหลดลูกค้าไม่ได้: '+error.message);return;}
+  customers=data||[];
+  const {data:cp}=await db.from('customer_prices').select('customer_id');
+  priceCounts={};(cp||[]).forEach(r=>priceCounts[r.customer_id]=(priceCounts[r.customer_id]||0)+1);
+  renderCustomers();
+}
+function renderCustomers(){
+  const q=(document.getElementById('c-search').value||'').toLowerCase();
+  const list=customers.filter(c=>!q||c.name.toLowerCase().includes(q)||c.code.toLowerCase().includes(q));
+  document.getElementById('c-count').textContent=list.length+' ราย';
+  document.getElementById('c-body').innerHTML=list.map(c=>`<tr>
+    <td><b>${esc(c.code)}</b></td><td>${esc(c.name)}</td>
+    <td style="font-size:12.5px;color:var(--muted)">${c.line_group_id?esc(c.line_group_id.slice(0,14))+'…':'<span class="tag tag-low">ยังไม่ผูก</span>'}</td>
+    <td class="num">${priceCounts[c.id]?'<span class="tag tag-ov">'+priceCounts[c.id]+' รายการ</span>':'—'}</td>
+    <td style="white-space:nowrap">
+      <button class="btn-s mini" onclick="editCustomer(${c.id})">แก้ไข</button>
+      <button class="btn-g mini" onclick="gotoPricing(${c.id})">ตั้งราคา</button>
+    </td></tr>`).join('');
+}
+function editCustomer(id){
+  const c=customers.find(x=>x.id===id);if(!c)return;
+  editCustomerId=id;
+  document.getElementById('cust-form-title').textContent='แก้ไข: '+c.name;
+  document.getElementById('c-code').value=c.code;
+  document.getElementById('c-name').value=c.name;
+  document.getElementById('c-line').value=c.line_group_id||'';
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function resetCustomerForm(){
+  editCustomerId=null;
+  document.getElementById('cust-form-title').textContent='เพิ่มลูกค้า';
+  ['c-code','c-name','c-line'].forEach(id=>document.getElementById(id).value='');
+}
+async function saveCustomer(){
+  const rec={code:document.getElementById('c-code').value.trim(),
+    name:document.getElementById('c-name').value.trim(),
+    line_group_id:document.getElementById('c-line').value.trim()||null};
+  if(!rec.code||!rec.name){toast('กรอกรหัสและชื่อลูกค้าก่อน');return;}
+  const q=editCustomerId?db.from('customers').update(rec).eq('id',editCustomerId)
+                        :db.from('customers').insert(rec);
+  const {error}=await q;
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  toast(editCustomerId?'อัพเดตลูกค้าแล้ว':'เพิ่มลูกค้าแล้ว');
+  resetCustomerForm(); loadCustomers();
+}
+function gotoPricing(id){
+  showPage('pricing');
+  setTimeout(()=>{document.getElementById('pr-customer').value=id;loadPricing();},50);
+}
+
+/* ---------- ตั้งราคา ---------- */
+function fillCustomerSelect(){
+  const sel=document.getElementById('pr-customer');
+  const cur=sel.value;
+  sel.innerHTML='<option value="">— เลือกลูกค้า —</option>'+
+    customers.map(c=>`<option value="${c.id}">${esc(c.code)} · ${esc(c.name)}</option>`).join('');
+  if(cur)sel.value=cur;
+}
+async function loadPricing(){
+  const cid=document.getElementById('pr-customer').value;
+  pendingPrices={}; updateChangeCount();
+  if(!cid){document.getElementById('pr-body').innerHTML='';return;}
+  const {data,error}=await db.from('customer_prices').select('product_id,price').eq('customer_id',cid);
+  if(error){toast('โหลดราคาไม่ได้: '+error.message);return;}
+  overrides={};(data||[]).forEach(r=>overrides[r.product_id]=r.price);
+  renderPricing();
+}
+function renderPricing(){
+  const cid=document.getElementById('pr-customer').value;
+  if(!cid)return;
+  const q=(document.getElementById('pr-search').value||'').toLowerCase();
+  const list=products.filter(p=>!q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q));
+  document.getElementById('pr-body').innerHTML=list.map(p=>{
+    const ov = (p.id in pendingPrices) ? pendingPrices[p.id] : (overrides[p.id]??'');
+    const has = ov!=='' && ov!=null;
+    return `<tr>
+      <td><b>${esc(p.sku)}</b></td><td>${esc(p.name)}</td>
+      <td class="num" style="color:var(--muted)">${fmt(p.base_price)}</td>
+      <td class="num"><input class="price-in ${p.id in pendingPrices?'changed':''}" type="number" step="0.01"
+        value="${has?ov:''}" placeholder="${fmt(p.base_price)}"
+        onchange="markPrice(${p.id},this.value)"></td>
+      <td>${has?'<span class="tag tag-ov">ราคาพิเศษ</span>':''}</td>
+    </tr>`;
+  }).join('');
+}
+function markPrice(pid,val){
+  pendingPrices[pid]=val.trim();
+  updateChangeCount(); renderPricing();
+}
+function updateChangeCount(){
+  const n=Object.keys(pendingPrices).length;
+  document.getElementById('pr-changes').textContent=n;
+  document.getElementById('pr-save').disabled=n===0;
+}
+async function savePricing(){
+  const cid=document.getElementById('pr-customer').value;
+  if(!cid)return;
+  const ups=[],dels=[];
+  for(const [pid,val] of Object.entries(pendingPrices)){
+    if(val===''||val==null){ if(pid in overrides) dels.push(Number(pid)); }
+    else ups.push({customer_id:Number(cid),product_id:Number(pid),price:parseFloat(val)});
+  }
+  if(ups.length){
+    const {error}=await db.from('customer_prices').upsert(ups,{onConflict:'customer_id,product_id'});
+    if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  }
+  if(dels.length){
+    const {error}=await db.from('customer_prices').delete().eq('customer_id',cid).in('product_id',dels);
+    if(error){toast('ลบราคาพิเศษไม่สำเร็จ: '+error.message);return;}
+  }
+  toast('บันทึกราคาแล้ว '+(ups.length+dels.length)+' รายการ');
+  loadPricing(); loadCustomers();
+}
+
+/* ---------- เริ่มต้น ---------- */
+(async()=>{ await loadProducts(); await loadCustomers(); })();
+</script>
+</body>
+</html>
