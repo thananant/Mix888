@@ -111,13 +111,13 @@ h2{font-size:16px;font-weight:700;margin-bottom:12px}
   <div class="card">
     <h2 id="cust-form-title">เพิ่มลูกค้า</h2>
     <div class="row">
-      <div id="c-prefix-wrap"><label>รหัสนำหน้า (อังกฤษ 3 ตัว)</label><input id="c-prefix" style="width:130px;text-transform:uppercase" maxlength="3" placeholder="AAA"></div>
+      <div id="c-prefix-wrap"><label>รหัสลูกค้า (รันจากรหัสเซลล์)</label><input id="c-prefix" style="width:150px;background:#f5f0ea" readonly placeholder="เลือกเซลล์ก่อน"></div>
       <div id="c-code-wrap" style="display:none"><label>รหัสลูกค้า</label><input id="c-code" style="width:130px;background:#f5f0ea" readonly></div>
       <div style="flex:1;min-width:170px"><label>ชื่อร้าน</label><input id="c-name" style="width:100%"></div>
-      <div style="min-width:150px"><label>เซลล์ที่ดูแล</label><select id="c-sale" style="width:100%"><option value="">— เลือกเซลล์ —</option></select></div>
+      <div style="min-width:170px"><label>เซลล์ที่ดูแล</label><select id="c-sale" style="width:100%" onchange="updateCodePreview()"><option value="">— เลือกเซลล์ —</option></select></div>
       <div style="flex:1;min-width:200px"><label>LINE Group ID (ไว้ส่งบิล)</label><input id="c-line" style="width:100%" placeholder="ใส่ทีหลังได้"></div>
     </div>
-    <p class="hint">รหัสลูกค้าระบบรันเลขให้อัตโนมัติจากตัวนำหน้า เช่น ใส่ AAA → ได้ AAA00001, AAA00002 ต่อกันไปเรื่อย ๆ</p>
+    <p class="hint">เลือกเซลล์ก่อน → รหัสลูกค้าจะรันต่อจากรหัสเซลล์อัตโนมัติ เช่น เซลล์รหัส AAA → ลูกค้าได้ AAA00001, AAA00002 …</p>
 
     <h2 style="margin-top:16px">🧾 ข้อมูลออกบิล</h2>
     <div class="row">
@@ -157,17 +157,19 @@ h2{font-size:16px;font-weight:700;margin-bottom:12px}
   <div class="card">
     <h2 id="sale-form-title">เพิ่มเซลล์</h2>
     <div class="row">
+      <div><label>รหัสเซลล์ (A-Z 3 ตัว)</label><input id="s-code" maxlength="3" style="width:130px;text-transform:uppercase" placeholder="AAA" oninput="this.value=this.value.replace(/[^A-Za-z]/g,'').toUpperCase()"></div>
       <div style="flex:1;min-width:180px"><label>ชื่อเซลล์</label><input id="s-name" style="width:100%"></div>
       <div><label>เบอร์โทร (10 หลัก)</label><input id="s-phone" inputmode="numeric" maxlength="10" style="width:140px" placeholder="0812345678" oninput="this.value=this.value.replace(/\D/g,'')"></div>
       <button class="btn-p" onclick="saveSale()">บันทึก</button>
       <button class="btn-g" onclick="resetSaleForm()">ล้าง</button>
     </div>
+    <p class="hint">รหัสเซลล์ใช้เป็นตัวนำหน้ารหัสลูกค้า เช่น เซลล์รหัส AAA → ลูกค้าที่เขาดูแลได้รหัส AAA00001, AAA00002 ต่อกันไป · รหัสซ้ำกันไม่ได้</p>
   </div>
   <div class="card">
     <div class="row" style="margin-bottom:12px;align-items:center"><span class="count" id="s-count"></span></div>
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th>ชื่อเซลล์</th><th>เบอร์</th><th class="num">ลูกค้าที่ดูแล</th><th></th></tr></thead>
+      <thead><tr><th>รหัส</th><th>ชื่อเซลล์</th><th>เบอร์</th><th class="num">ลูกค้าที่ดูแล</th><th></th></tr></thead>
       <tbody id="s-body"></tbody>
     </table>
     </div>
@@ -387,6 +389,12 @@ function copyBillToShip(){
   document.getElementById('c-shipphone').value=document.getElementById('c-phone').value;
   document.getElementById('c-shipaddr').value=document.getElementById('c-billaddr').value;
 }
+function updateCodePreview(){
+  const el=document.getElementById('c-prefix'); if(!el)return;
+  const sid=Number(document.getElementById('c-sale').value);
+  const s=sales.find(x=>x.id===sid);
+  el.value=s&&s.code?s.code+'XXXXX':'';
+}
 async function saveCustomer(){
   const phone=document.getElementById('c-phone').value.trim();
   const shipPhone=document.getElementById('c-shipphone').value.trim();
@@ -394,7 +402,7 @@ async function saveCustomer(){
   const rec={
     name:document.getElementById('c-name').value.trim(),
     sale_id:saleSel.value?Number(saleSel.value):null,
-    sale_name:saleSel.value?saleSel.selectedOptions[0].textContent:null,
+    sale_name:saleSel.value?saleSel.selectedOptions[0].textContent.split(' · ').pop():null,
     line_group_id:document.getElementById('c-line').value.trim()||null,
     contact_name:document.getElementById('c-contact').value.trim()||null,
     phone:phone||null,
@@ -408,9 +416,11 @@ async function saveCustomer(){
   if(shipPhone&&!/^[0-9]{10}$/.test(shipPhone)){toast('เบอร์ผู้รับของต้องเป็นตัวเลข 10 หลักเท่านั้น');return;}
 
   if(!editCustomerId){
-    // รันรหัสอัตโนมัติ: prefix 3 ตัว + เลข 5 หลัก
-    const prefix=document.getElementById('c-prefix').value.trim().toUpperCase();
-    if(!/^[A-Z]{3}$/.test(prefix)){toast('รหัสนำหน้าต้องเป็นอังกฤษ 3 ตัว เช่น AAA');return;}
+    // รหัสลูกค้ารันจากรหัสเซลล์ที่เลือก
+    if(!rec.sale_id){toast('เลือกเซลล์ก่อน — รหัสลูกค้ารันจากรหัสเซลล์');return;}
+    const sale=sales.find(x=>x.id===rec.sale_id);
+    if(!sale||!/^[A-Z]{3}$/.test(sale.code||'')){toast('เซลล์คนนี้ยังไม่มีรหัส 3 ตัว ไปตั้งในแท็บเซลล์ก่อน');return;}
+    const prefix=sale.code;
     const {data,error:e1}=await db.from('customers').select('code')
       .like('code',prefix+'%').order('code',{ascending:false}).limit(1);
     if(e1){toast('เช็ครหัสไม่ได้: '+e1.message);return;}
@@ -445,14 +455,16 @@ async function loadSales(){
 function fillSaleSelect(){
   const sel=document.getElementById('c-sale'); const cur=sel.value;
   sel.innerHTML='<option value="">— เลือกเซลล์ —</option>'+
-    sales.filter(s=>s.active!==false).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
+    sales.filter(s=>s.active!==false).map(s=>`<option value="${s.id}">${esc(s.code||'???')} · ${esc(s.name)}</option>`).join('');
   if(cur)sel.value=cur;
+  updateCodePreview();
 }
 function renderSales(){
   const counts={};customers.forEach(c=>{if(c.sale_id)counts[c.sale_id]=(counts[c.sale_id]||0)+1;});
   document.getElementById('s-count').textContent=sales.length+' คน';
   document.getElementById('s-body').innerHTML=sales.map(s=>`<tr>
-    <td><b>${esc(s.name)}</b></td>
+    <td><b>${s.code?esc(s.code):'<span class="tag tag-low">ยังไม่มีรหัส</span>'}</b></td>
+    <td>${esc(s.name)}</td>
     <td style="font-variant-numeric:tabular-nums">${s.phone?esc(s.phone):'<span style="color:var(--muted)">—</span>'}</td>
     <td class="num">${counts[s.id]?'<span class="tag tag-ov">'+counts[s.id]+' ราย</span>':'<span style="color:var(--muted)">—</span>'}</td>
     <td style="white-space:nowrap">
@@ -464,6 +476,7 @@ function editSale(id){
   const s=sales.find(x=>x.id===id);if(!s)return;
   editSaleId=id;
   document.getElementById('sale-form-title').textContent='แก้ไข: '+s.name;
+  document.getElementById('s-code').value=s.code||'';
   document.getElementById('s-name').value=s.name;
   document.getElementById('s-phone').value=s.phone||'';
   window.scrollTo({top:0,behavior:'smooth'});
@@ -471,18 +484,24 @@ function editSale(id){
 function resetSaleForm(){
   editSaleId=null;
   document.getElementById('sale-form-title').textContent='เพิ่มเซลล์';
-  ['s-name','s-phone'].forEach(id=>document.getElementById(id).value='');
+  ['s-code','s-name','s-phone'].forEach(id=>document.getElementById(id).value='');
 }
 async function saveSale(){
   const wasEdit=editSaleId;
+  const code=document.getElementById('s-code').value.trim().toUpperCase();
   const name=document.getElementById('s-name').value.trim();
   const phone=document.getElementById('s-phone').value.trim();
+  if(!/^[A-Z]{3}$/.test(code)){toast('รหัสเซลล์ต้องเป็นอังกฤษพิมพ์ใหญ่ 3 ตัวเท่านั้น เช่น AAA');return;}
   if(!name){toast('กรอกชื่อเซลล์ก่อน');return;}
   if(phone&&!/^[0-9]{10}$/.test(phone)){toast('เบอร์โทรต้องเป็นตัวเลข 10 หลักเท่านั้น');return;}
-  const rec={name,phone:phone||null};
+  const rec={code,name,phone:phone||null};
   const q=wasEdit?db.from('sales').update(rec).eq('id',wasEdit):db.from('sales').insert(rec);
   const {error}=await q;
-  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  if(error){
+    if(error.message.includes('duplicate')||error.code==='23505'){toast('รหัส '+code+' มีคนใช้แล้ว เลือกรหัสอื่น');}
+    else toast('บันทึกไม่สำเร็จ: '+error.message);
+    return;
+  }
   if(wasEdit){
     // อัพเดตชื่อที่บันทึกไว้ในลูกค้าให้ตรงกัน
     await db.from('customers').update({sale_name:name}).eq('sale_id',wasEdit);
