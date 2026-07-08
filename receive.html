@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mix888 — รับสินค้าเข้า</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --ink:#2e1b16; --muted:#8a6f66; --line:#ecdcd2; --bg:#faf5ef; --card:#ffffff;
+  --accent:#b91c1c; --accent-soft:#fdeaea; --warn:#ba7517; --warn-soft:#faeeda;
+  --danger:#7a1f1f; --danger-soft:#f7dede; --radius:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans Thai',sans-serif;background:var(--bg);color:var(--ink);font-size:15px}
+header{background:var(--card);border-bottom:1px solid var(--line);border-top:4px solid var(--accent);padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;position:sticky;top:0;z-index:10}
+header h1{font-size:18px;font-weight:700}
+header h1 span{color:var(--accent)}
+a.navlink{font-size:13.5px;color:var(--muted);text-decoration:none}
+main{max-width:1000px;margin:20px auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px}
+h2{font-size:16px;font-weight:700;margin-bottom:12px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px;font-weight:500}
+input{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;min-width:0}
+input:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+button{font:inherit;font-weight:600;padding:9px 18px;border:none;border-radius:8px;cursor:pointer}
+.btn-p{background:var(--accent);color:#fff}
+.btn-s{background:var(--accent-soft);color:var(--accent)}
+.btn-g{background:#f1ece6;color:var(--ink)}
+.btn-d{background:var(--danger-soft);color:var(--danger)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.mini{padding:4px 12px;font-size:13px;font-weight:500}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;padding:8px 10px;color:var(--muted);font-size:12.5px;font-weight:600;border-bottom:2px solid var(--line)}
+td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.qin{width:90px;text-align:right}
+#suggest{position:relative}
+#sug-list{position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--line);border-radius:8px;max-height:280px;overflow-y:auto;z-index:20;display:none;box-shadow:0 6px 18px rgba(0,0,0,.08)}
+.sug-item{padding:9px 12px;cursor:pointer;border-bottom:1px solid #f5efe9;font-size:14px}
+.sug-item:hover{background:var(--accent-soft)}
+.sug-item small{color:var(--muted)}
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 22px;border-radius:99px;font-weight:500;opacity:0;transition:opacity .25s;pointer-events:none;z-index:50;max-width:92vw;text-align:center}
+#toast.show{opacity:1}
+.empty{text-align:center;color:var(--muted);padding:30px 0}
+.hint{font-size:13px;color:var(--muted);margin-top:8px}
+.rhead{display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:14px}
+.rhead b{font-size:15px}
+.rhead .d{color:var(--muted);font-size:13px}
+details{margin-top:6px}
+summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:600}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📦 Mix888 <span>· รับสินค้าเข้า</span></h1>
+  <a class="navlink" href="admin.html">หลังบ้าน</a>
+  <a class="navlink" href="bill.html">ทำบิล</a>
+  <a class="navlink" href="account.html">บัญชี</a>
+</header>
+
+<main>
+  <div class="card">
+    <h2>รับสินค้าเข้าสต๊อก</h2>
+    <div class="row" style="margin-bottom:12px">
+      <div style="flex:1;min-width:180px"><label>ผู้ขาย / ที่มา (ใส่หรือไม่ก็ได้)</label><input id="supplier" style="width:100%" placeholder="เช่น แม็คโคร, บ.ผู้ผลิต"></div>
+      <div style="min-width:150px"><label>ผู้รับของ</label><input id="staff" style="width:100%" placeholder="ชื่อคนคีย์"></div>
+    </div>
+    <div class="row">
+      <div id="suggest" style="flex:1;min-width:240px">
+        <label>ค้นหาสินค้าเพื่อเพิ่มเข้ารายการ</label>
+        <input id="p-search" style="width:100%" placeholder="พิมพ์ชื่อหรือ SKU…" oninput="suggest()" autocomplete="off">
+        <div id="sug-list"></div>
+      </div>
+    </div>
+
+    <div style="overflow-x:auto;margin-top:14px">
+    <table>
+      <thead><tr><th>สินค้า</th><th class="num">สต๊อกปัจจุบัน</th><th class="num">จำนวนรับเข้า</th><th class="num">ต้นทุน/หน่วย (ไม่บังคับ)</th><th></th></tr></thead>
+      <tbody id="rcv-body"><tr><td colspan="5" class="empty">ยังไม่มีรายการ — ค้นหาสินค้าด้านบนเพื่อเพิ่ม</td></tr></tbody>
+    </table>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn-p" id="save-btn" onclick="saveReceive()" disabled>✓ บันทึกรับเข้า (<span id="rcv-n">0</span> รายการ)</button>
+      <button class="btn-g" onclick="clearAll()">ล้างทั้งหมด</button>
+    </div>
+    <p class="hint">บันทึกแล้วสต๊อกเพิ่มทันที และหน้าสั่งของลูกค้าเห็นตัวเลขใหม่แบบสด · ต้นทุนเก็บไว้ทำรายงานกำไรภายหลัง</p>
+  </div>
+
+  <div class="card">
+    <h2>ประวัติการรับเข้า</h2>
+    <div id="hist"></div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+/* ================= ตั้งค่า ================= */
+const SUPABASE_URL = 'https://eqbzpgynzgdwvouuzfwt.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_HqLNQDwR4omYcb7BNUEKIw_vyHCo4N-';
+/* =========================================== */
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const fmt = n => Number(n).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3200);}
+
+let products=[], rcv=[]; // rcv: {product, qty, cost}
+
+async function loadProducts(){
+  const {data,error}=await db.from('products').select('id,sku,name,unit,stock_qty').eq('active',true).order('sku');
+  if(error){toast('โหลดสินค้าไม่ได้: '+error.message);return;}
+  products=data||[];
+}
+
+function suggest(){
+  const q=document.getElementById('p-search').value.trim().toLowerCase();
+  const box=document.getElementById('sug-list');
+  if(!q){box.style.display='none';return;}
+  const list=products.filter(p=>(p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q))
+    &&!rcv.some(r=>r.product.id===p.id)).slice(0,12);
+  if(!list.length){box.style.display='none';return;}
+  box.innerHTML=list.map(p=>`<div class="sug-item" onclick="addItem(${p.id})">
+    <b>${esc(p.sku)}</b> ${esc(p.name)} <small>· สต๊อก ${Number(p.stock_qty)} ${esc(p.unit)}</small></div>`).join('');
+  box.style.display='block';
+}
+function addItem(pid){
+  const p=products.find(x=>x.id===pid);if(!p)return;
+  rcv.push({product:p,qty:'',cost:''});
+  document.getElementById('p-search').value='';
+  document.getElementById('sug-list').style.display='none';
+  renderRcv();
+}
+function removeItem(i){rcv.splice(i,1);renderRcv();}
+function setVal(i,k,v){rcv[i][k]=v;updateBtn();}
+function renderRcv(){
+  const b=document.getElementById('rcv-body');
+  if(!rcv.length){b.innerHTML='<tr><td colspan="5" class="empty">ยังไม่มีรายการ — ค้นหาสินค้าด้านบนเพื่อเพิ่ม</td></tr>';updateBtn();return;}
+  b.innerHTML=rcv.map((r,i)=>`<tr>
+    <td><b>${esc(r.product.sku)}</b> ${esc(r.product.name)}</td>
+    <td class="num">${Number(r.product.stock_qty)} ${esc(r.product.unit)}</td>
+    <td class="num"><input class="qin" inputmode="numeric" value="${r.qty}" placeholder="0"
+      oninput="this.value=this.value.replace(/[^0-9.]/g,'');setVal(${i},'qty',this.value)"></td>
+    <td class="num"><input class="qin" inputmode="numeric" value="${r.cost}" placeholder="—"
+      oninput="this.value=this.value.replace(/[^0-9.]/g,'');setVal(${i},'cost',this.value)"></td>
+    <td><button class="btn-d mini" onclick="removeItem(${i})">ลบ</button></td>
+  </tr>`).join('');
+  updateBtn();
+}
+function updateBtn(){
+  const ok=rcv.filter(r=>parseFloat(r.qty)>0);
+  document.getElementById('rcv-n').textContent=ok.length;
+  document.getElementById('save-btn').disabled=!ok.length;
+}
+function clearAll(){rcv=[];renderRcv();}
+
+async function saveReceive(){
+  const items=rcv.filter(r=>parseFloat(r.qty)>0)
+    .map(r=>({product_id:r.product.id,qty:parseFloat(r.qty),cost:r.cost?parseFloat(r.cost):null}));
+  if(!items.length)return;
+  const btn=document.getElementById('save-btn');
+  btn.disabled=true;
+  const {data,error}=await db.rpc('receive_stock',{
+    p_supplier:document.getElementById('supplier').value.trim()||null,
+    p_items:items,
+    p_created_by:document.getElementById('staff').value.trim()||null
+  });
+  btn.disabled=false;
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  toast('รับสินค้าเข้า '+items.length+' รายการเรียบร้อย ✓');
+  rcv=[];renderRcv();
+  await loadProducts(); loadHistory();
+}
+
+async function loadHistory(){
+  const {data,error}=await db.from('stock_receives')
+    .select('*, stock_receive_items(qty,cost,products(sku,name,unit))')
+    .order('created_at',{ascending:false}).limit(30);
+  if(error)return;
+  const el=document.getElementById('hist');
+  if(!data||!data.length){el.innerHTML='<div class="empty">ยังไม่มีประวัติ</div>';return;}
+  el.innerHTML=data.map(r=>{
+    const d=new Date(r.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+    const n=r.stock_receive_items.length;
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--line)">
+      <div class="rhead">
+        <b>${esc(r.receive_no)}</b>
+        <span class="d">${d}${r.supplier?' · '+esc(r.supplier):''}${r.created_by?' · โดย '+esc(r.created_by):''}</span>
+        <span style="margin-left:auto">${n} รายการ</span>
+      </div>
+      <details><summary>ดูรายการ</summary>
+        <table style="margin-top:6px"><tbody>
+        ${r.stock_receive_items.map(it=>`<tr>
+          <td>${esc(it.products?.sku)} ${esc(it.products?.name)}</td>
+          <td class="num">+${Number(it.qty)} ${esc(it.products?.unit||'')}</td>
+          <td class="num">${it.cost!=null?fmt(it.cost)+' บ./หน่วย':'—'}</td></tr>`).join('')}
+        </tbody></table>
+      </details>
+    </div>`;
+  }).join('');
+}
+
+document.addEventListener('click',e=>{
+  if(!document.getElementById('suggest').contains(e.target))
+    document.getElementById('sug-list').style.display='none';
+});
+
+(async()=>{ await loadProducts(); loadHistory(); })();
+</script>
+</body>
+</html>

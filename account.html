@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mix888 — บัญชี</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --ink:#2e1b16; --muted:#8a6f66; --line:#ecdcd2; --bg:#faf5ef; --card:#ffffff;
+  --accent:#b91c1c; --accent-soft:#fdeaea; --warn:#ba7517; --warn-soft:#faeeda;
+  --danger:#7a1f1f; --danger-soft:#f7dede; --ok:#0f6e56; --ok-soft:#e1f5ee; --radius:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans Thai',sans-serif;background:var(--bg);color:var(--ink);font-size:15px}
+header{background:var(--card);border-bottom:1px solid var(--line);border-top:4px solid var(--accent);padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;position:sticky;top:0;z-index:10}
+header h1{font-size:18px;font-weight:700}
+header h1 span{color:var(--accent)}
+a.navlink{font-size:13.5px;color:var(--muted);text-decoration:none}
+main{max-width:1050px;margin:20px auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px}
+.stats{display:flex;gap:12px;flex-wrap:wrap}
+.stat{flex:1;min-width:160px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+.stat .l{font-size:13px;color:var(--muted)}
+.stat .v{font-size:22px;font-weight:700;margin-top:2px}
+.stat.red .v{color:var(--accent)}
+.stat.green .v{color:var(--ok)}
+.filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.fbtn{font:inherit;padding:7px 16px;border:none;border-radius:99px;background:#f1ece6;color:var(--muted);font-weight:600;cursor:pointer;font-size:13.5px}
+.fbtn.active{background:var(--accent);color:#fff}
+input,select{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+input:focus,select:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+button{font:inherit;font-weight:600;padding:8px 16px;border:none;border-radius:8px;cursor:pointer}
+.btn-p{background:var(--accent);color:#fff}
+.btn-ok{background:var(--ok);color:#fff}
+.btn-g{background:#f1ece6;color:var(--ink)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.mini{padding:5px 12px;font-size:13px;font-weight:500}
+table{width:100%;border-collapse:collapse;font-size:14px;margin-top:10px}
+th{text-align:left;padding:8px 10px;color:var(--muted);font-size:12.5px;font-weight:600;border-bottom:2px solid var(--line);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.tag{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600}
+.tag-ok{background:var(--ok-soft);color:var(--ok)}
+.tag-warn{background:var(--warn-soft);color:var(--warn)}
+.tag-bad{background:var(--danger-soft);color:var(--danger)}
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 22px;border-radius:99px;font-weight:500;opacity:0;transition:opacity .25s;pointer-events:none;z-index:50;max-width:92vw;text-align:center}
+#toast.show{opacity:1}
+.empty{text-align:center;color:var(--muted);padding:30px 0}
+label{font-size:12.5px;color:var(--muted);font-weight:500}
+@media(max-width:640px){header{padding:10px 12px}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>💰 Mix888 <span>· บัญชี</span></h1>
+  <a class="navlink" href="admin.html">หลังบ้าน</a>
+  <a class="navlink" href="bill.html">ทำบิล</a>
+  <a class="navlink" href="receive.html">รับสินค้า</a>
+  <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+    <label>ผู้ตรวจ</label><input id="staff" style="width:110px" placeholder="ชื่อ">
+    <select id="polite"><option value="ครับ">ครับ</option><option value="ค่ะ">ค่ะ</option></select>
+  </div>
+</header>
+
+<main>
+  <div class="stats">
+    <div class="stat red"><div class="l">ค้างจ่าย</div><div class="v" id="st-unpaid">—</div></div>
+    <div class="stat red"><div class="l">ยอดค้างรวม</div><div class="v" id="st-unpaid-amt">—</div></div>
+    <div class="stat green"><div class="l">รับยอดแล้ววันนี้</div><div class="v" id="st-paid-today">—</div></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="filters">
+      <button class="fbtn active" data-f="unpaid" onclick="setFilter('unpaid')">ค้างจ่าย</button>
+      <button class="fbtn" data-f="paid" onclick="setFilter('paid')">จ่ายแล้ว</button>
+      <button class="fbtn" data-f="all" onclick="setFilter('all')">ทั้งหมด</button>
+      <input id="q" placeholder="ค้นหาเลขบิล / ลูกค้า…" style="flex:1;min-width:180px" oninput="render()">
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>เลขบิล</th><th>ลูกค้า</th><th class="num">ยอด</th><th>ออกเมื่อ</th><th>สถานะ</th><th>รับยอดโดย</th><th></th></tr></thead>
+      <tbody id="body"></tbody>
+    </table>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+/* ================= ตั้งค่า ================= */
+const SUPABASE_URL = 'https://eqbzpgynzgdwvouuzfwt.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_HqLNQDwR4omYcb7BNUEKIw_vyHCo4N-';
+/* =========================================== */
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const fmt = n => Number(n).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3500);}
+
+let bills=[], filter='unpaid';
+
+async function loadBills(){
+  const {data,error}=await db.from('bills')
+    .select('*, customers(code,name,line_group_id)')
+    .order('created_at',{ascending:false}).limit(500);
+  if(error){toast('โหลดบิลไม่ได้: '+error.message);return;}
+  bills=data||[]; render(); stats();
+}
+function stats(){
+  const unpaid=bills.filter(b=>b.payment_status!=='paid');
+  const today=new Date();today.setHours(0,0,0,0);
+  const paidToday=bills.filter(b=>b.payment_status==='paid'&&b.paid_at&&new Date(b.paid_at)>=today);
+  document.getElementById('st-unpaid').textContent=unpaid.length+' บิล';
+  document.getElementById('st-unpaid-amt').textContent='฿'+fmt(unpaid.reduce((s,b)=>s+Number(b.total),0));
+  document.getElementById('st-paid-today').textContent=paidToday.length+' บิล · ฿'+fmt(paidToday.reduce((s,b)=>s+Number(b.total),0));
+}
+function setFilter(f){
+  filter=f;
+  document.querySelectorAll('.fbtn').forEach(b=>b.classList.toggle('active',b.dataset.f===f));
+  render();
+}
+function render(){
+  const q=(document.getElementById('q').value||'').toLowerCase();
+  const list=bills.filter(b=>{
+    if(filter==='unpaid'&&b.payment_status==='paid')return false;
+    if(filter==='paid'&&b.payment_status!=='paid')return false;
+    if(q&&!b.bill_no.toLowerCase().includes(q)&&!(b.customers?.name||'').toLowerCase().includes(q))return false;
+    return true;
+  });
+  const el=document.getElementById('body');
+  if(!list.length){el.innerHTML='<tr><td colspan="7" class="empty">ไม่มีบิลในหมวดนี้</td></tr>';return;}
+  el.innerHTML=list.map(b=>{
+    const d=new Date(b.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+    const paid=b.payment_status==='paid';
+    const pd=b.paid_at?new Date(b.paid_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+    return `<tr>
+      <td><b>${esc(b.bill_no)}</b></td>
+      <td>${esc(b.customers?.code)} · ${esc(b.customers?.name)}</td>
+      <td class="num"><b>${fmt(b.total)}</b></td>
+      <td style="font-size:13px;color:var(--muted)">${d}</td>
+      <td>${paid?'<span class="tag tag-ok">✓ จ่ายแล้ว</span>':'<span class="tag tag-bad">ค้างจ่าย</span>'}</td>
+      <td style="font-size:13px;color:var(--muted)">${paid?esc(b.paid_by||'')+'<br>'+pd:'—'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-g mini" onclick="window.open('${b.image_url}','_blank')">ดูบิล</button>
+        ${paid
+          ?`<button class="btn-g mini" onclick="unmarkPaid(${b.id})">ยกเลิก</button>`
+          :`<button class="btn-ok mini" onclick="markPaid(${b.id},this)">✓ รับยอด</button>`}
+      </td></tr>`;
+  }).join('');
+}
+
+async function markPaid(id,btn){
+  const b=bills.find(x=>x.id===id);if(!b)return;
+  const staff=document.getElementById('staff').value.trim();
+  if(!staff){toast('ใส่ชื่อผู้ตรวจที่มุมขวาบนก่อน จะได้รู้ว่าใครติ๊ก');return;}
+  if(!confirm('ยืนยันรับยอดบิล '+b.bill_no+'\nลูกค้า: '+b.customers?.name+'\nยอด ฿'+fmt(b.total)+'\n\n(เช็ครูปสลิปในกลุ่ม LINE เรียบร้อยแล้วใช่ไหม)'))return;
+  btn.disabled=true;
+  const {error}=await db.from('bills').update({
+    payment_status:'paid',paid_at:new Date().toISOString(),paid_by:staff
+  }).eq('id',id);
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);btn.disabled=false;return;}
+
+  // ส่งขอบคุณเข้ากลุ่ม LINE
+  if(b.customers?.line_group_id){
+    const polite=document.getElementById('polite').value;
+    const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
+      to:b.customers.line_group_id,
+      messages:[{type:'text',
+        text:'✅ รับยอดบิลเลขที่ '+b.bill_no+'\nจำนวน ฿'+fmt(b.total)+' เรียบร้อย\nขอบคุณ'+polite+' 🙏'}]
+    }});
+    if(fnErr||!res||res.status!==200) toast('รับยอดแล้ว แต่ส่งข้อความ LINE ไม่สำเร็จ');
+    else toast('รับยอด '+b.bill_no+' และส่งขอบคุณเข้ากลุ่มแล้ว ✓');
+  }else{
+    toast('รับยอด '+b.bill_no+' แล้ว (ลูกค้าไม่ได้ผูกกลุ่ม LINE)');
+  }
+  loadBills();
+}
+
+async function unmarkPaid(id){
+  const b=bills.find(x=>x.id===id);if(!b)return;
+  if(!confirm('ยกเลิกการรับยอดบิล '+b.bill_no+' ? (กลับเป็นค้างจ่าย ไม่มีการส่งข้อความหาลูกค้า)'))return;
+  const {error}=await db.from('bills').update({
+    payment_status:'unpaid',paid_at:null,paid_by:null
+  }).eq('id',id);
+  if(error){toast('ยกเลิกไม่สำเร็จ: '+error.message);return;}
+  toast('ยกเลิกรับยอด '+b.bill_no+' แล้ว');
+  loadBills();
+}
+
+loadBills();
+</script>
+</body>
+</html>
