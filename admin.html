@@ -8,13 +8,13 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root{
-  --ink:#1a2b28; --muted:#5c6f6b; --line:#dbe4e1; --bg:#f3f6f5; --card:#ffffff;
-  --accent:#0f6e56; --accent-soft:#e1f5ee; --warn:#ba7517; --warn-soft:#faeeda;
-  --danger:#a32d2d; --danger-soft:#fcebeb; --radius:10px;
+  --ink:#2e1b16; --muted:#8a6f66; --line:#ecdcd2; --bg:#faf5ef; --card:#ffffff;
+  --accent:#b91c1c; --accent-soft:#fdeaea; --warn:#ba7517; --warn-soft:#faeeda;
+  --danger:#7a1f1f; --danger-soft:#f7dede; --radius:10px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'IBM Plex Sans Thai',sans-serif;background:var(--bg);color:var(--ink);font-size:15px}
-header{background:var(--card);border-bottom:1px solid var(--line);padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;position:sticky;top:0;z-index:10}
+header{background:var(--card);border-bottom:1px solid var(--line);border-top:4px solid var(--accent);padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;position:sticky;top:0;z-index:10}
 header h1{font-size:18px;font-weight:700}
 header h1 span{color:var(--accent)}
 .tabs{display:flex;gap:4px;margin-left:auto}
@@ -57,7 +57,7 @@ h2{font-size:16px;font-weight:700;margin-bottom:12px}
 <body>
 
 <header>
-  <h1>📦 ระบบสั่งสินค้า <span>· แอดมิน</span></h1>
+  <h1>🔥 Mix888 <span>· ระบบสั่งสินค้า</span></h1>
   <div class="tabs">
     <button class="tab active" data-page="products" onclick="showPage('products')">สินค้า</button>
     <button class="tab" data-page="customers" onclick="showPage('customers')">ลูกค้า</button>
@@ -152,8 +152,8 @@ h2{font-size:16px;font-weight:700;margin-bottom:12px}
 
 <script>
 /* ================= ตั้งค่า — แก้ 2 บรรทัดนี้ ================= */
-const SUPABASE_URL = 'https://eqbzpgynzgdwvouuzfwt.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_HqLNQDwR4omYcb7BNUEKIw_vyHCo4N-';
+const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+const SUPABASE_KEY = 'YOUR-ANON-KEY';
 /* ============================================================ */
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
