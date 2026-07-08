@@ -354,6 +354,8 @@ function renderCustomers(){
     <td style="white-space:nowrap">
       <button class="btn-s mini" onclick="editCustomer(${c.id})">แก้ไข</button>
       <button class="btn-g mini" onclick="gotoPricing(${c.id})">จัดสินค้า</button>
+      <button class="btn-g mini" onclick="copyLink(${c.id})">🔗 ลิงก์</button>
+      <button class="btn-g mini" onclick="copyLink(${c.id})">📋 ลิงก์</button>
     </td></tr>`;}).join('');
 }
 function editCustomer(id){
@@ -442,6 +444,33 @@ async function saveCustomer(){
 function gotoPricing(id){
   showPage('pricing');
   setTimeout(()=>{document.getElementById('pr-customer').value=id;loadPricing();},50);
+}
+const ORDER_URL='https://thananant.github.io/Mix888/';
+async function copyLink(id){
+  let c=customers.find(x=>x.id===id);if(!c)return;
+  if(!c.order_token){
+    // สร้าง token ให้ถ้ายังไม่มี
+    const tk=btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(9)))).replace(/\+/g,'-').replace(/\//g,'_');
+    const {error}=await db.from('customers').update({order_token:tk}).eq('id',id);
+    if(error){toast('สร้างลิงก์ไม่ได้: '+error.message);return;}
+    c.order_token=tk;
+  }
+  const url=ORDER_URL+'?t='+encodeURIComponent(c.order_token);
+  try{
+    await navigator.clipboard.writeText(url);
+    toast('คัดลอกลิงก์ของ '+c.name+' แล้ว ส่งเข้ากลุ่ม LINE ได้เลย');
+  }catch(e){
+    prompt('คัดลอกลิงก์ของ '+c.name+':',url);
+  }
+}
+function copyLink(id){
+  const c=customers.find(x=>x.id===id);if(!c)return;
+  if(!c.order_token){toast('ลูกค้ารายนี้ยังไม่มีลิงก์ — รัน SQL อัพเดต token ก่อน');return;}
+  const base=location.href.replace(/admin\.html.*$/,'');
+  const url=base+'?t='+c.order_token;
+  navigator.clipboard.writeText(url)
+    .then(()=>toast('คัดลอกลิงก์สั่งของ '+c.name+' แล้ว — ส่งเข้ากลุ่ม LINE ได้เลย'))
+    .catch(()=>prompt('คัดลอกลิงก์นี้:',url));
 }
 
 /* ---------- เซลล์ ---------- */
