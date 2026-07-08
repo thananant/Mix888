@@ -64,6 +64,7 @@ h2{font-size:16px;font-weight:700;margin-bottom:12px}
   <div class="tabs">
     <button class="tab active" data-page="products" onclick="showPage('products')">สินค้า</button>
     <button class="tab" data-page="customers" onclick="showPage('customers')">ลูกค้า</button>
+    <button class="tab" data-page="sales" onclick="showPage('sales')">เซลล์</button>
     <button class="tab" data-page="pricing" onclick="showPage('pricing')">จัดสินค้าให้ลูกค้า</button>
   </div>
 </header>
@@ -113,7 +114,7 @@ h2{font-size:16px;font-weight:700;margin-bottom:12px}
       <div id="c-prefix-wrap"><label>รหัสนำหน้า (อังกฤษ 3 ตัว)</label><input id="c-prefix" style="width:130px;text-transform:uppercase" maxlength="3" placeholder="AAA"></div>
       <div id="c-code-wrap" style="display:none"><label>รหัสลูกค้า</label><input id="c-code" style="width:130px;background:#f5f0ea" readonly></div>
       <div style="flex:1;min-width:170px"><label>ชื่อร้าน</label><input id="c-name" style="width:100%"></div>
-      <div style="min-width:140px"><label>เซลล์ที่ดูแล</label><input id="c-sale" list="sale-list" style="width:100%" placeholder="ชื่อเซลล์"><datalist id="sale-list"></datalist></div>
+      <div style="min-width:150px"><label>เซลล์ที่ดูแล</label><select id="c-sale" style="width:100%"><option value="">— เลือกเซลล์ —</option></select></div>
       <div style="flex:1;min-width:200px"><label>LINE Group ID (ไว้ส่งบิล)</label><input id="c-line" style="width:100%" placeholder="ใส่ทีหลังได้"></div>
     </div>
     <p class="hint">รหัสลูกค้าระบบรันเลขให้อัตโนมัติจากตัวนำหน้า เช่น ใส่ AAA → ได้ AAA00001, AAA00002 ต่อกันไปเรื่อย ๆ</p>
@@ -148,6 +149,29 @@ h2{font-size:16px;font-weight:700;margin-bottom:12px}
       <tbody id="c-body"></tbody>
     </table>
     </div>
+  </div>
+</div>
+
+<!-- ============ เซลล์ ============ -->
+<div class="page" id="page-sales">
+  <div class="card">
+    <h2 id="sale-form-title">เพิ่มเซลล์</h2>
+    <div class="row">
+      <div style="flex:1;min-width:180px"><label>ชื่อเซลล์</label><input id="s-name" style="width:100%"></div>
+      <div><label>เบอร์โทร (10 หลัก)</label><input id="s-phone" inputmode="numeric" maxlength="10" style="width:140px" placeholder="0812345678" oninput="this.value=this.value.replace(/\D/g,'')"></div>
+      <button class="btn-p" onclick="saveSale()">บันทึก</button>
+      <button class="btn-g" onclick="resetSaleForm()">ล้าง</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row" style="margin-bottom:12px;align-items:center"><span class="count" id="s-count"></span></div>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>ชื่อเซลล์</th><th>เบอร์</th><th class="num">ลูกค้าที่ดูแล</th><th></th></tr></thead>
+      <tbody id="s-body"></tbody>
+    </table>
+    </div>
+    <p class="hint">เซลล์ที่มีลูกค้าดูแลอยู่จะลบไม่ได้ ต้องย้ายลูกค้าไปเซลล์คนอื่นก่อน</p>
   </div>
 </div>
 
@@ -197,6 +221,7 @@ function showPage(p){
   document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('active',e.dataset.page===p));
   document.getElementById('page-'+p).classList.add('active');
   if(p==='pricing') fillCustomerSelect();
+  if(p==='sales') renderSales();
 }
 const fmt = n => Number(n).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
 const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -316,17 +341,18 @@ function renderCustomers(){
   const q=(document.getElementById('c-search').value||'').toLowerCase();
   const list=customers.filter(c=>!q||c.name.toLowerCase().includes(q)||c.code.toLowerCase().includes(q));
   document.getElementById('c-count').textContent=list.length+' ราย';
-  document.getElementById('sale-list').innerHTML=[...new Set(customers.map(c=>c.sale_name).filter(Boolean))].map(s=>`<option value="${esc(s)}">`).join('');
-  document.getElementById('c-body').innerHTML=list.map(c=>`<tr>
+  document.getElementById('c-body').innerHTML=list.map(c=>{
+    const sname=saleName(c.sale_id)||c.sale_name;
+    return `<tr>
     <td><b>${esc(c.code)}</b></td><td>${esc(c.name)}</td>
-    <td>${c.sale_name?esc(c.sale_name):'<span style="color:var(--muted)">—</span>'}</td>
+    <td>${sname?esc(sname):'<span style="color:var(--muted)">—</span>'}</td>
     <td style="font-variant-numeric:tabular-nums">${c.phone?esc(c.phone):'<span style="color:var(--muted)">—</span>'}</td>
     <td style="font-size:12.5px;color:var(--muted)">${c.line_group_id?esc(c.line_group_id.slice(0,14))+'…':'<span class="tag tag-low">ยังไม่ผูก</span>'}</td>
     <td class="num">${priceCounts[c.id]?'<span class="tag tag-ov">'+priceCounts[c.id]+' รายการ</span>':'<span class="tag tag-out">ยังไม่จัด</span>'}</td>
     <td style="white-space:nowrap">
       <button class="btn-s mini" onclick="editCustomer(${c.id})">แก้ไข</button>
       <button class="btn-g mini" onclick="gotoPricing(${c.id})">จัดสินค้า</button>
-    </td></tr>`).join('');
+    </td></tr>`;}).join('');
 }
 function editCustomer(id){
   const c=customers.find(x=>x.id===id);if(!c)return;
@@ -336,7 +362,7 @@ function editCustomer(id){
   document.getElementById('c-code-wrap').style.display='';
   document.getElementById('c-code').value=c.code;
   document.getElementById('c-name').value=c.name;
-  document.getElementById('c-sale').value=c.sale_name||'';
+  document.getElementById('c-sale').value=c.sale_id||'';
   document.getElementById('c-line').value=c.line_group_id||'';
   document.getElementById('c-contact').value=c.contact_name||'';
   document.getElementById('c-phone').value=c.phone||'';
@@ -364,9 +390,11 @@ function copyBillToShip(){
 async function saveCustomer(){
   const phone=document.getElementById('c-phone').value.trim();
   const shipPhone=document.getElementById('c-shipphone').value.trim();
+  const saleSel=document.getElementById('c-sale');
   const rec={
     name:document.getElementById('c-name').value.trim(),
-    sale_name:document.getElementById('c-sale').value.trim()||null,
+    sale_id:saleSel.value?Number(saleSel.value):null,
+    sale_name:saleSel.value?saleSel.selectedOptions[0].textContent:null,
     line_group_id:document.getElementById('c-line').value.trim()||null,
     contact_name:document.getElementById('c-contact').value.trim()||null,
     phone:phone||null,
@@ -404,6 +432,71 @@ async function saveCustomer(){
 function gotoPricing(id){
   showPage('pricing');
   setTimeout(()=>{document.getElementById('pr-customer').value=id;loadPricing();},50);
+}
+
+/* ---------- เซลล์ ---------- */
+let sales=[], editSaleId=null;
+function saleName(id){const s=sales.find(x=>x.id===id);return s?s.name:null;}
+async function loadSales(){
+  const {data,error}=await db.from('sales').select('*').order('name');
+  if(error){toast('โหลดเซลล์ไม่ได้: '+error.message);return;}
+  sales=data||[]; fillSaleSelect(); renderSales();
+}
+function fillSaleSelect(){
+  const sel=document.getElementById('c-sale'); const cur=sel.value;
+  sel.innerHTML='<option value="">— เลือกเซลล์ —</option>'+
+    sales.filter(s=>s.active!==false).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  if(cur)sel.value=cur;
+}
+function renderSales(){
+  const counts={};customers.forEach(c=>{if(c.sale_id)counts[c.sale_id]=(counts[c.sale_id]||0)+1;});
+  document.getElementById('s-count').textContent=sales.length+' คน';
+  document.getElementById('s-body').innerHTML=sales.map(s=>`<tr>
+    <td><b>${esc(s.name)}</b></td>
+    <td style="font-variant-numeric:tabular-nums">${s.phone?esc(s.phone):'<span style="color:var(--muted)">—</span>'}</td>
+    <td class="num">${counts[s.id]?'<span class="tag tag-ov">'+counts[s.id]+' ราย</span>':'<span style="color:var(--muted)">—</span>'}</td>
+    <td style="white-space:nowrap">
+      <button class="btn-s mini" onclick="editSale(${s.id})">แก้ไข</button>
+      <button class="btn-d mini" onclick="delSale(${s.id})">ลบ</button>
+    </td></tr>`).join('');
+}
+function editSale(id){
+  const s=sales.find(x=>x.id===id);if(!s)return;
+  editSaleId=id;
+  document.getElementById('sale-form-title').textContent='แก้ไข: '+s.name;
+  document.getElementById('s-name').value=s.name;
+  document.getElementById('s-phone').value=s.phone||'';
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function resetSaleForm(){
+  editSaleId=null;
+  document.getElementById('sale-form-title').textContent='เพิ่มเซลล์';
+  ['s-name','s-phone'].forEach(id=>document.getElementById(id).value='');
+}
+async function saveSale(){
+  const wasEdit=editSaleId;
+  const name=document.getElementById('s-name').value.trim();
+  const phone=document.getElementById('s-phone').value.trim();
+  if(!name){toast('กรอกชื่อเซลล์ก่อน');return;}
+  if(phone&&!/^[0-9]{10}$/.test(phone)){toast('เบอร์โทรต้องเป็นตัวเลข 10 หลักเท่านั้น');return;}
+  const rec={name,phone:phone||null};
+  const q=wasEdit?db.from('sales').update(rec).eq('id',wasEdit):db.from('sales').insert(rec);
+  const {error}=await q;
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  if(wasEdit){
+    // อัพเดตชื่อที่บันทึกไว้ในลูกค้าให้ตรงกัน
+    await db.from('customers').update({sale_name:name}).eq('sale_id',wasEdit);
+  }
+  toast(wasEdit?'อัพเดตเซลล์แล้ว':'เพิ่มเซลล์แล้ว');
+  resetSaleForm(); await loadSales(); await loadCustomers();
+}
+async function delSale(id){
+  const s=sales.find(x=>x.id===id);
+  if(customers.some(c=>c.sale_id===id)){toast('ลบไม่ได้ มีลูกค้าที่ '+s.name+' ดูแลอยู่ ย้ายลูกค้าไปเซลล์อื่นก่อน');return;}
+  if(!confirm('ลบเซลล์ "'+s.name+'" ?'))return;
+  const {error}=await db.from('sales').delete().eq('id',id);
+  if(error){toast('ลบไม่สำเร็จ: '+error.message);return;}
+  toast('ลบแล้ว'); loadSales();
 }
 
 /* ---------- จัดสินค้าให้ลูกค้า ---------- */
@@ -498,7 +591,7 @@ async function savePricing(){
 }
 
 /* ---------- เริ่มต้น ---------- */
-(async()=>{ await loadProducts(); await loadCustomers(); })();
+(async()=>{ await loadProducts(); await loadCustomers(); await loadSales(); })();
 </script>
 </body>
 </html>
