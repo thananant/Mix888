@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>แอดมิน — ระบบสั่งสินค้า</title>
+<title>Mix888 — แอดมิน</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -26,29 +26,32 @@ main{max-width:1100px;margin:20px auto;padding:0 16px}
 label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px;font-weight:500}
 input,select{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;min-width:0}
 input:focus,select:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);cursor:pointer}
 button{font:inherit;font-weight:600;padding:9px 18px;border:none;border-radius:8px;cursor:pointer}
 .btn-p{background:var(--accent);color:#fff}
 .btn-s{background:var(--accent-soft);color:var(--accent)}
-.btn-g{background:#eef1f0;color:var(--ink)}
+.btn-g{background:#f1ece6;color:var(--ink)}
 .btn-d{background:var(--danger-soft);color:var(--danger)}
 button:disabled{opacity:.5;cursor:not-allowed}
 table{width:100%;border-collapse:collapse;font-size:14px}
 th{text-align:left;padding:9px 10px;color:var(--muted);font-size:12.5px;font-weight:600;border-bottom:2px solid var(--line);white-space:nowrap}
 td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
-tr:hover td{background:#fafcfb}
+tr:hover td{background:#fdfaf6}
 .num{text-align:right;font-variant-numeric:tabular-nums}
 .tag{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600}
-.tag-ok{background:var(--accent-soft);color:var(--accent)}
+.tag-ok{background:#e1f5ee;color:#0f6e56}
 .tag-low{background:var(--warn-soft);color:var(--warn)}
 .tag-out{background:var(--danger-soft);color:var(--danger)}
-.tag-ov{background:#eeedfe;color:#534ab7}
+.tag-ov{background:var(--accent-soft);color:var(--accent)}
 .mini{padding:4px 12px;font-size:13px;font-weight:500}
 #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 22px;border-radius:99px;font-weight:500;opacity:0;transition:opacity .25s;pointer-events:none;z-index:50;max-width:90vw}
 #toast.show{opacity:1}
 .hint{font-size:13px;color:var(--muted);margin-top:8px;line-height:1.6}
 .count{font-size:13px;color:var(--muted);font-weight:500}
-.price-in{width:110px;text-align:right}
+.price-in{width:100px;text-align:right}
+.price-in:disabled{background:#f5f0ea;color:var(--muted)}
 .changed{border-color:var(--warn);background:var(--warn-soft)}
+.pack{font-size:12.5px;color:var(--muted)}
 h2{font-size:16px;font-weight:700;margin-bottom:12px}
 .page{display:none}.page.active{display:block}
 @media(max-width:640px){header{padding:10px 12px}.tabs{width:100%;margin-left:0}.tab{flex:1;padding:8px 6px;font-size:14px}}
@@ -61,7 +64,7 @@ h2{font-size:16px;font-weight:700;margin-bottom:12px}
   <div class="tabs">
     <button class="tab active" data-page="products" onclick="showPage('products')">สินค้า</button>
     <button class="tab" data-page="customers" onclick="showPage('customers')">ลูกค้า</button>
-    <button class="tab" data-page="pricing" onclick="showPage('pricing')">ตั้งราคา</button>
+    <button class="tab" data-page="pricing" onclick="showPage('pricing')">จัดสินค้าให้ลูกค้า</button>
   </div>
 </header>
 
@@ -72,12 +75,13 @@ h2{font-size:16px;font-weight:700;margin-bottom:12px}
   <div class="card">
     <h2 id="prod-form-title">เพิ่มสินค้า</h2>
     <div class="row">
-      <div><label>รหัส (SKU)</label><input id="p-sku" style="width:110px" placeholder="P001"></div>
-      <div style="flex:1;min-width:180px"><label>ชื่อสินค้า</label><input id="p-name" style="width:100%"></div>
-      <div><label>หน่วย</label><input id="p-unit" style="width:80px" value="ชิ้น"></div>
-      <div><label>ราคากลาง</label><input id="p-price" type="number" step="0.01" style="width:110px" class="num"></div>
-      <div><label>สต๊อกเริ่มต้น</label><input id="p-stock" type="number" step="1" style="width:100px" class="num" value="0"></div>
-      <div><label>เตือนใกล้หมด</label><input id="p-alert" type="number" step="1" style="width:100px" class="num" value="10"></div>
+      <div><label>รหัส (SKU)</label><input id="p-sku" style="width:100px" placeholder="P001"></div>
+      <div style="flex:1;min-width:170px"><label>ชื่อสินค้า</label><input id="p-name" style="width:100%"></div>
+      <div><label>หน่วยขาย</label><input id="p-unit" style="width:80px" value="ลัง"></div>
+      <div style="flex:1;min-width:170px"><label>ข้อมูลแพ็ค</label><input id="p-pack" style="width:100%" placeholder="เช่น 1 ลัง = 24 กระป๋อง"></div>
+      <div><label>ราคากลาง</label><input id="p-price" type="number" step="0.01" style="width:100px" class="num"></div>
+      <div><label>สต๊อก</label><input id="p-stock" type="number" step="1" style="width:90px" class="num" value="0"></div>
+      <div><label>เตือนใกล้หมด</label><input id="p-alert" type="number" step="1" style="width:90px" class="num" value="10"></div>
       <button class="btn-p" id="p-save" onclick="saveProduct()">บันทึก</button>
       <button class="btn-g" onclick="resetProductForm()">ล้าง</button>
     </div>
@@ -93,11 +97,11 @@ h2{font-size:16px;font-weight:700;margin-bottom:12px}
     </div>
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th>SKU</th><th>ชื่อสินค้า</th><th>หน่วย</th><th class="num">ราคากลาง</th><th class="num">สต๊อก</th><th>สถานะ</th><th></th></tr></thead>
+      <thead><tr><th>SKU</th><th>ชื่อสินค้า</th><th>หน่วย / แพ็ค</th><th class="num">ราคากลาง</th><th class="num">สต๊อก</th><th>สถานะ</th><th></th></tr></thead>
       <tbody id="p-body"></tbody>
     </table>
     </div>
-    <p class="hint">รูปแบบ CSV: <b>sku,name,unit,base_price,stock_qty</b> (บรรทัดแรกเป็นหัวตาราง) — SKU ซ้ำจะอัพเดตทับของเดิม รองรับ 500+ รายการในไฟล์เดียว</p>
+    <p class="hint">รูปแบบ CSV: <b>sku,name,unit,base_price,stock_qty,pack_info</b> (บรรทัดแรกเป็นหัวตาราง · pack_info ไม่ใส่ก็ได้) — SKU ซ้ำจะอัพเดตทับของเดิม</p>
   </div>
 </div>
 
@@ -120,27 +124,32 @@ h2{font-size:16px;font-weight:700;margin-bottom:12px}
     </div>
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th>รหัส</th><th>ชื่อ</th><th>LINE Group</th><th class="num">ราคาพิเศษ (รายการ)</th><th></th></tr></thead>
+      <thead><tr><th>รหัส</th><th>ชื่อ</th><th>LINE Group</th><th class="num">สินค้าที่เห็น</th><th></th></tr></thead>
       <tbody id="c-body"></tbody>
     </table>
     </div>
   </div>
 </div>
 
-<!-- ============ ตั้งราคา ============ -->
+<!-- ============ จัดสินค้าให้ลูกค้า ============ -->
 <div class="page" id="page-pricing">
   <div class="card">
     <div class="row" style="align-items:center">
       <div style="flex:1;min-width:220px"><label>เลือกลูกค้า</label><select id="pr-customer" style="width:100%" onchange="loadPricing()"></select></div>
-      <input id="pr-search" placeholder="ค้นหาสินค้า…" style="flex:1;min-width:180px" oninput="renderPricing()">
-      <button class="btn-p" id="pr-save" onclick="savePricing()" disabled>บันทึกราคา (<span id="pr-changes">0</span>)</button>
+      <input id="pr-search" placeholder="ค้นหาสินค้า…" style="flex:1;min-width:170px" oninput="renderPricing()">
+      <button class="btn-g mini" onclick="toggleShown(true)">✓ เลือกที่แสดง</button>
+      <button class="btn-g mini" onclick="toggleShown(false)">✗ เอาออกที่แสดง</button>
+      <button class="btn-p" id="pr-save" onclick="savePricing()" disabled>บันทึก (<span id="pr-changes">0</span>)</button>
     </div>
-    <p class="hint">ใส่ราคาเฉพาะตัวที่ <b>ต่างจากราคากลาง</b> เท่านั้น — เว้นว่าง = ใช้ราคากลางอัตโนมัติ · ลบราคาพิเศษ = ล้างช่องให้ว่างแล้วบันทึก</p>
+    <p class="hint"><b>ติ๊ก ✓ = ลูกค้ารายนี้เห็นและสั่งสินค้าตัวนี้ได้</b> ตัวที่ไม่ติ๊กจะไม่โผล่ในหน้าสั่งของเขาเลย · ราคาพิเศษเว้นว่าง = ใช้ราคากลางอัตโนมัติ</p>
   </div>
   <div class="card">
+    <div class="row" style="margin-bottom:10px;align-items:center">
+      <span class="count" id="pr-summary"></span>
+    </div>
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th>SKU</th><th>ชื่อสินค้า</th><th class="num">ราคากลาง</th><th class="num">ราคาลูกค้ารายนี้</th><th></th></tr></thead>
+      <thead><tr><th style="width:40px">เห็น</th><th>SKU</th><th>ชื่อสินค้า</th><th>แพ็ค</th><th class="num">ราคากลาง</th><th class="num">ราคาพิเศษ</th></tr></thead>
       <tbody id="pr-body"></tbody>
     </table>
     </div>
@@ -157,10 +166,12 @@ const SUPABASE_KEY = 'YOUR-ANON-KEY';
 /* ============================================================ */
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-let products = [], customers = [], overrides = {}, priceCounts = {};
-let editProductId = null, editCustomerId = null, pendingPrices = {};
+let products = [], customers = [], priceCounts = {};
+let assigned = {};            // product_id -> price(null=ราคากลาง) จาก DB
+let pending = {};             // product_id -> {on:bool, price:string}
+let editProductId = null, editCustomerId = null;
 
-function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2800);}
 function showPage(p){
   document.querySelectorAll('.page').forEach(e=>e.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('active',e.dataset.page===p));
@@ -182,10 +193,11 @@ function renderProducts(){
   document.getElementById('p-count').textContent=list.length+' รายการ';
   document.getElementById('p-body').innerHTML=list.map(p=>{
     let tag = p.stock_qty<=0 ? '<span class="tag tag-out">หมด</span>'
-            : p.stock_qty<= (p.low_stock_alert??10) ? '<span class="tag tag-low">ใกล้หมด</span>'
+            : p.stock_qty<=(p.low_stock_alert??10) ? '<span class="tag tag-low">ใกล้หมด</span>'
             : '<span class="tag tag-ok">มีของ</span>';
     return `<tr>
-      <td><b>${esc(p.sku)}</b></td><td>${esc(p.name)}</td><td>${esc(p.unit)}</td>
+      <td><b>${esc(p.sku)}</b></td><td>${esc(p.name)}</td>
+      <td>${esc(p.unit)}${p.pack_info?'<div class="pack">'+esc(p.pack_info)+'</div>':''}</td>
       <td class="num">${fmt(p.base_price)}</td><td class="num"><b>${Number(p.stock_qty)}</b></td><td>${tag}</td>
       <td style="white-space:nowrap">
         <button class="btn-s mini" onclick="editProduct(${p.id})">แก้ไข</button>
@@ -197,7 +209,10 @@ function editProduct(id){
   const p=products.find(x=>x.id===id); if(!p)return;
   editProductId=id;
   document.getElementById('prod-form-title').textContent='แก้ไข: '+p.name;
-  ['sku','name','unit'].forEach(k=>document.getElementById('p-'+k).value=p[k]);
+  document.getElementById('p-sku').value=p.sku;
+  document.getElementById('p-name').value=p.name;
+  document.getElementById('p-unit').value=p.unit;
+  document.getElementById('p-pack').value=p.pack_info||'';
   document.getElementById('p-price').value=p.base_price;
   document.getElementById('p-stock').value=p.stock_qty;
   document.getElementById('p-alert').value=p.low_stock_alert??10;
@@ -206,8 +221,8 @@ function editProduct(id){
 function resetProductForm(){
   editProductId=null;
   document.getElementById('prod-form-title').textContent='เพิ่มสินค้า';
-  ['p-sku','p-name','p-price'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('p-unit').value='ชิ้น';
+  ['p-sku','p-name','p-pack','p-price'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('p-unit').value='ลัง';
   document.getElementById('p-stock').value='0';
   document.getElementById('p-alert').value='10';
 }
@@ -216,6 +231,7 @@ async function saveProduct(){
     sku:document.getElementById('p-sku').value.trim(),
     name:document.getElementById('p-name').value.trim(),
     unit:document.getElementById('p-unit').value.trim()||'ชิ้น',
+    pack_info:document.getElementById('p-pack').value.trim()||null,
     base_price:parseFloat(document.getElementById('p-price').value)||0,
     stock_qty:parseFloat(document.getElementById('p-stock').value)||0,
     low_stock_alert:parseFloat(document.getElementById('p-alert').value)||10
@@ -230,11 +246,12 @@ async function saveProduct(){
 }
 async function delProduct(id){
   const p=products.find(x=>x.id===id);
-  if(!confirm('ลบ "'+p.name+'" ? (ประวัติออเดอร์เดิมยังอยู่)'))return;
-  const {error}=await db.from('products').update({active:false}).eq('id',id);
-  if(error){toast('ลบไม่สำเร็จ: '+error.message);return;}
-  const {error:e2}=await db.from('products').delete().eq('id',id);
-  if(e2) toast('ปิดการขายแล้ว (ลบถาวรไม่ได้เพราะมีประวัติ)'); else toast('ลบแล้ว');
+  if(!confirm('ลบ "'+p.name+'" ?'))return;
+  const {error}=await db.from('products').delete().eq('id',id);
+  if(error){
+    await db.from('products').update({active:false}).eq('id',id);
+    toast('ปิดการขายแล้ว (ลบถาวรไม่ได้เพราะมีประวัติ)');
+  } else toast('ลบแล้ว');
   loadProducts();
 }
 function importCSV(input){
@@ -247,7 +264,8 @@ function importCSV(input){
       const c=lines[i].split(',');
       if(c.length<2)continue;
       rows.push({sku:c[0].trim(),name:c[1].trim(),unit:(c[2]||'ชิ้น').trim(),
-        base_price:parseFloat(c[3])||0,stock_qty:parseFloat(c[4])||0});
+        base_price:parseFloat(c[3])||0,stock_qty:parseFloat(c[4])||0,
+        pack_info:(c[5]||'').trim()||null});
     }
     if(!rows.length){toast('ไม่พบข้อมูลในไฟล์');return;}
     const {error}=await db.from('products').upsert(rows,{onConflict:'sku'});
@@ -258,8 +276,8 @@ function importCSV(input){
   reader.readAsText(f,'UTF-8'); input.value='';
 }
 function exportCSV(){
-  const head='sku,name,unit,base_price,stock_qty\n';
-  const body=products.map(p=>[p.sku,p.name,p.unit,p.base_price,p.stock_qty].join(',')).join('\n');
+  const head='sku,name,unit,base_price,stock_qty,pack_info\n';
+  const body=products.map(p=>[p.sku,p.name,p.unit,p.base_price,p.stock_qty,p.pack_info||''].join(',')).join('\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob(['\uFEFF'+head+body],{type:'text/csv;charset=utf-8'}));
   a.download='products.csv'; a.click();
@@ -281,10 +299,10 @@ function renderCustomers(){
   document.getElementById('c-body').innerHTML=list.map(c=>`<tr>
     <td><b>${esc(c.code)}</b></td><td>${esc(c.name)}</td>
     <td style="font-size:12.5px;color:var(--muted)">${c.line_group_id?esc(c.line_group_id.slice(0,14))+'…':'<span class="tag tag-low">ยังไม่ผูก</span>'}</td>
-    <td class="num">${priceCounts[c.id]?'<span class="tag tag-ov">'+priceCounts[c.id]+' รายการ</span>':'—'}</td>
+    <td class="num">${priceCounts[c.id]?'<span class="tag tag-ov">'+priceCounts[c.id]+' รายการ</span>':'<span class="tag tag-out">ยังไม่จัด</span>'}</td>
     <td style="white-space:nowrap">
       <button class="btn-s mini" onclick="editCustomer(${c.id})">แก้ไข</button>
-      <button class="btn-g mini" onclick="gotoPricing(${c.id})">ตั้งราคา</button>
+      <button class="btn-g mini" onclick="gotoPricing(${c.id})">จัดสินค้า</button>
     </td></tr>`).join('');
 }
 function editCustomer(id){
@@ -318,7 +336,7 @@ function gotoPricing(id){
   setTimeout(()=>{document.getElementById('pr-customer').value=id;loadPricing();},50);
 }
 
-/* ---------- ตั้งราคา ---------- */
+/* ---------- จัดสินค้าให้ลูกค้า ---------- */
 function fillCustomerSelect(){
   const sel=document.getElementById('pr-customer');
   const cur=sel.value;
@@ -326,13 +344,17 @@ function fillCustomerSelect(){
     customers.map(c=>`<option value="${c.id}">${esc(c.code)} · ${esc(c.name)}</option>`).join('');
   if(cur)sel.value=cur;
 }
+function getState(pid){
+  if(pid in pending) return pending[pid];
+  return {on:(pid in assigned), price:(assigned[pid]??'')};
+}
 async function loadPricing(){
   const cid=document.getElementById('pr-customer').value;
-  pendingPrices={}; updateChangeCount();
-  if(!cid){document.getElementById('pr-body').innerHTML='';return;}
+  pending={}; updateChangeCount();
+  if(!cid){document.getElementById('pr-body').innerHTML='';document.getElementById('pr-summary').textContent='';return;}
   const {data,error}=await db.from('customer_prices').select('product_id,price').eq('customer_id',cid);
-  if(error){toast('โหลดราคาไม่ได้: '+error.message);return;}
-  overrides={};(data||[]).forEach(r=>overrides[r.product_id]=r.price);
+  if(error){toast('โหลดข้อมูลไม่ได้: '+error.message);return;}
+  assigned={};(data||[]).forEach(r=>assigned[r.product_id]=r.price);
   renderPricing();
 }
 function renderPricing(){
@@ -340,25 +362,44 @@ function renderPricing(){
   if(!cid)return;
   const q=(document.getElementById('pr-search').value||'').toLowerCase();
   const list=products.filter(p=>!q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q));
+  let onCount=0;
+  products.forEach(p=>{ if(getState(p.id).on) onCount++; });
+  document.getElementById('pr-summary').textContent='ลูกค้าเห็น '+onCount+' จาก '+products.length+' รายการ';
   document.getElementById('pr-body').innerHTML=list.map(p=>{
-    const ov = (p.id in pendingPrices) ? pendingPrices[p.id] : (overrides[p.id]??'');
-    const has = ov!=='' && ov!=null;
+    const st=getState(p.id);
+    const dirty=(p.id in pending);
     return `<tr>
+      <td><input type="checkbox" ${st.on?'checked':''} onchange="markOn(${p.id},this.checked)"></td>
       <td><b>${esc(p.sku)}</b></td><td>${esc(p.name)}</td>
+      <td class="pack">${esc(p.pack_info||'—')}</td>
       <td class="num" style="color:var(--muted)">${fmt(p.base_price)}</td>
-      <td class="num"><input class="price-in ${p.id in pendingPrices?'changed':''}" type="number" step="0.01"
-        value="${has?ov:''}" placeholder="${fmt(p.base_price)}"
-        onchange="markPrice(${p.id},this.value)"></td>
-      <td>${has?'<span class="tag tag-ov">ราคาพิเศษ</span>':''}</td>
+      <td class="num"><input class="price-in ${dirty?'changed':''}" type="number" step="0.01"
+        value="${st.price!==''&&st.price!=null?st.price:''}" placeholder="${fmt(p.base_price)}"
+        ${st.on?'':'disabled'} onchange="markPrice(${p.id},this.value)"></td>
     </tr>`;
   }).join('');
 }
+function markOn(pid,on){
+  const st=getState(pid);
+  pending[pid]={on:on, price:st.price};
+  updateChangeCount(); renderPricing();
+}
 function markPrice(pid,val){
-  pendingPrices[pid]=val.trim();
+  const st=getState(pid);
+  pending[pid]={on:st.on, price:val.trim()};
+  updateChangeCount(); renderPricing();
+}
+function toggleShown(on){
+  const q=(document.getElementById('pr-search').value||'').toLowerCase();
+  const list=products.filter(p=>!q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q));
+  list.forEach(p=>{
+    const st=getState(p.id);
+    if(st.on!==on) pending[p.id]={on:on, price:st.price};
+  });
   updateChangeCount(); renderPricing();
 }
 function updateChangeCount(){
-  const n=Object.keys(pendingPrices).length;
+  const n=Object.keys(pending).length;
   document.getElementById('pr-changes').textContent=n;
   document.getElementById('pr-save').disabled=n===0;
 }
@@ -366,9 +407,13 @@ async function savePricing(){
   const cid=document.getElementById('pr-customer').value;
   if(!cid)return;
   const ups=[],dels=[];
-  for(const [pid,val] of Object.entries(pendingPrices)){
-    if(val===''||val==null){ if(pid in overrides) dels.push(Number(pid)); }
-    else ups.push({customer_id:Number(cid),product_id:Number(pid),price:parseFloat(val)});
+  for(const [pid,st] of Object.entries(pending)){
+    if(st.on){
+      ups.push({customer_id:Number(cid),product_id:Number(pid),
+        price:(st.price===''||st.price==null)?null:parseFloat(st.price)});
+    } else if(pid in assigned){
+      dels.push(Number(pid));
+    }
   }
   if(ups.length){
     const {error}=await db.from('customer_prices').upsert(ups,{onConflict:'customer_id,product_id'});
@@ -376,9 +421,9 @@ async function savePricing(){
   }
   if(dels.length){
     const {error}=await db.from('customer_prices').delete().eq('customer_id',cid).in('product_id',dels);
-    if(error){toast('ลบราคาพิเศษไม่สำเร็จ: '+error.message);return;}
+    if(error){toast('เอาสินค้าออกไม่สำเร็จ: '+error.message);return;}
   }
-  toast('บันทึกราคาแล้ว '+(ups.length+dels.length)+' รายการ');
+  toast('บันทึกแล้ว '+(ups.length+dels.length)+' รายการ');
   loadPricing(); loadCustomers();
 }
 
