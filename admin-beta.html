@@ -7,6 +7,8 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <style>
 :root{
   --ink:#2e1b16; --muted:#8a6f66; --line:#efe4db; --bg:#f7f2ec; --card:#ffffff;
@@ -218,6 +220,14 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div><label>เรท 20 ลัง</label><input id="p-r20" type="number" step="0.01" style="width:100px" class="num" placeholder="ว่าง=กลาง"></div>
       <div><label>เรท 50 ลัง</label><input id="p-r50" type="number" step="0.01" style="width:100px" class="num" placeholder="ว่าง=กลาง"></div>
       <div><label>รวมส่งตจว</label><input id="p-upc" type="number" step="0.01" style="width:100px" class="num" placeholder="ว่าง=กลาง"></div>
+      <div><label>รูปสินค้า</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <img id="p-img-preview" src="" style="width:44px;height:44px;border-radius:8px;object-fit:cover;border:1px solid var(--line);display:none">
+          <button class="btn-g mini" type="button" onclick="document.getElementById('p-img-file').click()">📷 เลือกรูป</button>
+          <button class="btn-g mini" type="button" id="p-img-clear" onclick="clearProductImage()" style="display:none">ลบรูป</button>
+          <input type="file" id="p-img-file" accept="image/*" style="display:none" onchange="pickProductImage(this)">
+        </div>
+      </div>
       <button class="btn-p" onclick="saveProduct()">บันทึก</button>
       <button class="btn-g" onclick="resetProductForm()">ล้าง</button>
     </div>
@@ -232,7 +242,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th>SKU</th><th>ชื่อสินค้า</th><th>หน่วย / แพ็ค</th><th class="num">ราคากลาง</th><th class="num">กัลปพฤกษ์</th><th class="num">วังหิน</th><th class="num">จองรอส่ง</th><th class="num">พร้อมขาย</th><th>สถานะ</th><th></th></tr></thead>
+      <thead><tr><th style="width:44px">รูป</th><th>SKU</th><th>ชื่อสินค้า</th><th>หน่วย / แพ็ค</th><th class="num">ราคากลาง</th><th class="num">กัลปพฤกษ์</th><th class="num">วังหิน</th><th class="num">จองรอส่ง</th><th class="num">พร้อมขาย</th><th>สถานะ</th><th></th></tr></thead>
       <tbody id="p-body"></tbody>
     </table>
     </div>
@@ -304,6 +314,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div><label>รหัสเซลล์ (A-Z 3 ตัว)</label><input id="s-code" maxlength="3" style="width:130px;text-transform:uppercase" placeholder="AAA" oninput="this.value=this.value.replace(/[^A-Za-z]/g,'').toUpperCase()"></div>
       <div style="flex:1;min-width:180px"><label>ชื่อเซลล์</label><input id="s-name" style="width:100%"></div>
       <div><label>เบอร์โทร (10 หลัก)</label><input id="s-phone" inputmode="numeric" maxlength="10" style="width:140px" placeholder="0812345678" oninput="this.value=this.value.replace(/\D/g,'')"></div>
+      <div style="flex:1;min-width:180px"><label>อีเมล (ขึ้นหัวบิล)</label><input id="s-email" type="email" style="width:100%" placeholder="sale@mixfresh.com"></div>
       <button class="btn-p" onclick="saveSale()">บันทึก</button>
       <button class="btn-g" onclick="resetSaleForm()">ล้าง</button>
     </div>
@@ -427,6 +438,18 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-p" onclick="saveSettings()">บันทึกตั้งค่า</button>
     </div>
     <p class="hint">กลุ่มกลาง = กลุ่มทีมภายใน (ต่างจากกลุ่มลูกค้าแต่ละราย) ไว้รับแจ้งเตือนออเดอร์ใหม่และสรุปออเดอร์รายวันสำหรับจัดส่ง</p>
+    <h3 class="ct" style="margin-top:18px">🧾 ข้อมูลบนหัวบิล</h3>
+    <div class="row">
+      <div style="min-width:150px"><label>ชื่อร้าน</label><input id="st-shopname" style="width:100%" placeholder="Mixfresh"></div>
+      <div style="min-width:170px"><label>เลขผู้เสียภาษีร้าน</label><input id="st-taxid" inputmode="numeric" maxlength="13" style="width:100%" placeholder="13 หลัก (ถ้ามี)" oninput="this.value=this.value.replace(/\D/g,'')"></div>
+      <div style="flex:2;min-width:220px"><label>ที่อยู่ร้าน (ถ้ามี)</label><input id="st-address" style="width:100%"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div style="min-width:150px"><label>เบอร์กลาง (สำรอง)</label><input id="st-phone" style="width:100%" placeholder="ใช้เมื่อลูกค้าไม่มีเซลล์"></div>
+      <div style="min-width:200px"><label>อีเมลกลาง (สำรอง)</label><input id="st-email" style="width:100%"></div>
+      <button class="btn-p" onclick="saveShopInfo()">บันทึกข้อมูลบิล</button>
+    </div>
+    <p class="hint">เบอร์/อีเมล/ผู้สร้างรายการบนหัวบิลจะดึงจาก<b>เซลล์ที่ดูแลลูกค้ารายนั้น</b>ก่อน ถ้าลูกค้ายังไม่มีเซลล์ จึงใช้ค่ากลางสำรองด้านบน</p>
   </div>
   <div class="card">
     <h3 class="ct" id="user-form-title">เพิ่มผู้ใช้</h3>
@@ -644,6 +667,7 @@ function renderProducts(){
             : avail<=(p.low_stock_alert??10) ? '<span class="tag tag-low">ใกล้หมด</span>'
             : '<span class="tag tag-ok">มีของ</span>';
     return `<tr>
+      <td>${p.image_url?`<img src="${esc(p.image_url)}" style="width:36px;height:36px;border-radius:6px;object-fit:cover;border:1px solid var(--line)">`:'<span style="color:var(--line)">—</span>'}</td>
       <td><b>${esc(p.sku)}</b></td><td>${esc(p.name)}</td>
       <td>${esc(p.unit)}${p.pack_info?'<div class="pack">'+esc(p.pack_info)+'</div>':''}</td>
       <td class="num">${fmt(p.base_price)}</td>
@@ -672,6 +696,8 @@ function editProduct(id){
   document.getElementById('p-upc').value=p.price_upc??'';
   document.getElementById('p-stock').value=p.stock_qty;
   document.getElementById('p-alert').value=p.low_stock_alert??10;
+  productImageFile=null; productImageUrl=p.image_url||'';
+  showProductPreview(p.image_url||'');
   window.scrollTo({top:0,behavior:'smooth'});
 }
 function resetProductForm(){
@@ -681,6 +707,26 @@ function resetProductForm(){
   document.getElementById('p-unit').value='ลัง';
   document.getElementById('p-stock').value='0';
   document.getElementById('p-alert').value='10';
+  productImageFile=null; productImageUrl='';
+  showProductPreview('');
+}
+let productImageFile=null, productImageUrl='';
+function showProductPreview(url){
+  const img=document.getElementById('p-img-preview');
+  const clr=document.getElementById('p-img-clear');
+  if(url){img.src=url;img.style.display='';clr.style.display='';}
+  else{img.src='';img.style.display='none';clr.style.display='none';}
+}
+function pickProductImage(input){
+  const f=input.files[0];if(!f)return;
+  if(f.size>3*1024*1024){toast('รูปใหญ่เกิน 3MB กรุณาย่อก่อน');input.value='';return;}
+  productImageFile=f;
+  showProductPreview(URL.createObjectURL(f));
+  input.value='';
+}
+function clearProductImage(){
+  productImageFile=null; productImageUrl='';
+  showProductPreview('');
 }
 async function saveProduct(){
   const rec={
@@ -696,6 +742,19 @@ async function saveProduct(){
   };
   if(!editProductId) rec.stock_klp=parseFloat(document.getElementById('p-stock').value)||0;
   if(!rec.sku||!rec.name){toast('กรอก SKU และชื่อสินค้าก่อน');return;}
+
+  // อัปโหลดรูปถ้ามีเลือกใหม่
+  if(productImageFile){
+    const ext=(productImageFile.name.split('.').pop()||'jpg').toLowerCase();
+    const path='p_'+rec.sku+'_'+Date.now()+'.'+ext;
+    const {error:upErr}=await db.storage.from('products').upload(path,productImageFile,{contentType:productImageFile.type,upsert:true});
+    if(upErr){toast('อัปโหลดรูปไม่สำเร็จ: '+upErr.message);return;}
+    const {data:pub}=db.storage.from('products').getPublicUrl(path);
+    rec.image_url=pub.publicUrl;
+  }else{
+    rec.image_url=productImageUrl||null;
+  }
+
   const q = editProductId ? db.from('products').update(rec).eq('id',editProductId)
                           : db.from('products').insert(rec);
   const {error}=await q;
@@ -938,12 +997,13 @@ function editSale(id){
   document.getElementById('s-code').value=s.code||'';
   document.getElementById('s-name').value=s.name;
   document.getElementById('s-phone').value=s.phone||'';
+  document.getElementById('s-email').value=s.email||'';
   window.scrollTo({top:0,behavior:'smooth'});
 }
 function resetSaleForm(){
   editSaleId=null;
   document.getElementById('sale-form-title').textContent='เพิ่มเซลล์';
-  ['s-code','s-name','s-phone'].forEach(id=>document.getElementById(id).value='');
+  ['s-code','s-name','s-phone','s-email'].forEach(id=>document.getElementById(id).value='');
 }
 async function saveSale(){
   const wasEdit=editSaleId;
@@ -953,7 +1013,7 @@ async function saveSale(){
   if(!/^[A-Z]{3}$/.test(code)){toast('รหัสเซลล์ต้องเป็นอังกฤษพิมพ์ใหญ่ 3 ตัวเท่านั้น เช่น AAA');return;}
   if(!name){toast('กรอกชื่อเซลล์ก่อน');return;}
   if(phone&&!/^[0-9]{10}$/.test(phone)){toast('เบอร์โทรต้องเป็นตัวเลข 10 หลักเท่านั้น');return;}
-  const rec={code,name,phone:phone||null};
+  const rec={code,name,phone:phone||null,email:document.getElementById('s-email').value.trim()||null};
   const q=wasEdit?db.from('sales').update(rec).eq('id',wasEdit):db.from('sales').insert(rec);
   const {error}=await q;
   if(error){
@@ -1079,7 +1139,7 @@ async function savePricing(){
 async function loadOrders(){
   const {data,error}=await db.from('orders')
     .select(`*, customers(id,code,name,line_group_id,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address),
-             order_items(qty,price,amount,products(name,unit))`)
+             order_items(qty,price,amount,product_id,products(name,unit))`)
     .eq('status','new').order('created_at',{ascending:true});
   if(error){toast('โหลดออเดอร์ไม่ได้: '+error.message);return;}
   orders=data||[]; renderOrders();
@@ -1127,101 +1187,260 @@ function wrapText(ctx,text,maxW){
   if(cur)lines.push(cur);
   return lines;
 }
+function bahtText(num){
+  // แปลงจำนวนเงินเป็นข้อความภาษาไทย
+  num=Number(num);
+  const txt1=['','หนึ่ง','สอง','สาม','สี่','ห้า','หก','เจ็ด','แปด','เก้า'];
+  const txt2=['','สิบ','ร้อย','พัน','หมื่น','แสน','ล้าน'];
+  function conv(n){
+    n=String(parseInt(n,10)); let r='';
+    const len=n.length;
+    for(let i=0;i<len;i++){
+      const d=+n[i], pos=len-i-1, unit=pos%6;
+      if(d===0)continue;
+      if(unit===0&&pos>=6){ r+=txt1[d]; }
+      else if(unit===1&&d===1) r+='สิบ';
+      else if(unit===1&&d===2) r+='ยี่สิบ';
+      else if(unit===0&&d===1&&len>1&&i!==len-1) r+='เอ็ด';
+      else r+=txt1[d]+txt2[unit];
+      if(pos>=6&&pos%6===0&&i!==len-1) r+='ล้าน';
+    }
+    return r;
+  }
+  const parts=num.toFixed(2).split('.');
+  let baht=conv(parts[0])||'ศูนย์';
+  let s=baht+'บาท';
+  if(parts[1]==='00') s+='ถ้วน';
+  else s+=conv(parts[1])+'สตางค์';
+  return s;
+}
+function loadImg(url){
+  return new Promise(res=>{
+    if(!url){res(null);return;}
+    const img=new Image(); img.crossOrigin='anonymous';
+    img.onload=()=>res(img); img.onerror=()=>res(null);
+    img.src=url;
+  });
+}
+function makeBarcode(text){
+  try{
+    const c=document.createElement('canvas');
+    JsBarcode(c,text,{format:'CODE128',displayValue:false,margin:0,height:44,width:1.6});
+    return c.toDataURL('image/png');
+  }catch(e){return null;}
+}
+// ข้อมูลติดต่อบนหัวบิล — ดึงจากเซลล์ที่ดูแลลูกค้าก่อน ถ้าไม่มีใช้ค่ากลาง
+function billContact(c){
+  const s=sales.find(x=>x.id===c.sale_id);
+  return {
+    shop: appSettings.shop_name||'Mixfresh',
+    phone: (s&&s.phone) || appSettings.shop_phone || '',
+    email: (s&&s.email) || appSettings.shop_email || '',
+    creator: (s&&s.name) || 'Mixfresh',
+    taxid: appSettings.shop_taxid||'',
+    addr: appSettings.shop_address||''
+  };
+}
 async function drawBill(o,billNo){
   await document.fonts.load('700 30px "IBM Plex Sans Thai"');
   await document.fonts.load('400 20px "IBM Plex Sans Thai"');
   const c=o.customers, items=o.order_items;
-  const cv=document.getElementById('cv'), W=800;
-  const m=cv.getContext('2d');
-  m.font='400 20px "IBM Plex Sans Thai"';
+  const info=billContact(c);
 
-  const billAddrLines=wrapText(m,c.billing_address,440);
-  const shipAddrLines=wrapText(m,c.ship_address,440);
-  const rowH=34;
-  const infoH=140+(billAddrLines.length*26)+70+(shipAddrLines.length*26);
-  const H=110+infoH+50+items.length*rowH+130;
+  // โหลดรูปสินค้าล่วงหน้า (map จาก products global ด้วย name)
+  const imgs={};
+  await Promise.all(items.map(async it=>{
+    const pid=it.product_id;
+    const prod=products.find(p=>p.id===pid) || null;
+    const url=prod?prod.image_url:null;
+    imgs[pid]=await loadImg(url);
+  }));
+  const barcode=makeBarcode(billNo);
 
-  cv.width=W; cv.height=H;
+  // A4 สัดส่วน 210x297 → ใช้ 2480x3508 (300dpi) ย่อรับมือได้; ใช้ scale 2.7 ~ 2244x3175
+  const S=2.7, W=Math.round(794*S), Wmm=794; // 794px = A4 กว้างที่ 96dpi
+  const cv=document.getElementById('cv');
+  const ctx0=cv.getContext('2d');
+  const PAD=40, rowH=64;
+  // คำนวณความสูงเนื้อหา
+  const headH=210, custH=150, tableHeadH=46;
+  const bodyH=items.length*rowH;
+  const totalH=120, signH=210, footH=40;
+  const Hlogic=headH+custH+tableHeadH+bodyH+totalH+signH+footH;
+  const H=Math.max(Hlogic,1050);
+
+  cv.width=Math.round(Wmm*S); cv.height=Math.round(H*S);
   const x=cv.getContext('2d');
-  x.fillStyle='#ffffff';x.fillRect(0,0,W,H);
+  x.scale(S,S);
+  x.fillStyle='#ffffff';x.fillRect(0,0,Wmm,H);
+  x.textBaseline='alphabetic';
+  const R=Wmm-PAD;
 
-  x.fillStyle='#b91c1c';x.fillRect(0,0,W,86);
-  x.fillStyle='#ffffff';
-  x.font='700 32px "IBM Plex Sans Thai"';
-  x.fillText('🔥 '+SHOP_NAME,32,54);
-  x.font='500 20px "IBM Plex Sans Thai"';
-  x.textAlign='right';
-  x.fillText('ใบส่งของ / ใบเรียกเก็บเงิน',W-32,54);
-  x.textAlign='left';
-
-  let y=120;
-  x.fillStyle='#2e1b16';
-  x.textAlign='right';
+  // ---------- หัวบิล ----------
+  let y=54;
+  x.fillStyle='#111';x.textAlign='left';
   x.font='700 22px "IBM Plex Sans Thai"';
-  x.fillText('เลขที่ '+billNo,W-32,y);
-  x.font='400 18px "IBM Plex Sans Thai"';
-  x.fillStyle='#8a6f66';
-  x.fillText(new Date().toLocaleString('th-TH',{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'}),W-32,y+28);
+  x.fillText(info.shop,PAD+52,y-6);
+  x.font='400 13px "IBM Plex Sans Thai"';x.fillStyle='#555';
+  x.fillText('โทรศัพท์: '+info.phone+(info.email?'   อีเมล: '+info.email:''),PAD+52,y+16);
+  if(info.taxid){x.fillText('เลขผู้เสียภาษี: '+info.taxid,PAD+52,y+34);}
+  // โลโก้วงกลม
+  x.fillStyle='#b91c1c';x.beginPath();x.arc(PAD+22,y-2,20,0,7);x.fill();
+  x.fillStyle='#fff';x.font='700 20px "IBM Plex Sans Thai"';x.textAlign='center';x.fillText('M',PAD+22,y+5);
   x.textAlign='left';
 
-  x.fillStyle='#b91c1c';x.font='700 19px "IBM Plex Sans Thai"';
-  x.fillText('ลูกค้า',32,y);y+=28;
-  x.fillStyle='#2e1b16';x.font='600 21px "IBM Plex Sans Thai"';
-  x.fillText(c.name+'  ('+c.code+')',32,y);y+=27;
-  x.font='400 19px "IBM Plex Sans Thai"';x.fillStyle='#5c4a42';
-  if(c.contact_name||c.phone){x.fillText((c.contact_name||'')+(c.phone?'  โทร '+c.phone:''),32,y);y+=26;}
-  for(const l of billAddrLines){x.fillText(l,32,y);y+=26;}
+  // ชื่อเอกสาร + บาร์โค้ด (ขวาบน)
+  x.fillStyle='#111';x.textAlign='right';x.font='700 26px "IBM Plex Sans Thai"';
+  x.fillText('ใบแจ้งหนี้/วางบิล',R,y-2);
+  if(barcode){const bi=await loadImg(barcode); if(bi){const bw=230,bh=44;x.drawImage(bi,R-bw,y+12,bw,bh);}}
+  x.font='400 12px "IBM Plex Sans Thai"';x.fillStyle='#333';
+  x.fillText(billNo,R,y+74);
+  x.textAlign='left';
 
-  y+=14;
-  x.fillStyle='#b91c1c';x.font='700 19px "IBM Plex Sans Thai"';
-  x.fillText('จัดส่งที่',32,y);y+=28;
-  x.fillStyle='#2e1b16';x.font='400 19px "IBM Plex Sans Thai"';
-  const shipHead=(c.ship_shop_name||c.name)+((c.ship_receiver)?'  ผู้รับ: '+c.ship_receiver:'')+(c.ship_phone?'  โทร '+c.ship_phone:'');
-  x.fillText(shipHead,32,y);y+=26;
-  x.fillStyle='#5c4a42';
-  for(const l of shipAddrLines){x.fillText(l,32,y);y+=26;}
+  // เส้นคั่น
+  y=170;
+  x.strokeStyle='#111';x.lineWidth=1;x.beginPath();x.moveTo(PAD,y);x.lineTo(R,y);x.stroke();
 
+  // ---------- ข้อมูลลูกค้า (ซ้าย) + meta (ขวา) ----------
+  y+=28;
+  const billAddr=c.billing_address||c.ship_address||'';
+  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillStyle='#111';
+  x.fillText('ลูกค้า:',PAD,y);
+  x.font='400 13.5px "IBM Plex Sans Thai"';
+  const custName=c.name+(c.code?'  ('+c.code+')':'');
+  x.fillText(custName,PAD+70,y);
+  // meta ขวา
+  const MX=Wmm-330;
+  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('วันที่:',MX,y);
+  x.font='400 13.5px "IBM Plex Sans Thai"';
+  x.fillText(new Date().toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'}),MX+90,y);
+  y+=24;
+  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('ที่อยู่:',PAD,y);
+  x.font='400 13px "IBM Plex Sans Thai"';
+  const addrLines=wrapText2(x,billAddr,300,'400 13px "IBM Plex Sans Thai"');
+  addrLines.slice(0,3).forEach((l,i)=>x.fillText(l,PAD+70,y+i*18));
+  // meta ขวา ต่อ
+  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('เลขที่',MX,y);
+  x.font='400 13.5px "IBM Plex Sans Thai"';x.fillText(billNo,MX+90,y);
+  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('ผู้สร้างรายการ:',MX,y+24);
+  x.font='400 13.5px "IBM Plex Sans Thai"';x.fillText(info.creator,MX+90,y+24);
+  const addrBlock=Math.max(addrLines.slice(0,3).length,1)*18;
+  y+=addrBlock+6;
+  if(c.tax_id){x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('เลขผู้เสียภาษี:',PAD,y);
+    x.font='400 13px "IBM Plex Sans Thai"';x.fillText(c.tax_id,PAD+90,y);y+=20;}
+  if(c.phone){x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('โทรศัพท์:',PAD,y);
+    x.font='400 13px "IBM Plex Sans Thai"';x.fillText(c.phone,PAD+70,y);y+=20;}
+
+  // ---------- ตารางสินค้า ----------
   y+=16;
-  x.fillStyle='#faf0ea';x.fillRect(24,y-6,W-48,36);
-  x.fillStyle='#8a6f66';x.font='600 17px "IBM Plex Sans Thai"';
-  x.fillText('รายการ',36,y+18);
+  const cX={no:PAD+4, img:PAD+34, code:PAD+92, name:PAD+180, qty:Wmm-320, unit:Wmm-250, price:Wmm-140, sum:R};
+  x.fillStyle='#111';x.lineWidth=1;
+  x.strokeRect(PAD,y,Wmm-2*PAD,tableHeadH);
+  x.font='700 13px "IBM Plex Sans Thai"';x.fillStyle='#111';
+  const thY=y+29;
+  x.textAlign='left';x.fillText('#',cX.no,thY);
+  x.fillText('รหัสสินค้า',cX.code,thY);
+  x.textAlign='center';x.fillText('ชื่อสินค้า',(cX.name+cX.qty)/2,thY);
   x.textAlign='right';
-  x.fillText('จำนวน',555,y+18);
-  x.fillText('ราคา/หน่วย',655,y+18);
-  x.fillText('รวม',W-36,y+18);
+  x.fillText('จำนวน',cX.qty+56,thY);
+  x.fillText('มูลค่าต่อหน่วย',cX.price+70,thY);
+  x.fillText('รวม',cX.sum,thY);
+  x.textAlign='left';
+  y+=tableHeadH;
+
+  x.font='400 13px "IBM Plex Sans Thai"';
+  items.forEach((it,i)=>{
+    const ry=y+i*rowH;
+    x.strokeStyle='#ccc';x.strokeRect(PAD,ry,Wmm-2*PAD,rowH);
+    x.fillStyle='#111';x.textAlign='left';
+    x.fillText(String(i+1),cX.no,ry+rowH/2+5);
+    // รูปสินค้า
+    const im=imgs[it.product_id];
+    if(im){
+      const size=48, iy=ry+(rowH-size)/2;
+      try{x.drawImage(im,cX.img,iy,size,size);}catch(e){}
+    }
+    x.fillText(prodSku(it.product_id),cX.code,ry+rowH/2+5);
+    // ชื่อ (ตัดบรรทัด)
+    const nmLines=wrapText2(x,it.products?.name||'',cX.qty-cX.name-16,'400 13px "IBM Plex Sans Thai"');
+    nmLines.slice(0,2).forEach((l,j)=>x.fillText(l,cX.name,ry+rowH/2+5+(j-((nmLines.length>1)?0.5:0))*17));
+    x.textAlign='right';
+    x.fillText(Number(it.qty)+' '+(it.products?.unit||''),cX.qty+56,ry+rowH/2+5);
+    x.fillText(fmt(it.price),cX.price+70,ry+rowH/2+5);
+    x.fillText(fmt(it.amount),cX.sum,ry+rowH/2+5);
+    x.textAlign='left';
+  });
+  y+=bodyH;
+
+  // แถวรวม
+  const totQty=items.reduce((s,it)=>s+Number(it.qty),0);
+  x.strokeStyle='#111';x.strokeRect(PAD,y,Wmm-2*PAD,44);
+  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillStyle='#111';x.textAlign='center';
+  x.fillText('รวมทั้งหมด',(PAD+cX.qty)/2+40,y+28);
+  x.textAlign='right';
+  x.fillText(String(totQty),cX.qty+56,y+28);
+  x.fillText(fmt(o.total),cX.sum,y+28);
   x.textAlign='left';
   y+=44;
 
-  x.font='400 19px "IBM Plex Sans Thai"';
-  for(const it of items){
-    x.fillStyle='#2e1b16';
-    let nm=it.products?.name||'';
-    if(x.measureText(nm).width>440)nm=nm.slice(0,32)+'…';
-    x.fillText(nm,36,y);
-    x.textAlign='right';
-    x.fillText(Number(it.qty)+' '+(it.products?.unit||''),555,y);
-    x.fillText(fmt(it.price),655,y);
-    x.font='600 19px "IBM Plex Sans Thai"';
-    x.fillText(fmt(it.amount),W-36,y);
-    x.font='400 19px "IBM Plex Sans Thai"';
-    x.textAlign='left';
-    x.strokeStyle='#f0e6de';x.beginPath();x.moveTo(24,y+10);x.lineTo(W-24,y+10);x.stroke();
-    y+=rowH;
-  }
-
-  y+=14;
-  x.fillStyle='#b91c1c';x.fillRect(24,y-8,W-48,52);
-  x.fillStyle='#ffffff';x.font='700 22px "IBM Plex Sans Thai"';
-  x.fillText('รวมทั้งสิ้น',36,y+26);
-  x.textAlign='right';x.font='700 28px "IBM Plex Sans Thai"';
-  x.fillText('฿'+fmt(o.total),W-36,y+28);
+  // มูลค่ารวมสุทธิ
+  y+=34;
+  x.textAlign='right';x.font='700 15px "IBM Plex Sans Thai"';x.fillStyle='#111';
+  x.fillText('มูลค่ารวมสุทธิ',R-160,y);
+  x.font='700 16px "IBM Plex Sans Thai"';
+  x.fillText(fmt(o.total)+' บาท',R,y);
+  y+=22;
+  x.font='400 12.5px "IBM Plex Sans Thai"';x.fillStyle='#555';
+  x.fillText('('+bahtText(o.total)+')',R,y);
   x.textAlign='left';
 
-  y+=76;
-  x.fillStyle='#8a6f66';x.font='400 17px "IBM Plex Sans Thai"';
-  x.fillText('ขอบคุณที่ใช้บริการครับ 🙏  ·  อ้างอิงออเดอร์ '+o.order_no,32,y);
+  // ---------- ช่องเซ็น 3 จุด ----------
+  y+=80;
+  const cols=['ผู้รับสินค้า','ผู้ส่งสินค้า','ผู้รับเงิน'];
+  const colW=(Wmm-2*PAD)/3;
+  x.textAlign='center';x.fillStyle='#111';
+  cols.forEach((t,i)=>{
+    const cx=PAD+colW*i+colW/2;
+    x.font='400 13px "IBM Plex Sans Thai"';
+    x.fillText(t,cx,y);
+    x.strokeStyle='#999';x.setLineDash([4,3]);
+    x.beginPath();x.moveTo(cx-80,y+52);x.lineTo(cx+80,y+52);x.stroke();
+    x.font='400 12px "IBM Plex Sans Thai"';x.fillStyle='#777';
+    x.fillText('วันที่',cx,y+74);
+    x.beginPath();x.moveTo(cx-80,y+92);x.lineTo(cx+80,y+92);x.stroke();
+    x.setLineDash([]);x.fillStyle='#111';
+  });
+  x.textAlign='left';
 
-  return cv;
+  return {cv, contentH:(y+110)};
+}
+function prodSku(pid){const p=products.find(x=>x.id===pid);return p?p.sku:'';}
+function wrapText2(ctx,text,maxW,font){
+  if(!text)return[];
+  const prev=ctx.font; if(font)ctx.font=font;
+  const words=String(text).split('');
+  const lines=[];let cur='';
+  for(const ch of words){
+    if(ctx.measureText(cur+ch).width>maxW&&cur){lines.push(cur);cur=ch;}
+    else cur+=ch;
+  }
+  if(cur)lines.push(cur);
+  ctx.font=prev;
+  return lines;
+}
+// สร้าง PDF จาก canvas บิล
+async function billToPDF(cvResult,billNo){
+  const {jsPDF}=window.jspdf;
+  const pdf=new jsPDF({unit:'pt',format:'a4'});
+  const pw=pdf.internal.pageSize.getWidth();   // 595.28
+  const ph=pdf.internal.pageSize.getHeight();  // 841.89
+  const cv=cvResult.cv;
+  const imgData=cv.toDataURL('image/jpeg',0.92);
+  const ratio=cv.width/cv.height;
+  let w=pw, h=pw/ratio;
+  if(h>ph){h=ph;w=ph*ratio;}
+  pdf.addImage(imgData,'JPEG',(pw-w)/2,0,w,h);
+  return pdf;
 }
 async function nextBillNo(){
   const ymd=new Date(Date.now()+7*3600*1000).toISOString().slice(2,10).replace(/-/g,'');
@@ -1237,7 +1456,8 @@ async function makeBill(orderId,btn,sendLine){
   btn.disabled=true;btn.textContent='กำลังออกบิล…';
   try{
     const billNo=await nextBillNo();
-    const cv=await drawBill(o,billNo);
+    const result=await drawBill(o,billNo);
+    const cv=result.cv;
     const blob=await new Promise(res=>cv.toBlob(res,'image/png'));
 
     const path=billNo+'.png';
@@ -1245,6 +1465,12 @@ async function makeBill(orderId,btn,sendLine){
     if(upErr)throw new Error('อัพรูปไม่สำเร็จ: '+upErr.message);
     const {data:pub}=db.storage.from('bills').getPublicUrl(path);
     const imageUrl=pub.publicUrl;
+
+    // สร้าง PDF แล้วดาวน์โหลดให้ทันที
+    try{
+      const pdf=await billToPDF(result,billNo);
+      pdf.save(billNo+'.pdf');
+    }catch(e){console.warn('PDF error',e);}
 
     const {error:insErr}=await db.from('bills').insert({
       bill_no:billNo,order_id:o.id,customer_id:o.customers.id,
@@ -1446,6 +1672,23 @@ function setFilter(f){
   document.querySelectorAll('.fbtn').forEach(b=>b.classList.toggle('active',b.dataset.f===f));
   renderAccount();
 }
+async function downloadBillPDF(billId,btn){
+  const b=bills.find(x=>x.id===billId);if(!b)return;
+  btn.disabled=true;btn.textContent='…';
+  try{
+    // ดึงออเดอร์เต็มของบิลนี้
+    const {data:bill}=await db.from('bills').select('order_id,bill_no').eq('id',billId).single();
+    const {data:o,error}=await db.from('orders')
+      .select(`*, customers(*), order_items(qty,price,amount,product_id,products(name,unit))`)
+      .eq('id',bill.order_id).single();
+    if(error||!o)throw new Error('โหลดข้อมูลบิลไม่ได้');
+    const result=await drawBill(o,bill.bill_no);
+    const pdf=await billToPDF(result,bill.bill_no);
+    pdf.save(bill.bill_no+'.pdf');
+    toast('ดาวน์โหลด PDF '+bill.bill_no+' แล้ว');
+  }catch(e){toast('สร้าง PDF ไม่สำเร็จ: '+(e.message||e));}
+  btn.disabled=false;btn.textContent='PDF';
+}
 function shipTag(s){
   if(s==='shipped')return '<span class="tag tag-ok">ส่งแล้ว</span>';
   if(s==='cancelled')return '<span class="tag tag-out">ยกเลิก</span>';
@@ -1483,6 +1726,7 @@ function renderAccount(){
       <td style="font-size:13px;color:var(--muted)">${paid?esc(b.paid_by||'')+'<br>'+pd:'—'}</td>
       <td style="white-space:nowrap">
         <button class="btn-g mini" onclick="window.open('${b.image_url}','_blank')">ดูบิล</button>
+        <button class="btn-g mini" onclick="downloadBillPDF(${b.id},this)">PDF</button>
         ${b.customers?.line_group_id&&!b.line_sent?`<button class="btn-s mini" onclick="resendBill(${b.id},this)">ส่ง LINE</button>`:''}
         ${ss==='pending'?`<button class="btn-ok mini" onclick="shipBillUI(${b.id})">🚚 ส่งแล้ว</button><button class="btn-d mini" onclick="cancelBillUI(${b.id})">ยกเลิกบิล</button>`:''}
         ${ss!=='cancelled'?(paid
@@ -1661,6 +1905,21 @@ async function loadSettings(){
   appSettings={};(data||[]).forEach(r=>appSettings[r.key]=r.value);
   const el=document.getElementById('st-central');
   if(el)el.value=appSettings.line_central_group||'';
+  const map={'st-shopname':'shop_name','st-taxid':'shop_taxid','st-address':'shop_address','st-phone':'shop_phone','st-email':'shop_email'};
+  for(const [id,key] of Object.entries(map)){const e=document.getElementById(id);if(e)e.value=appSettings[key]||'';}
+}
+async function saveShopInfo(){
+  const rows=[
+    {key:'shop_name',value:document.getElementById('st-shopname').value.trim()},
+    {key:'shop_taxid',value:document.getElementById('st-taxid').value.trim()},
+    {key:'shop_address',value:document.getElementById('st-address').value.trim()},
+    {key:'shop_phone',value:document.getElementById('st-phone').value.trim()},
+    {key:'shop_email',value:document.getElementById('st-email').value.trim()}
+  ];
+  const {error}=await db.from('settings').upsert(rows,{onConflict:'key'});
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  rows.forEach(r=>appSettings[r.key]=r.value);
+  toast('บันทึกข้อมูลบิลแล้ว');
 }
 async function saveSettings(){
   const val=document.getElementById('st-central').value.trim();
