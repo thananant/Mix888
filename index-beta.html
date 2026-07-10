@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Mix888 — สั่งสินค้า</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --ink:#2e1b16; --muted:#8a6f66; --line:#ecdcd2; --bg:#faf5ef; --card:#ffffff;
+  --accent:#b91c1c; --accent-soft:#fdeaea; --warn:#ba7517; --warn-soft:#faeeda;
+  --danger:#7a1f1f; --danger-soft:#f7dede; --radius:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:'IBM Plex Sans Thai',sans-serif;background:var(--bg);color:var(--ink);font-size:15px;padding-bottom:90px}
+header{background:var(--card);border-bottom:1px solid var(--line);border-top:4px solid var(--accent);padding:12px 16px;position:sticky;top:0;z-index:10}
+header h1{font-size:17px;font-weight:700}
+header h1 span{color:var(--accent)}
+.cust{font-size:13px;color:var(--muted);margin-top:2px}
+main{max-width:640px;margin:0 auto;padding:12px}
+.searchbox{width:100%;font:inherit;padding:11px 14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);margin-bottom:10px}
+.searchbox:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+.item{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px}
+.item.out{opacity:.55}
+.info{flex:1;min-width:0}
+.name{font-weight:600;line-height:1.35}
+.pack{font-size:12.5px;color:var(--muted)}
+.price{font-size:14px;color:var(--accent);font-weight:700;margin-top:2px}
+.price small{color:var(--muted);font-weight:400}
+.stock{font-size:12px;margin-top:2px}
+.stock.ok{color:#0f6e56}
+.stock.low{color:var(--warn);font-weight:600}
+.stock.zero{color:var(--danger);font-weight:700}
+.qtybox{display:flex;align-items:center;gap:6px}
+.qbtn{width:38px;height:38px;border:none;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-size:20px;font-weight:700;cursor:pointer;flex-shrink:0}
+.qbtn:disabled{opacity:.35}
+.qin{width:52px;height:38px;text-align:center;font:inherit;font-weight:700;border:1px solid var(--line);border-radius:10px;background:#fff}
+.qin:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+#cartbar{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--line);padding:12px 16px;display:flex;align-items:center;gap:12px;z-index:20;box-shadow:0 -2px 12px rgba(0,0,0,.06)}
+#cartbar .sum{flex:1}
+#cartbar .n{font-size:13px;color:var(--muted)}
+#cartbar .t{font-size:18px;font-weight:700}
+.btn{font:inherit;font-weight:700;padding:13px 26px;border:none;border-radius:12px;cursor:pointer}
+.btn-p{background:var(--accent);color:#fff}
+.btn-p:disabled{opacity:.4}
+.btn-g{background:#f1ece6;color:var(--ink)}
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:30;display:none;align-items:flex-end;justify-content:center}
+#overlay.show{display:flex}
+.sheet{background:var(--card);border-radius:18px 18px 0 0;width:100%;max-width:640px;max-height:85vh;overflow-y:auto;padding:20px 16px 24px}
+.sheet h2{font-size:17px;font-weight:700;margin-bottom:12px}
+.cline{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+.cline .cn{flex:1}
+.cline .cq{color:var(--muted);white-space:nowrap}
+.cline .ca{font-weight:600;white-space:nowrap}
+.total-line{display:flex;justify-content:space-between;padding:14px 0;font-size:17px;font-weight:700}
+#success{position:fixed;inset:0;background:var(--bg);z-index:40;display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px}
+#success.show{display:flex}
+.bigcheck{width:88px;height:88px;border-radius:50%;background:#e1f5ee;color:#0f6e56;font-size:44px;display:flex;align-items:center;justify-content:center;margin-bottom:18px}
+#success h2{font-size:20px;margin-bottom:6px}
+#success .ono{font-size:15px;color:var(--muted);margin-bottom:4px}
+#success .ot{font-size:26px;font-weight:700;color:var(--accent);margin-bottom:24px}
+.hist{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-top:16px}
+.hist h3{font-size:14px;font-weight:700;margin-bottom:8px;color:var(--muted)}
+.hline{display:flex;justify-content:space-between;font-size:13.5px;padding:6px 0;border-bottom:1px solid var(--line)}
+.hline:last-child{border-bottom:none}
+.tag{display:inline-block;padding:1px 9px;border-radius:99px;font-size:11.5px;font-weight:600}
+.tag-new{background:var(--warn-soft);color:var(--warn)}
+.tag-billed{background:#e1f5ee;color:#0f6e56}
+#toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 20px;border-radius:99px;font-weight:500;opacity:0;transition:opacity .25s;pointer-events:none;z-index:50;max-width:92vw;text-align:center}
+#toast.show{opacity:1}
+#errpage{display:none;text-align:center;padding:60px 24px}
+#errpage.show{display:block}
+.empty{text-align:center;color:var(--muted);padding:40px 0}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🔥 Mix888 <span>· สั่งสินค้า</span></h1>
+  <div class="cust" id="cust-name">กำลังโหลด…</div>
+</header>
+
+<main>
+  <div id="errpage">
+    <div style="font-size:44px;margin-bottom:12px">🔒</div>
+    <h2 style="margin-bottom:8px">เปิดหน้านี้ไม่ได้</h2>
+    <p id="errmsg" style="color:var(--muted)"></p>
+  </div>
+
+  <div id="shop" style="display:none">
+    <input class="searchbox" id="search" placeholder="🔍 ค้นหาสินค้า…" oninput="render()">
+    <div id="list"></div>
+    <div class="hist" id="hist" style="display:none">
+      <h3>ออเดอร์ล่าสุดของคุณ</h3>
+      <div id="hist-body"></div>
+    </div>
+  </div>
+</main>
+
+<div id="cartbar" style="display:none">
+  <div class="sum">
+    <div class="n" id="cart-n">ยังไม่ได้เลือกสินค้า</div>
+    <div class="t" id="cart-t">฿0.00</div>
+  </div>
+  <button class="btn btn-p" id="order-btn" onclick="openConfirm()" disabled>สั่งสินค้า</button>
+</div>
+
+<div id="overlay" onclick="if(event.target===this)closeConfirm()">
+  <div class="sheet">
+    <h2>ยืนยันการสั่งสินค้า</h2>
+    <div id="confirm-list"></div>
+    <div class="total-line"><span>รวมทั้งหมด</span><span id="confirm-total"></span></div>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-g" style="flex:1" onclick="closeConfirm()">กลับไปแก้</button>
+      <button class="btn btn-p" style="flex:2" id="confirm-btn" onclick="placeOrder()">✓ ยืนยันสั่งสินค้า</button>
+    </div>
+  </div>
+</div>
+
+<div id="success">
+  <div class="bigcheck">✓</div>
+  <h2>สั่งสินค้าเรียบร้อย</h2>
+  <div class="ono" id="s-no"></div>
+  <div class="ot" id="s-total"></div>
+  <button class="btn btn-p" onclick="backToShop()">สั่งสินค้าเพิ่ม</button>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ================= ตั้งค่า ================= */
+const SUPABASE_URL = 'https://eqbzpgynzgdwvouuzfwt.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_HqLNQDwR4omYcb7BNUEKIw_vyHCo4N-';
+/* =========================================== */
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const fmt = n => '฿'+Number(n).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
+
+let customer=null, items=[], cart={};
+const token=new URLSearchParams(location.search).get('t');
+
+function showError(msg){
+  document.getElementById('errpage').classList.add('show');
+  document.getElementById('errmsg').textContent=msg;
+  document.getElementById('cust-name').textContent='—';
+}
+
+async function init(){
+  if(!token){showError('ลิงก์ไม่ครบถ้วน กรุณาใช้ลิงก์ที่ทางร้านส่งให้ในกลุ่ม LINE');return;}
+  const {data,error}=await db.from('customers')
+    .select('id,code,name,sale_name,contact_name,phone,billing_address,map_link,receive_time,note,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address')
+    .eq('order_token',token).eq('active',true).maybeSingle();
+  if(error||!data){showError('ลิงก์ไม่ถูกต้องหรือถูกยกเลิกแล้ว กรุณาติดต่อทางร้าน');return;}
+  customer=data;
+  document.getElementById('cust-name').textContent=customer.name+' ('+customer.code+')';
+  document.getElementById('shop').style.display='';
+  document.getElementById('cartbar').style.display='flex';
+  await loadCatalog();
+  subscribeStock();
+  loadHistory();
+}
+
+async function loadCatalog(){
+  const {data,error}=await db.from('v_customer_catalog')
+    .select('*').eq('customer_id',customer.id).order('sku');
+  if(error){toast('โหลดสินค้าไม่ได้: '+error.message);return;}
+  items=data||[];
+  for(const it of items){
+    if(cart[it.product_id]>it.stock_qty) cart[it.product_id]=Math.max(0,Math.floor(it.stock_qty));
+  }
+  render();
+}
+
+function render(){
+  const q=(document.getElementById('search').value||'').toLowerCase();
+  const list=items.filter(it=>!q||it.name.toLowerCase().includes(q)||it.sku.toLowerCase().includes(q));
+  const el=document.getElementById('list');
+  if(!items.length){el.innerHTML='<div class="empty">ยังไม่มีสินค้าในรายการของคุณ<br>กรุณาติดต่อทางร้าน</div>';updateCartBar();return;}
+  if(!list.length){el.innerHTML='<div class="empty">ไม่พบสินค้าที่ค้นหา</div>';updateCartBar();return;}
+  el.innerHTML=list.map(it=>{
+    const stock=Number(it.stock_qty);
+    const qty=cart[it.product_id]||0;
+    const out=stock<=0;
+    let stockHtml = out ? '<span class="stock zero">สินค้าหมด</span>'
+      : stock<=10 ? `<span class="stock low">เหลือ ${stock} ${esc(it.unit)}</span>`
+      : `<span class="stock ok">เหลือ ${stock} ${esc(it.unit)}</span>`;
+    return `<div class="item ${out?'out':''}">
+      <div class="info">
+        <div class="name">${esc(it.name)}</div>
+        ${it.pack_info?`<div class="pack">${esc(it.pack_info)}</div>`:''}
+        <div class="price">${fmt(it.price)} <small>/ ${esc(it.unit)}</small></div>
+        ${stockHtml}
+      </div>
+      <div class="qtybox">
+        <button class="qbtn" onclick="step(${it.product_id},-1)" ${out||qty<=0?'disabled':''}>−</button>
+        <input class="qin" inputmode="numeric" value="${qty||''}" placeholder="0" ${out?'disabled':''}
+          onchange="setQty(${it.product_id},this.value)">
+        <button class="qbtn" onclick="step(${it.product_id},1)" ${out||qty>=stock?'disabled':''}>＋</button>
+      </div>
+    </div>`;
+  }).join('');
+  updateCartBar();
+}
+
+function step(pid,d){
+  const it=items.find(x=>x.product_id===pid);if(!it)return;
+  let q=(cart[pid]||0)+d;
+  q=Math.max(0,Math.min(q,Math.floor(it.stock_qty)));
+  cart[pid]=q; render();
+}
+function setQty(pid,val){
+  const it=items.find(x=>x.product_id===pid);if(!it)return;
+  let q=parseInt(String(val).replace(/\D/g,''),10)||0;
+  const max=Math.floor(it.stock_qty);
+  if(q>max){q=max;toast('สินค้านี้เหลือ '+max+' '+it.unit);}
+  cart[pid]=q; render();
+}
+
+function cartItems(){
+  return Object.entries(cart).filter(([,q])=>q>0).map(([pid,q])=>{
+    const it=items.find(x=>x.product_id===Number(pid));
+    return it?{...it,qty:q,amount:q*Number(it.price)}:null;
+  }).filter(Boolean);
+}
+function updateCartBar(){
+  const ci=cartItems();
+  const total=ci.reduce((s,x)=>s+x.amount,0);
+  const n=ci.reduce((s,x)=>s+x.qty,0);
+  document.getElementById('cart-n').textContent=ci.length?ci.length+' รายการ · '+n+' ชิ้น':'ยังไม่ได้เลือกสินค้า';
+  document.getElementById('cart-t').textContent=fmt(total);
+  document.getElementById('order-btn').disabled=!ci.length;
+}
+
+function openConfirm(){
+  const ci=cartItems();if(!ci.length)return;
+  document.getElementById('confirm-list').innerHTML=ci.map(x=>`
+    <div class="cline">
+      <span class="cn">${esc(x.name)}</span>
+      <span class="cq">${x.qty} ${esc(x.unit)} × ${fmt(x.price)}</span>
+      <span class="ca">${fmt(x.amount)}</span>
+    </div>`).join('');
+  document.getElementById('confirm-total').textContent=fmt(ci.reduce((s,x)=>s+x.amount,0));
+  document.getElementById('overlay').classList.add('show');
+}
+function closeConfirm(){document.getElementById('overlay').classList.remove('show');}
+
+async function placeOrder(){
+  const ci=cartItems();if(!ci.length)return;
+  const btn=document.getElementById('confirm-btn');
+  btn.disabled=true;btn.textContent='กำลังส่งออเดอร์…';
+  const {data,error}=await db.rpc('place_order',{
+    p_customer_id:customer.id,
+    p_items:ci.map(x=>({product_id:x.product_id,qty:x.qty}))
+  });
+  btn.disabled=false;btn.textContent='✓ ยืนยันสั่งสินค้า';
+  if(error){
+    closeConfirm();
+    if(error.message.includes('OUT_OF_STOCK')){
+      const p=error.message.split('|');
+      toast('ขออภัย "'+(p[1]||'สินค้า')+'" '+(p[2]||'ของไม่พอ')+' กรุณาปรับจำนวน');
+      await loadCatalog();
+    } else if(error.message.includes('NOT_ALLOWED')){
+      toast('มีสินค้าที่ไม่อยู่ในรายการของคุณ กรุณารีเฟรชหน้า');
+      await loadCatalog();
+    } else toast('สั่งไม่สำเร็จ: '+error.message);
+    return;
+  }
+  closeConfirm();
+  cart={};
+  document.getElementById('s-no').textContent='เลขที่ออเดอร์ '+data.order_no;
+  document.getElementById('s-total').textContent=fmt(data.total);
+  document.getElementById('success').classList.add('show');
+  notifyCentral(data,ci);
+  loadCatalog(); loadHistory();
+}
+async function notifyCentral(data,ci){
+  try{
+    const {data:st}=await db.from('settings').select('value').eq('key','line_central_group').maybeSingle();
+    const gid=st&&st.value;if(!gid)return;
+    const c=customer;
+    let t='🆕 ออเดอร์ใหม่ '+data.order_no+'\n';
+    if(c.sale_name)t+='Sale : '+c.sale_name+'\n';
+    t+='ร้าน : '+c.name+' ('+c.code+')\n';
+    t+='ผู้รับ : '+(c.ship_receiver||c.contact_name||'-');
+    const ph=c.ship_phone||c.phone;if(ph)t+='  โทร '+ph;
+    t+='\nวิธีส่ง : '+(c.delivery_method||'-');
+    if(c.receive_time)t+='\nเวลารับของ : '+c.receive_time;
+    if(c.map_link)t+='\nMap : '+c.map_link;
+    const addr=c.ship_address||c.billing_address;if(addr)t+='\nที่อยู่ : '+addr;
+    t+='\n──────────\nรายการ :';
+    ci.forEach(x=>{t+='\n'+x.name+' '+x.qty+' '+(x.unit||'');});
+    t+='\nรวม ฿'+fmt(data.total);
+    if(c.note)t+='\nหมายเหตุ : '+c.note;
+    await db.functions.invoke('line-push',{body:{to:gid,messages:[{type:'text',text:t}]}});
+  }catch(e){/* เงียบไว้ ไม่รบกวนลูกค้า */}
+}
+function backToShop(){
+  document.getElementById('success').classList.remove('show');
+  window.scrollTo(0,0);
+}
+
+async function loadHistory(){
+  const {data}=await db.from('orders')
+    .select('order_no,total,status,created_at')
+    .eq('customer_id',customer.id)
+    .order('created_at',{ascending:false}).limit(5);
+  if(!data||!data.length)return;
+  document.getElementById('hist').style.display='';
+  document.getElementById('hist-body').innerHTML=data.map(o=>{
+    const d=new Date(o.created_at).toLocaleDateString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+    const st=o.status==='billed'?'<span class="tag tag-billed">ออกบิลแล้ว</span>':'<span class="tag tag-new">รอทำบิล</span>';
+    return `<div class="hline"><span>${esc(o.order_no)}<br><small style="color:var(--muted)">${d}</small></span><span style="text-align:right">${fmt(o.total)}<br>${st}</span></div>`;
+  }).join('');
+}
+
+function subscribeStock(){
+  db.channel('stock-live')
+    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'products'},payload=>{
+      const it=items.find(x=>x.product_id===payload.new.id);
+      if(it){
+        it.stock_qty=payload.new.stock_qty;
+        if(cart[it.product_id]>it.stock_qty) cart[it.product_id]=Math.max(0,Math.floor(it.stock_qty));
+        render();
+      }
+    }).subscribe();
+}
+
+init();
+</script>
+</body>
+</html>
