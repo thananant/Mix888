@@ -151,9 +151,16 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 <!-- ============ ภาพรวม ============ -->
 <div class="page active" id="page-dashboard">
   <div class="pagehead"><h2>ภาพรวม</h2>
-    <label style="margin:0">จาก</label><input type="date" id="d-from" onchange="loadDashboard()">
-    <label style="margin:0">ถึง</label><input type="date" id="d-to" onchange="loadDashboard()">
-    <span class="date" id="dash-date"></span></div>
+    <div class="filters" style="margin-left:auto">
+      <button class="fbtn" id="rg-today" onclick="setRange('today')">วันนี้</button>
+      <button class="fbtn" id="rg-7" onclick="setRange('7')">7 วัน</button>
+      <button class="fbtn active" id="rg-month" onclick="setRange('month')">เดือนนี้</button>
+      <input type="month" id="d-month-pick" onchange="setRange('pick')" title="เลือกเดือน">
+      <label style="margin:0 0 0 6px">จาก</label><input type="date" id="d-from" onchange="setRange('custom')">
+      <label style="margin:0">ถึง</label><input type="date" id="d-to" onchange="setRange('custom')">
+    </div>
+  </div>
+  <div style="color:var(--muted);font-size:13px;margin:-6px 0 12px"><span id="dash-date"></span></div>
   <div class="stats">
     <div class="stat red"><div class="ic">💵</div><div><div class="l">ยอดขายวันนี้</div><div class="v" id="d-today">—</div></div></div>
     <div class="stat"><div class="ic">📈</div><div><div class="l">ยอดขายเดือนนี้</div><div class="v" id="d-month">—</div></div></div>
@@ -167,7 +174,12 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div class="card"><h3 class="ct">ยอดขายรายวัน (ช่วงที่เลือก)</h3><div class="chart-box"><canvas id="ch-sales"></canvas></div></div>
     <div class="card"><h3 class="ct">สินค้าขายดี (ช่วงที่เลือก)</h3><div class="chart-box"><canvas id="ch-top"></canvas></div></div>
   </div>
-  <div class="card" style="margin-top:16px"><h3 class="ct">ยอดขายแยกตามเซลล์ (ช่วงที่เลือก)</h3><div class="chart-box" style="height:220px"><canvas id="ch-sale"></canvas></div></div>
+  <div class="charts" style="margin-top:16px">
+    <div class="card"><h3 class="ct">ยอดขายแยกตามเซลล์ (ช่วงที่เลือก)</h3><div class="chart-box" style="height:260px"><canvas id="ch-sale"></canvas></div></div>
+    <div class="card"><h3 class="ct">สรุปยอดต่อเซลล์</h3><div style="overflow-x:auto"><table>
+      <thead><tr><th>เซลล์</th><th class="num">ออเดอร์</th><th class="num">ยอดขาย</th><th class="num">%</th></tr></thead>
+      <tbody id="d-bysale"></tbody></table></div></div>
+  </div>
   <div class="charts">
     <div class="card"><h3 class="ct">สินค้าขายออกวันนี้</h3><div style="overflow-x:auto"><table><thead><tr><th>สินค้า</th><th class="num">จำนวน</th><th class="num">ยอดขาย</th></tr></thead><tbody id="d-sold"></tbody></table></div></div>
     <div class="card"><h3 class="ct">ใกล้หมดอายุ (≤ 3 เดือน)</h3><div style="overflow-x:auto"><table><thead><tr><th>สินค้า</th><th class="num">รับเข้า</th><th>หมดอายุ</th></tr></thead><tbody id="d-exp"></tbody></table></div></div>
@@ -526,6 +538,30 @@ function showPage(p){
 
 /* ==================== ภาพรวม ==================== */
 let chSales=null, chTop=null, chSale=null;
+function ymd(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function setRange(mode){
+  const from=document.getElementById('d-from'), to=document.getElementById('d-to');
+  const monthPick=document.getElementById('d-month-pick');
+  const now=new Date();
+  const setActive=id=>document.querySelectorAll('#rg-today,#rg-7,#rg-month').forEach(b=>b.classList.toggle('active',b.id===id));
+  if(mode==='today'){
+    const t=ymd(now); from.value=t; to.value=t; monthPick.value=''; setActive('rg-today');
+  }else if(mode==='7'){
+    const s=new Date(now);s.setDate(now.getDate()-6);
+    from.value=ymd(s); to.value=ymd(now); monthPick.value=''; setActive('rg-7');
+  }else if(mode==='month'){
+    const s=new Date(now.getFullYear(),now.getMonth(),1);
+    from.value=ymd(s); to.value=ymd(now); monthPick.value=''; setActive('rg-month');
+  }else if(mode==='pick'){
+    const v=monthPick.value; if(!v)return;
+    const [y,m]=v.split('-').map(Number);
+    const s=new Date(y,m-1,1), e=new Date(y,m,0);
+    from.value=ymd(s); to.value=ymd(e); setActive('');
+  }else{ // custom (แก้ช่อง date เอง)
+    monthPick.value=''; setActive('');
+  }
+  loadDashboard();
+}
 function dashRange(){
   const now=new Date();
   const today=new Date(now);today.setHours(0,0,0,0);
@@ -533,14 +569,16 @@ function dashRange(){
   let to=document.getElementById('d-to').value;
   let dFrom,dTo;
   if(from){dFrom=new Date(from+'T00:00:00');}
-  else{dFrom=new Date(today);dFrom.setDate(today.getDate()-13);}   // ดีฟอลต์ 14 วัน
+  else{dFrom=new Date(today.getFullYear(),today.getMonth(),1);}   // ดีฟอลต์ = เดือนนี้
   if(to){dTo=new Date(to+'T23:59:59');}
   else{dTo=new Date(now);}
   return {today,dFrom,dTo};
 }
 async function loadDashboard(){
-  document.getElementById('dash-date').textContent=new Date().toLocaleDateString('th-TH',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   const {today,dFrom,dTo}=dashRange();
+  const fmtD=d=>d.toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit'});
+  const sameDay=dFrom.toDateString()===dTo.toDateString();
+  document.getElementById('dash-date').textContent='📅 ช่วงที่แสดง: '+(sameDay?fmtD(dFrom):fmtD(dFrom)+' – '+fmtD(dTo));
   const monthStart=new Date(new Date().getFullYear(),new Date().getMonth(),1);
 
   const [{data:ords},{data:items},{data:wastes},{data:exps}]=await Promise.all([
@@ -610,17 +648,24 @@ async function loadDashboard(){
         plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{family:'IBM Plex Sans Thai'}}}}}});
   }
 
-  // ยอดขายแยกเซลล์ (แท่ง)
+  // ยอดขายแยกเซลล์ (แท่ง + ตารางสรุป)
   const bySale={};
-  o.forEach(x=>{const s=x.customers?.sale_name||'ไม่ระบุ';bySale[s]=(bySale[s]||0)+Number(x.total);});
-  const se=Object.entries(bySale).sort((a,b)=>b[1]-a[1]);
+  o.forEach(x=>{const s=x.customers?.sale_name||'ไม่ระบุ';
+    (bySale[s]=bySale[s]||{amt:0,cnt:0});bySale[s].amt+=Number(x.total);bySale[s].cnt++;});
+  const se=Object.entries(bySale).sort((a,b)=>b[1].amt-a[1].amt);
+  const grand=se.reduce((s,[,v])=>s+v.amt,0);
   if(chSale)chSale.destroy();
   if(se.length){
     chSale=new Chart(document.getElementById('ch-sale'),{type:'bar',
-      data:{labels:se.map(s=>s[0]),datasets:[{data:se.map(s=>s[1]),backgroundColor:'#b91c1c',borderRadius:6}]},
+      data:{labels:se.map(s=>s[0]),datasets:[{data:se.map(s=>s[1].amt),backgroundColor:'#b91c1c',borderRadius:6}]},
       options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
         scales:{y:{beginAtZero:true,ticks:{callback:v=>'฿'+fmt0(v)}},x:{grid:{display:false}}}}});
   }
+  document.getElementById('d-bysale').innerHTML=se.length?
+    se.map(([nm,v])=>`<tr><td><b>${esc(nm)}</b></td><td class="num">${v.cnt}</td>
+      <td class="num">฿${fmt0(v.amt)}</td><td class="num" style="color:var(--muted)">${grand?Math.round(v.amt/grand*100):0}%</td></tr>`).join('')
+      +`<tr style="border-top:2px solid var(--line)"><td><b>รวม</b></td><td class="num"><b>${se.reduce((s,[,v])=>s+v.cnt,0)}</b></td><td class="num"><b>฿${fmt0(grand)}</b></td><td class="num">100%</td></tr>`
+    :'<tr><td colspan="4" class="empty">ไม่มียอดขายในช่วงนี้</td></tr>';
 
   // สินค้าขายออกวันนี้ (รายตัว)
   const soldToday={};
@@ -1978,7 +2023,7 @@ async function startApp(){
   loadRcvHistory();
   loadUsers();
   loadSettings();
-  loadDashboard();
+  setRange('month');
 }
 (function(){
   try{
