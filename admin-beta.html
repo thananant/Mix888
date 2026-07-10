@@ -1355,20 +1355,20 @@ async function drawBill(o,billNo){
   const custName=c.name+(c.code?'  ('+c.code+')':'');
   x.fillText(custName,PAD+70,y);
   // meta ขวา
-  const MX=Wmm-330;
+  const MX=Wmm-340, MV=Wmm-215;   // MX=ตำแหน่ง label, MV=ตำแหน่งค่า (เว้นห่างพอสำหรับ label ยาว)
   x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('วันที่:',MX,y);
   x.font='400 13.5px "IBM Plex Sans Thai"';
-  x.fillText(new Date().toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'}),MX+90,y);
+  x.fillText(new Date().toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'}),MV,y);
   y+=24;
   x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('ที่อยู่:',PAD,y);
   x.font='400 13px "IBM Plex Sans Thai"';
-  const addrLines=wrapText2(x,billAddr,300,'400 13px "IBM Plex Sans Thai"');
+  const addrLines=wrapText2(x,billAddr,MX-PAD-80,'400 13px "IBM Plex Sans Thai"');
   addrLines.slice(0,3).forEach((l,i)=>x.fillText(l,PAD+70,y+i*18));
   // meta ขวา ต่อ
-  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('เลขที่',MX,y);
-  x.font='400 13.5px "IBM Plex Sans Thai"';x.fillText(billNo,MX+90,y);
+  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('เลขที่:',MX,y);
+  x.font='400 13.5px "IBM Plex Sans Thai"';x.fillText(billNo,MV,y);
   x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('ผู้สร้างรายการ:',MX,y+24);
-  x.font='400 13.5px "IBM Plex Sans Thai"';x.fillText(info.creator,MX+90,y+24);
+  x.font='400 13.5px "IBM Plex Sans Thai"';x.fillText(info.creator,MV,y+24);
   const addrBlock=Math.max(addrLines.slice(0,3).length,1)*18;
   y+=addrBlock+6;
   if(c.tax_id){x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('เลขผู้เสียภาษี:',PAD,y);
@@ -1378,18 +1378,22 @@ async function drawBill(o,billNo){
 
   // ---------- ตารางสินค้า ----------
   y+=16;
-  const cX={no:PAD+4, img:PAD+34, code:PAD+92, name:PAD+180, qty:Wmm-320, unit:Wmm-250, price:Wmm-140, sum:R};
+  // ขอบขวาของแต่ละคอลัมน์ตัวเลข (right-aligned) — เว้นระยะไม่ให้ชน
+  const colQtyR = Wmm-290;   // ขอบขวาคอลัมน์จำนวน
+  const colPriceR = Wmm-135; // ขอบขวาคอลัมน์มูลค่าต่อหน่วย
+  const colSumR = R;         // ขอบขวาคอลัมน์รวม
+  const cX={no:PAD+6, img:PAD+30, code:PAD+90, name:PAD+178, nameEnd:Wmm-370};
   x.fillStyle='#111';x.lineWidth=1;
   x.strokeRect(PAD,y,Wmm-2*PAD,tableHeadH);
-  x.font='700 13px "IBM Plex Sans Thai"';x.fillStyle='#111';
+  x.font='700 12.5px "IBM Plex Sans Thai"';x.fillStyle='#111';
   const thY=y+29;
   x.textAlign='left';x.fillText('#',cX.no,thY);
   x.fillText('รหัสสินค้า',cX.code,thY);
-  x.textAlign='center';x.fillText('ชื่อสินค้า',(cX.name+cX.qty)/2,thY);
+  x.textAlign='center';x.fillText('ชื่อสินค้า',(cX.name+cX.nameEnd)/2,thY);
   x.textAlign='right';
-  x.fillText('จำนวน',cX.qty+56,thY);
-  x.fillText('มูลค่าต่อหน่วย',cX.price+70,thY);
-  x.fillText('รวม',cX.sum,thY);
+  x.fillText('จำนวน',colQtyR,thY);
+  x.fillText('มูลค่าต่อหน่วย',colPriceR,thY);
+  x.fillText('รวม',colSumR,thY);
   x.textAlign='left';
   y+=tableHeadH;
 
@@ -1397,22 +1401,23 @@ async function drawBill(o,billNo){
   items.forEach((it,i)=>{
     const ry=y+i*rowH;
     x.strokeStyle='#ccc';x.strokeRect(PAD,ry,Wmm-2*PAD,rowH);
+    const midY=ry+rowH/2+5;
     x.fillStyle='#111';x.textAlign='left';
-    x.fillText(String(i+1),cX.no,ry+rowH/2+5);
+    x.fillText(String(i+1),cX.no,midY);
     // รูปสินค้า
     const im=imgs[it.product_id];
     if(im){
-      const size=48, iy=ry+(rowH-size)/2;
+      const size=46, iy=ry+(rowH-size)/2;
       try{x.drawImage(im,cX.img,iy,size,size);}catch(e){}
     }
-    x.fillText(prodSku(it.product_id),cX.code,ry+rowH/2+5);
+    x.fillText(prodSku(it.product_id),cX.code,midY);
     // ชื่อ (ตัดบรรทัด)
-    const nmLines=wrapText2(x,it.products?.name||'',cX.qty-cX.name-16,'400 13px "IBM Plex Sans Thai"');
-    nmLines.slice(0,2).forEach((l,j)=>x.fillText(l,cX.name,ry+rowH/2+5+(j-((nmLines.length>1)?0.5:0))*17));
+    const nmLines=wrapText2(x,it.products?.name||'',cX.nameEnd-cX.name-10,'400 13px "IBM Plex Sans Thai"');
+    nmLines.slice(0,2).forEach((l,j)=>x.fillText(l,cX.name,midY+(j-((nmLines.length>1)?0.5:0))*17));
     x.textAlign='right';
-    x.fillText(Number(it.qty)+' '+(it.products?.unit||''),cX.qty+56,ry+rowH/2+5);
-    x.fillText(fmt(it.price),cX.price+70,ry+rowH/2+5);
-    x.fillText(fmt(it.amount),cX.sum,ry+rowH/2+5);
+    x.fillText(Number(it.qty)+' '+(it.products?.unit||''),colQtyR,midY);
+    x.fillText(fmt(it.price),colPriceR,midY);
+    x.fillText(fmt(it.amount),colSumR,midY);
     x.textAlign='left';
   });
   y+=bodyH;
@@ -1420,11 +1425,10 @@ async function drawBill(o,billNo){
   // แถวรวม
   const totQty=items.reduce((s,it)=>s+Number(it.qty),0);
   x.strokeStyle='#111';x.strokeRect(PAD,y,Wmm-2*PAD,44);
-  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillStyle='#111';x.textAlign='center';
-  x.fillText('รวมทั้งหมด',(PAD+cX.qty)/2+40,y+28);
-  x.textAlign='right';
-  x.fillText(String(totQty),cX.qty+56,y+28);
-  x.fillText(fmt(o.total),cX.sum,y+28);
+  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillStyle='#111';x.textAlign='right';
+  x.fillText('รวมทั้งหมด',colQtyR-70,y+28);
+  x.fillText(String(totQty),colQtyR,y+28);
+  x.fillText(fmt(o.total),colSumR,y+28);
   x.textAlign='left';
   y+=44;
 
