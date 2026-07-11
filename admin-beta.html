@@ -293,9 +293,9 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div class="row" style="margin-top:10px">
       <div><label>รหัสไปรษณีย์</label><input id="cb-postcode" inputmode="numeric" maxlength="5" style="width:110px" placeholder="10310" oninput="this.value=this.value.replace(/\D/g,'');postcodeLookup('cb')"></div>
-      <div style="flex:1;min-width:140px"><label>ตำบล/แขวง</label><select id="cb-subdistrict" style="width:100%"><option value="">—</option></select></div>
-      <div style="min-width:130px"><label>อำเภอ/เขต</label><input id="cb-district" style="width:100%" readonly></div>
-      <div style="min-width:130px"><label>จังหวัด</label><input id="cb-province" style="width:100%" readonly></div>
+      <div style="flex:1;min-width:140px"><label>ตำบล/แขวง</label><input id="cb-subdistrict" list="cb-sub-dl" style="width:100%" placeholder="เลือกหรือพิมพ์เอง" onchange="onSubdistrict('cb')"><datalist id="cb-sub-dl"></datalist></div>
+      <div style="min-width:130px"><label>อำเภอ/เขต</label><input id="cb-district" style="width:100%" placeholder="พิมพ์เองได้"></div>
+      <div style="min-width:130px"><label>จังหวัด</label><input id="cb-province" style="width:100%" placeholder="พิมพ์เองได้"></div>
     </div>
 
     <h3 class="ct" style="margin-top:16px">🚚 ข้อมูลจัดส่ง <button class="btn-g mini" style="margin-left:8px;vertical-align:middle" onclick="copyBillToShip()">คัดลอกจากข้อมูลบิล</button></h3>
@@ -312,9 +312,9 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div class="row" style="margin-top:10px">
       <div><label>รหัสไปรษณีย์</label><input id="cs-postcode" inputmode="numeric" maxlength="5" style="width:110px" placeholder="10310" oninput="this.value=this.value.replace(/\D/g,'');postcodeLookup('cs')"></div>
-      <div style="flex:1;min-width:140px"><label>ตำบล/แขวง</label><select id="cs-subdistrict" style="width:100%"><option value="">—</option></select></div>
-      <div style="min-width:130px"><label>อำเภอ/เขต</label><input id="cs-district" style="width:100%" readonly></div>
-      <div style="min-width:130px"><label>จังหวัด</label><input id="cs-province" style="width:100%" readonly></div>
+      <div style="flex:1;min-width:140px"><label>ตำบล/แขวง</label><input id="cs-subdistrict" list="cs-sub-dl" style="width:100%" placeholder="เลือกหรือพิมพ์เอง" onchange="onSubdistrict('cs')"><datalist id="cs-sub-dl"></datalist></div>
+      <div style="min-width:130px"><label>อำเภอ/เขต</label><input id="cs-district" style="width:100%" placeholder="พิมพ์เองได้"></div>
+      <div style="min-width:130px"><label>จังหวัด</label><input id="cs-province" style="width:100%" placeholder="พิมพ์เองได้"></div>
     </div>
     <div class="row" style="margin-top:10px">
       <div style="flex:2;min-width:240px"><label>Google Map Link</label><input id="c-map" style="width:100%" placeholder="https://maps.app.goo.gl/…"></div>
@@ -463,9 +463,9 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <h3 class="ct" style="margin-top:14px">📍 ที่อยู่</h3>
     <div class="row">
       <div><label>รหัสไปรษณีย์</label><input id="w-postcode" inputmode="numeric" maxlength="5" style="width:110px" placeholder="10310" oninput="this.value=this.value.replace(/\D/g,'');postcodeLookup('w')"></div>
-      <div style="flex:1;min-width:150px"><label>ตำบล/แขวง</label><select id="w-subdistrict" style="width:100%"><option value="">—</option></select></div>
-      <div style="min-width:140px"><label>อำเภอ/เขต</label><input id="w-district" style="width:100%" readonly></div>
-      <div style="min-width:140px"><label>จังหวัด</label><input id="w-province" style="width:100%" readonly></div>
+      <div style="flex:1;min-width:150px"><label>ตำบล/แขวง</label><input id="w-subdistrict" list="w-sub-dl" style="width:100%" placeholder="เลือกหรือพิมพ์เอง" onchange="onSubdistrict('w')"><datalist id="w-sub-dl"></datalist></div>
+      <div style="min-width:140px"><label>อำเภอ/เขต</label><input id="w-district" style="width:100%" placeholder="พิมพ์เองได้"></div>
+      <div style="min-width:140px"><label>จังหวัด</label><input id="w-province" style="width:100%" placeholder="พิมพ์เองได้"></div>
     </div>
     <div class="row" style="margin-top:10px">
       <div style="flex:1;min-width:150px"><label>ชื่อสถานที่</label><input id="w-addrname" style="width:100%" placeholder="เช่น โกดัง A"></div>
@@ -1032,18 +1032,11 @@ function fillAddr(prefix,a){
   document.getElementById(prefix+'-soi').value=a.soi||'';
   document.getElementById(prefix+'-road').value=a.road||'';
   document.getElementById(prefix+'-postcode').value=a.postcode||'';
-  if(a.postcode){
-    postcodeLookup(prefix);
-    setTimeout(()=>{
-      document.getElementById(prefix+'-subdistrict').value=a.subdistrict||'';
-      document.getElementById(prefix+'-district').value=a.district||'';
-      document.getElementById(prefix+'-province').value=a.province||'';
-    },30);
-  }else{
-    document.getElementById(prefix+'-subdistrict').innerHTML='<option value="">—</option>';
-    document.getElementById(prefix+'-district').value=a.district||'';
-    document.getElementById(prefix+'-province').value=a.province||'';
-  }
+  if(a.postcode) postcodeLookup(prefix);  // เติม datalist ให้
+  // ค่าที่บันทึกไว้เดิม override เสมอ (ผู้ใช้เคยกรอก/แก้ไว้)
+  document.getElementById(prefix+'-subdistrict').value=a.subdistrict||'';
+  document.getElementById(prefix+'-district').value=a.district||'';
+  document.getElementById(prefix+'-province').value=a.province||'';
 }
 // ประกอบที่อยู่บรรทัดเดียวจากช่องแยก
 function composeAddr(prefix){
@@ -1058,10 +1051,10 @@ function resetCustomerForm(){
   document.getElementById('c-code-wrap').style.display='none';
   ['c-prefix','c-code','c-name','c-sale','c-line','c-contact','c-phone',
    'c-shipshop','c-receiver','c-shipphone','c-tax','c-map','c-rtime','c-note',
-   'cb-name','cb-no','cb-soi','cb-road','cb-postcode','cb-district','cb-province',
-   'cs-name','cs-no','cs-soi','cs-road','cs-postcode','cs-district','cs-province'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('cb-subdistrict').innerHTML='<option value="">—</option>';
-  document.getElementById('cs-subdistrict').innerHTML='<option value="">—</option>';
+   'cb-name','cb-no','cb-soi','cb-road','cb-postcode','cb-subdistrict','cb-district','cb-province',
+   'cs-name','cs-no','cs-soi','cs-road','cs-postcode','cs-subdistrict','cs-district','cs-province'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('cb-sub-dl').innerHTML='';
+  document.getElementById('cs-sub-dl').innerHTML='';
   document.getElementById('c-pgroup').value='base';
   document.getElementById('c-delivery').value='Lalamove';
 }
@@ -1069,16 +1062,11 @@ function copyBillToShip(){
   document.getElementById('c-shipshop').value=document.getElementById('c-name').value;
   document.getElementById('c-receiver').value=document.getElementById('c-contact').value;
   document.getElementById('c-shipphone').value=document.getElementById('c-phone').value;
-  // คัดลอกที่อยู่แยกช่อง
-  ['name','no','soi','road','postcode'].forEach(f=>{
+  // คัดลอกที่อยู่แยกช่องครบทุกช่อง
+  ['name','no','soi','road','postcode','subdistrict','district','province'].forEach(f=>{
     document.getElementById('cs-'+f).value=document.getElementById('cb-'+f).value;
   });
-  const pc=document.getElementById('cb-postcode').value;
-  if(pc){postcodeLookup('cs');setTimeout(()=>{
-    document.getElementById('cs-subdistrict').value=document.getElementById('cb-subdistrict').value;
-    document.getElementById('cs-district').value=document.getElementById('cb-district').value;
-    document.getElementById('cs-province').value=document.getElementById('cb-province').value;
-  },30);}
+  if(document.getElementById('cb-postcode').value) postcodeLookup('cs'); // เติม datalist ให้ฝั่งจัดส่ง
 }
 function updateCodePreview(){
   const el=document.getElementById('c-prefix'); if(!el)return;
@@ -2145,23 +2133,40 @@ async function loadWhList(){
 }
 
 // auto-fill รหัสไปรษณีย์ (prefix = 'w' สำหรับหน้าคลัง)
+// เก็บ mapping รหัส→ตำบล ไว้ให้ onSubdistrict ใช้ (แยกตาม prefix)
+const _pcRows={};
 function postcodeLookup(prefix){
   const pc=document.getElementById(prefix+'-postcode').value.trim();
+  const dl=document.getElementById(prefix+'-sub-dl');
   const sub=document.getElementById(prefix+'-subdistrict');
   const dis=document.getElementById(prefix+'-district');
   const prov=document.getElementById(prefix+'-province');
-  if(pc.length!==5||typeof THAI_POSTCODE==='undefined'){return;}
+  if(typeof THAI_POSTCODE==='undefined')return;
+  if(pc.length!==5){ if(dl)dl.innerHTML=''; return; }
   const rows=THAI_POSTCODE[pc];
-  if(!rows||!rows.length){sub.innerHTML='<option value="">ไม่พบรหัสนี้</option>';dis.value='';prov.value='';return;}
-  // rows = [[tambon,amphoe,province],...]
-  sub.innerHTML=rows.map(r=>`<option value="${esc(r[0])}">${esc(r[0])}</option>`).join('');
+  _pcRows[prefix]=rows||null;
+  if(!rows||!rows.length){
+    // หาไม่เจอ → ไม่ล้างของเดิม ให้ผู้ใช้พิมพ์เอง
+    if(dl)dl.innerHTML='';
+    return;
+  }
+  // rows = [[tambon,amphoe,province],...] → ใส่เป็นตัวเลือกใน datalist
+  dl.innerHTML=rows.map(r=>`<option value="${esc(r[0])}">`).join('');
+  // เติมอำเภอ/จังหวัดให้อัตโนมัติ (ผู้ใช้แก้ทับได้)
   dis.value=rows[0][1];
   prov.value=rows[0][2];
-  // ถ้าเลือกตำบลแล้ว amphoe อาจต่างกัน (rare) → อัพเดตตามตำบลที่เลือก
-  sub.onchange=()=>{
-    const sel=rows.find(r=>r[0]===sub.value);
-    if(sel){dis.value=sel[1];prov.value=sel[2];}
-  };
+  // ถ้ามีตำบลเดียว เติมให้เลย
+  if(rows.length===1) sub.value=rows[0][0];
+}
+// เมื่อผู้ใช้เลือก/พิมพ์ตำบล → ถ้าตรงกับในฐานข้อมูล เติมอำเภอ/จังหวัดให้
+function onSubdistrict(prefix){
+  const rows=_pcRows[prefix];if(!rows)return;
+  const val=document.getElementById(prefix+'-subdistrict').value.trim();
+  const sel=rows.find(r=>r[0]===val);
+  if(sel){
+    document.getElementById(prefix+'-district').value=sel[1];
+    document.getElementById(prefix+'-province').value=sel[2];
+  }
 }
 
 async function loadWarehouse(){
@@ -2254,16 +2259,17 @@ function editWarehouse(id){
   document.getElementById('w-no').value=w.addr_no||'';
   document.getElementById('w-soi').value=w.addr_soi||'';
   document.getElementById('w-road').value=w.addr_road||'';
-  if(w.postcode){postcodeLookup('w');setTimeout(()=>{document.getElementById('w-subdistrict').value=w.subdistrict||'';
-    document.getElementById('w-district').value=w.district||'';document.getElementById('w-province').value=w.province||'';},50);}
-  else{document.getElementById('w-district').value=w.district||'';document.getElementById('w-province').value=w.province||'';}
+  if(w.postcode) postcodeLookup('w');
+  document.getElementById('w-subdistrict').value=w.subdistrict||'';
+  document.getElementById('w-district').value=w.district||'';
+  document.getElementById('w-province').value=w.province||'';
   window.scrollTo({top:document.getElementById('wh-form-title').offsetTop-80,behavior:'smooth'});
 }
 function resetWhForm(){
   editWhId=null;
   document.getElementById('wh-form-title').textContent='เพิ่มคลัง';
-  ['w-name','w-contact','w-phone','w-map','w-postcode','w-addrname','w-no','w-soi','w-road','w-district','w-province'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('w-subdistrict').innerHTML='<option value="">—</option>';
+  ['w-name','w-contact','w-phone','w-map','w-postcode','w-addrname','w-no','w-soi','w-road','w-subdistrict','w-district','w-province'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('w-sub-dl').innerHTML='';
 }
 async function saveWarehouse(){
   const rec={
