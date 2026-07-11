@@ -586,6 +586,17 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 <canvas id="cv" style="display:none"></canvas>
 <div id="toast"></div>
 
+<!-- Modal: สต๊อกแยกคลัง -->
+<div id="stock-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)closeStockDetail()">
+  <div style="background:#fff;border-radius:16px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,.2)">
+    <div style="padding:18px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+      <h3 id="sd-title" style="margin:0;font-size:17px">สต๊อกแยกคลัง</h3>
+      <button class="btn-g mini" onclick="closeStockDetail()">✕ ปิด</button>
+    </div>
+    <div id="sd-body" style="padding:18px 20px"></div>
+  </div>
+</div>
+
 <script>
 /* ================= ตั้งค่า ================= */
 const SUPABASE_URL = 'https://eqbzpgynzgdwvouuzfwt.supabase.co';
@@ -823,7 +834,7 @@ function renderProducts(){
       <td><b>${esc(p.sku)}</b></td><td>${esc(p.name)}</td>
       <td>${esc(p.unit)}${p.pack_info?'<div class="pack">'+esc(p.pack_info)+'</div>':''}</td>
       <td class="num">${fmt(p.base_price)}</td>
-      <td class="num">${Number(p.stock_qty||0)}</td>
+      <td class="num"><a href="javascript:void(0)" onclick="showStockDetail(${p.id})" style="color:var(--accent);font-weight:600;text-decoration:underline dotted">${Number(p.stock_qty||0)}</a></td>
       <td class="num" style="color:var(--warn)">${Number(p.reserved_qty||0)}</td>
       <td class="num"><b>${avail}</b></td><td>${tag}</td>
       <td style="white-space:nowrap">${actions}</td></tr>`;
@@ -942,6 +953,67 @@ async function hardDelProduct(id){
   if(error){toast('ลบถาวรไม่ได้ — สินค้ามีประวัติการขายอยู่ ต้องเก็บไว้เพื่ออ้างอิงบิลเก่า');return;}
   toast('ลบถาวรแล้ว');
   loadProducts();
+}
+// ---- Popup สต๊อกแยกคลัง + แนะนำเบิก (FEFO) ----
+function closeStockDetail(){document.getElementById('stock-modal').style.display='none';}
+async function showStockDetail(pid){
+  const p=products.find(x=>x.id===pid);if(!p)return;
+  document.getElementById('sd-title').textContent='สต๊อก: '+p.name;
+  const body=document.getElementById('sd-body');
+  body.innerHTML='<div class="empty">กำลังโหลด…</div>';
+  document.getElementById('stock-modal').style.display='flex';
+
+  const [{data:st},{data:exp}]=await Promise.all([
+    db.from('stock').select('warehouse_id,qty').eq('product_id',pid),
+    db.from('v_product_expiry').select('warehouse_id,nearest_expiry').eq('product_id',pid)
+  ]);
+  const expMap={};(exp||[]).forEach(e=>expMap[e.warehouse_id]=e.nearest_expiry);
+  // รวมข้อมูลต่อคลัง (เฉพาะที่มีของ)
+  let rows=(st||[]).filter(s=>Number(s.qty)>0).map(s=>{
+    const w=whList.find(x=>x.id===s.warehouse_id)||{name:'คลัง #'+s.warehouse_id};
+    return {wid:s.warehouse_id,name:w.name,qty:Number(s.qty),exp:expMap[s.warehouse_id]||null};
+  });
+
+  if(!rows.length){body.innerHTML='<div class="empty">สินค้านี้ไม่มีสต๊อกในคลังใดเลย</div>';return;}
+
+  // แนะนำเบิก: คลังที่มี exp เร็วสุดก่อน (FEFO) → คลังที่มี exp มาก่อนคลังไม่มี exp → เหลือเรียงตามชื่อ
+  const ranked=[...rows].sort((a,b)=>{
+    if(a.exp&&b.exp)return new Date(a.exp)-new Date(b.exp);
+    if(a.exp&&!b.exp)return -1;
+    if(!a.exp&&b.exp)return 1;
+    return b.qty-a.qty;
+  });
+  const pick=ranked[0];
+  const total=rows.reduce((s,r)=>s+r.qty,0);
+
+  const fmtExp=d=>{
+    if(!d)return '<span style="color:var(--muted)">— ไม่มีข้อมูล —</span>';
+    const dt=new Date(d);const days=Math.ceil((dt-Date.now())/86400000);
+    const s=dt.toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit'});
+    const cls=days<0?'tag-out':days<=30?'tag-out':days<=90?'tag-low':'tag-ok';
+    const lbl=days<0?'หมดอายุแล้ว':'อีก '+days+' วัน';
+    return s+' <span class="tag '+cls+'">'+lbl+'</span>';
+  };
+
+  body.innerHTML=`
+    <div style="background:var(--accent-soft);border:1px solid var(--accent);border-radius:10px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:13px;color:var(--accent);font-weight:600">💡 แนะนำเบิกจาก</div>
+      <div style="font-size:16px;font-weight:700;margin-top:2px">${esc(pick.name)}</div>
+      <div style="font-size:13px;color:#5c4a42;margin-top:2px">
+        ${pick.exp?'หมดอายุเร็วสุด '+fmtExp(pick.exp)+' — เบิกก่อนเพื่อลดของหมดอายุ':'ยังไม่มีวันหมดอายุบันทึกไว้ — เบิกจากคลังนี้ได้ (มี '+pick.qty+' '+esc(p.unit)+')'}
+      </div>
+    </div>
+    <table style="width:100%">
+      <thead><tr><th>คลัง</th><th class="num">คงเหลือ</th><th>หมดอายุใกล้สุด</th></tr></thead>
+      <tbody>${ranked.map((r,i)=>`<tr${i===0?' style="background:var(--accent-soft)"':''}>
+        <td><b>${esc(r.name)}</b>${i===0?' <span class="tag tag-ov">เบิกก่อน</span>':''}</td>
+        <td class="num"><b>${r.qty}</b> ${esc(p.unit)}</td>
+        <td style="font-size:13px">${fmtExp(r.exp)}</td>
+      </tr>`).join('')}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--line)"><td><b>รวมทุกคลัง</b></td><td class="num"><b>${total}</b> ${esc(p.unit)}</td><td></td></tr></tfoot>
+    </table>
+    <p class="hint" style="margin-top:12px">การแนะนำใช้หลัก FEFO (First-Expired-First-Out) — เบิกของที่หมดอายุก่อน เพื่อลดสินค้าค้างหมดอายุ</p>
+  `;
 }
 async function wasteProduct(id){
   const p=products.find(x=>x.id===id);if(!p)return;
