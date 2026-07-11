@@ -416,6 +416,12 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div class="row" style="align-items:center">
       <div style="flex:1;min-width:220px"><label>เลือกลูกค้า</label><select id="pr-customer" style="width:100%" onchange="loadPricing()"></select></div>
       <input id="pr-search" placeholder="ค้นหาสินค้า…" style="flex:1;min-width:170px" oninput="renderPricing()">
+      <div><label>ประเภท SKU</label><select id="pr-suffix" onchange="renderPricing()">
+        <option value="all">ทั้งหมด</option>
+        <option value="none">ยกลัง (ไม่มีตัวต่อท้าย)</option>
+        <option value="S">ปลีก (ลงท้าย S)</option>
+        <option value="T">ลงท้าย T</option>
+      </select></div>
       <button class="btn-g mini" onclick="toggleShown(true)">✓ เลือกที่แสดง</button>
       <button class="btn-g mini" onclick="toggleShown(false)">✗ เอาออกที่แสดง</button>
       <button class="btn-p" id="pr-save" onclick="savePricing()" disabled>บันทึก (<span id="pr-changes">0</span>)</button>
@@ -1579,13 +1585,28 @@ function effPrice(p,grp){
   const v = grp==='r20'?p.price_r20 : grp==='r50'?p.price_r50 : grp==='upc'?p.price_upc : null;
   return (v!=null&&v!=='')?Number(v):Number(p.base_price);
 }
+function skuSuffix(sku){
+  const m=String(sku||'').match(/^[A-Z]+\d+([A-Z]*)$/);
+  return m?(m[1]||''):'';
+}
+function prFilterList(){
+  const q=(document.getElementById('pr-search').value||'').toLowerCase();
+  const sf=document.getElementById('pr-suffix').value;
+  return products.filter(p=>{
+    if(p.active===false)return false;
+    if(q&&!(p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q)))return false;
+    if(sf==='all')return true;
+    const s=skuSuffix(p.sku);
+    if(sf==='none')return s==='';
+    return s===sf;
+  });
+}
 function renderPricing(){
   const cid=document.getElementById('pr-customer').value;
   if(!cid)return;
   const cust=customers.find(c=>String(c.id)===String(cid));
   const grp=cust?cust.price_group||'base':'base';
-  const q=(document.getElementById('pr-search').value||'').toLowerCase();
-  const list=products.filter(p=>p.active!==false&&(!q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q)));
+  const list=prFilterList();
   let onCount=0;
   products.forEach(p=>{ if(getState(p.id).on) onCount++; });
   const grpLabel={base:'ราคากลาง',r20:'เรท 20 ลัง',r50:'เรท 50 ลัง',upc:'รวมส่งตจว'}[grp];
@@ -1616,8 +1637,7 @@ function markPrice(pid,val){
   updateChangeCount(); renderPricing();
 }
 function toggleShown(on){
-  const q=(document.getElementById('pr-search').value||'').toLowerCase();
-  const list=products.filter(p=>p.active!==false&&(!q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q)));
+  const list=prFilterList();
   list.forEach(p=>{
     const st=getState(p.id);
     if(st.on!==on) pending[p.id]={on:on, price:st.price};
