@@ -1816,24 +1816,10 @@ async function drawBill(o,billNo){
 
   // ---------- หัวบิล ----------
   let y=54;
-  x.fillStyle='#111';x.textAlign='left';
-  x.font='700 22px "IBM Plex Sans Thai"';
-  x.fillText(info.shop,PAD+52,y-6);
-  x.font='400 13px "IBM Plex Sans Thai"';x.fillStyle='#555';
-  x.fillText('โทรศัพท์: '+info.phone+(info.email?'   อีเมล: '+info.email:''),PAD+52,y+16);
-  if(info.taxid){x.fillText('เลขผู้เสียภาษี: '+info.taxid,PAD+52,y+34);}
-  // โลโก้ Mix Fresh 168
-  if(window._billLogo){
-    try{x.drawImage(window._billLogo,PAD-2,y-26,46,46);}catch(e){}
-  }else{
-    x.fillStyle='#b91c1c';x.beginPath();x.arc(PAD+22,y-2,20,0,7);x.fill();
-    x.fillStyle='#fff';x.font='700 20px "IBM Plex Sans Thai"';x.textAlign='center';x.fillText('M',PAD+22,y+5);
-  }
-  x.textAlign='left';
 
   // ชื่อเอกสาร + บาร์โค้ด (ขวาบน)
   x.fillStyle='#111';x.textAlign='right';x.font='700 26px "IBM Plex Sans Thai"';
-  x.fillText('ใบแจ้งหนี้/วางบิล',R,y-2);
+  x.fillText('บิลเงินสด',R,y-2);
   if(barcode){const bi=await loadImg(barcode); if(bi){const bw=230,bh=44;x.drawImage(bi,R-bw,y+12,bw,bh);}}
   x.font='400 12px "IBM Plex Sans Thai"';x.fillStyle='#333';
   x.fillText(billNo,R,y+74);
