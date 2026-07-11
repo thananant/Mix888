@@ -1461,7 +1461,12 @@ async function drawBill(o,billNo){
   });
   x.textAlign='left';
 
-  return {cv, contentH:(y+110)};
+  // เวอร์ชันบิล (ไว้เช็คว่าใช้ไฟล์ใหม่หรือเก่า)
+  x.font='400 9px "IBM Plex Sans Thai"';x.fillStyle='#bbb';x.textAlign='right';
+  x.fillText('bill v2 · '+new Date().toLocaleTimeString('th-TH'),R,y+118);
+  x.textAlign='left';
+
+  return {cv, contentH:(y+120)};
 }
 function prodSku(pid){const p=products.find(x=>x.id===pid);return p?p.sku:'';}
 function wrapText2(ctx,text,maxW,font){
