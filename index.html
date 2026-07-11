@@ -223,6 +223,7 @@ async function init(){
   document.getElementById('cartbar').style.display='flex';
   await loadCatalog();
   subscribeStock();
+  subscribeOrders();
 }
 
 async function loadCatalog(){
@@ -361,7 +362,7 @@ async function notifyCustomerOrder(data,ci){
     const gid=customer.line_group_id;if(!gid)return;
     let t='✅ รับออเดอร์ '+data.order_no+' เรียบร้อยแล้ว\nสถานะ: กำลังดำเนินการ กำลังจัดเตรียมสินค้า\n──────────\nรายการ :';
     ci.forEach(x=>{t+='\n'+x.name+' '+x.qty+' '+(x.unit||'');});
-    t+='\nรวม ฿'+fmt(data.total)+'\n\nขอบคุณที่สั่งสินค้าครับ 🙏';
+    t+='\nรวม '+fmt(data.total)+'\n\nขอบคุณที่สั่งสินค้าครับ 🙏';
     await db.functions.invoke('line-push',{body:{to:gid,messages:[{type:'text',text:t}]}});
   }catch(e){/* เงียบไว้ */}
 }
@@ -381,7 +382,7 @@ async function notifyCentral(data,ci){
     const addr=c.ship_address||c.billing_address;if(addr)t+='\nที่อยู่ : '+addr;
     t+='\n──────────\nรายการ :';
     ci.forEach(x=>{t+='\n'+x.name+' '+x.qty+' '+(x.unit||'');});
-    t+='\nรวม ฿'+fmt(data.total);
+    t+='\nรวม '+fmt(data.total);
     if(c.note)t+='\nหมายเหตุ : '+c.note;
     await db.functions.invoke('line-push',{body:{to:gid,messages:[{type:'text',text:t}]}});
   }catch(e){/* เงียบไว้ ไม่รบกวนลูกค้า */}
@@ -442,7 +443,7 @@ function renderHistory(){
     return true;
   });
   const total=list.reduce((s,o)=>s+Number(o.total),0);
-  document.getElementById('hist-summary').textContent=list.length+' ออเดอร์ · รวม ฿'+fmt(total);
+  document.getElementById('hist-summary').textContent=list.length+' ออเดอร์ · รวม '+fmt(total);
   const body=document.getElementById('hist-body');
   if(!list.length){body.innerHTML='<div class="empty">ไม่มีออเดอร์ในช่วงนี้</div>';return;}
   body.innerHTML=list.map(o=>{
@@ -452,7 +453,7 @@ function renderHistory(){
     if(s.cancelled){
       return `<div class="ocard" style="opacity:.65">
         <div class="oh"><div><div class="ono">${esc(o.order_no)}</div><div class="od">${d}</div></div>
-          <div class="oa">฿${fmt(o.total)}<br><span class="tag tag-new" style="background:var(--danger-soft);color:var(--danger)">ยกเลิกแล้ว</span></div></div></div>`;
+          <div class="oa">${fmt(o.total)}<br><span class="tag tag-new" style="background:var(--danger-soft);color:var(--danger)">ยกเลิกแล้ว</span></div></div></div>`;
     }
     const step=(label,done,icon)=>`<div class="step ${done?'done':'wait'}"><div class="dot">${done?'✓':icon}</div>${label}</div>`;
     // ป้ายสถานะล่าสุด (เป็นคำ)
@@ -468,19 +469,31 @@ function renderHistory(){
     return `<div class="ocard">
       <div class="oh">
         <div><div class="ono">${esc(o.order_no)}</div><div class="od">${d}${bill?' · บิล '+esc(bill.bill_no):''}</div></div>
-        <div class="oa">฿${fmt(o.total)}</div>
+        <div class="oa">${fmt(o.total)}</div>
       </div>
       <div class="statusrow"><span class="statusbadge" style="background:${statusColor}">${statusLabel}</span>${payTag}</div>
       <div class="steps">
         ${step('รับออเดอร์',s.ordered,'1')}
         ${step('ออกบิล',s.billed,'2')}
-        ${step('รอจัดส่ง',s.shipped,'3')}
-        ${step('รับชำระ',s.paid,'4')}
+        ${step('จัดส่ง',s.shipped,'3')}
+        ${step('ชำระเรียบร้อย',s.paid,'4')}
       </div>
     </div>`;
   }).join('');
 }
 
+// realtime สถานะออเดอร์/บิล — อัปเดตหน้าประวัติทันทีเมื่อร้านออกบิล/จัดส่ง/รับชำระ
+let histTimer=null;
+function refreshHistorySoon(){
+  clearTimeout(histTimer);
+  histTimer=setTimeout(()=>{ loadHistory(); },400);
+}
+function subscribeOrders(){
+  db.channel('orders-live')
+    .on('postgres_changes',{event:'*',schema:'public',table:'orders',filter:'customer_id=eq.'+customer.id},refreshHistorySoon)
+    .on('postgres_changes',{event:'*',schema:'public',table:'bills',filter:'customer_id=eq.'+customer.id},refreshHistorySoon)
+    .subscribe();
+}
 function subscribeStock(){
   db.channel('stock-live')
     .on('postgres_changes',{event:'UPDATE',schema:'public',table:'products'},payload=>{
