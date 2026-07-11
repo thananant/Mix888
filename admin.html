@@ -1411,6 +1411,33 @@ async function saveCustomer(){
     rec.code=prefix+String(n).padStart(5,'0');
   }
 
+  // ---------- เช็คข้อมูลซ้ำกับลูกค้าของทุกเซลล์ (เฉพาะตอนเพิ่มใหม่) ----------
+  if(!editCustomerId){
+    const nrm=s=>String(s||'').toLowerCase().replace(/[\s\-]/g,'');
+    const newName=nrm(rec.name), newContact=nrm(rec.contact_name);
+    const newPhones=[phone,shipPhone].filter(Boolean);
+    const newAddr=nrm(rec.billing_address), newShipAddr=nrm(composeAddr('cs'));
+    const dups=[];
+    for(const c of customers){
+      const why=[];
+      if(newName&&nrm(c.name)===newName)why.push('ชื่อร้าน');
+      if(newContact&&nrm(c.contact_name)===newContact)why.push('ชื่อผู้ติดต่อ');
+      for(const p of newPhones){if(p&&(c.phone===p||c.ship_phone===p)){why.push('เบอร์โทร');break;}}
+      const ca=nrm(c.billing_address), csa=nrm(c.ship_address);
+      if((newAddr&&(ca===newAddr||csa===newAddr))||(newShipAddr&&(ca===newShipAddr||csa===newShipAddr)))why.push('ที่อยู่');
+      if(why.length){
+        const sn=saleName(c.sale_id)||c.sale_name||'ไม่ระบุเซลล์';
+        dups.push('• '+why.join(', ')+' ซ้ำกับ ['+c.code+' · '+c.name+'] ของเซลล์ '+sn);
+      }
+    }
+    if(dups.length){
+      const msg='⚠️ พบข้อมูลซ้ำกับลูกค้าที่มีอยู่:\n\n'+dups.slice(0,6).join('\n')
+        +(dups.length>6?'\n…และอีก '+(dups.length-6)+' ราย':'')
+        +'\n\nยังยืนยันจะเพิ่มลูกค้า "'+rec.name+'" ใช่ไหม?';
+      if(!confirm(msg))return;
+    }
+  }
+
   const q=editCustomerId?db.from('customers').update(rec).eq('id',editCustomerId)
                         :db.from('customers').insert(rec);
   const {error}=await q;
