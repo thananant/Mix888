@@ -77,6 +77,11 @@ main{max-width:640px;margin:0 auto;padding:12px}
 .ocard .oa{font-weight:700;font-size:16px;white-space:nowrap}
 .oitems{font-size:13px;color:#5c4a42;margin:8px 0;padding:8px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 .oitems div{display:flex;justify-content:space-between;padding:2px 0}
+.statusrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 4px}
+.statusbadge{color:#fff;font-size:12.5px;font-weight:600;padding:3px 12px;border-radius:99px}
+.paytag{font-size:12px;font-weight:600;padding:3px 10px;border-radius:99px}
+.paytag.paid{background:#e1f5ee;color:#0f6e56}
+.paytag.unpaid{background:var(--warn-soft);color:var(--warn)}
 .steps{display:flex;gap:0;margin-top:10px}
 .step{flex:1;text-align:center;position:relative;font-size:11px;color:#c3b4ab}
 .step::before{content:'';position:absolute;top:11px;left:-50%;width:100%;height:2px;background:#eee;z-index:0}
@@ -197,7 +202,7 @@ function showError(msg){
 async function init(){
   if(!token){showError('ลิงก์ไม่ครบถ้วน กรุณาใช้ลิงก์ที่ทางร้านส่งให้ในกลุ่ม LINE');return;}
   const {data,error}=await db.from('customers')
-    .select('id,code,name,sale_name,contact_name,phone,billing_address,map_link,receive_time,note,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address')
+    .select('id,code,name,line_group_id,sale_name,contact_name,phone,billing_address,map_link,receive_time,note,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address')
     .eq('order_token',token).eq('active',true).maybeSingle();
   if(error||!data){showError('ลิงก์ไม่ถูกต้องหรือถูกยกเลิกแล้ว กรุณาติดต่อทางร้าน');return;}
   customer=data;
@@ -319,8 +324,19 @@ async function placeOrder(){
   document.getElementById('s-total').textContent=fmt(data.total);
   document.getElementById('success').classList.add('show');
   notifyCentral(data,ci);
+  notifyCustomerOrder(data,ci);
   loadCatalog();
   allOrders=[]; // ให้โหลดใหม่เมื่อเปิดแท็บประวัติ
+}
+// แจ้งกลุ่ม LINE ของลูกค้าเองว่ารับออเดอร์แล้ว
+async function notifyCustomerOrder(data,ci){
+  try{
+    const gid=customer.line_group_id;if(!gid)return;
+    let t='✅ รับออเดอร์ '+data.order_no+' เรียบร้อยแล้ว\nสถานะ: กำลังดำเนินการ กำลังจัดเตรียมสินค้า\n──────────\nรายการ :';
+    ci.forEach(x=>{t+='\n'+x.name+' '+x.qty+' '+(x.unit||'');});
+    t+='\nรวม ฿'+fmt(data.total)+'\n\nขอบคุณที่สั่งสินค้าครับ 🙏';
+    await db.functions.invoke('line-push',{body:{to:gid,messages:[{type:'text',text:t}]}});
+  }catch(e){/* เงียบไว้ */}
 }
 async function notifyCentral(data,ci){
   try{
@@ -412,15 +428,26 @@ function renderHistory(){
           <div class="oa">฿${fmt(o.total)}<br><span class="tag tag-new" style="background:var(--danger-soft);color:var(--danger)">ยกเลิกแล้ว</span></div></div></div>`;
     }
     const step=(label,done,icon)=>`<div class="step ${done?'done':'wait'}"><div class="dot">${done?'✓':icon}</div>${label}</div>`;
+    // ป้ายสถานะล่าสุด (เป็นคำ)
+    let statusLabel,statusColor;
+    if(s.paid){statusLabel='รับชำระแล้ว';statusColor='var(--ok)';}
+    else if(s.shipped){statusLabel='จัดส่งแล้ว';statusColor='#0f6e56';}
+    else if(s.billed){statusLabel='ออกบิลแล้ว · รอจัดส่ง';statusColor='#b8860b';}
+    else{statusLabel='รับออเดอร์ · กำลังเตรียมของ';statusColor='var(--muted)';}
+    // สถานะเงิน (แสดงเมื่อออกบิลแล้ว)
+    const payTag = s.billed
+      ? (s.paid?'<span class="paytag paid">💰 จ่ายแล้ว</span>':'<span class="paytag unpaid">⏳ ค้างจ่าย</span>')
+      : '';
     return `<div class="ocard">
       <div class="oh">
         <div><div class="ono">${esc(o.order_no)}</div><div class="od">${d}${bill?' · บิล '+esc(bill.bill_no):''}</div></div>
         <div class="oa">฿${fmt(o.total)}</div>
       </div>
+      <div class="statusrow"><span class="statusbadge" style="background:${statusColor}">${statusLabel}</span>${payTag}</div>
       <div class="steps">
         ${step('รับออเดอร์',s.ordered,'1')}
         ${step('ออกบิล',s.billed,'2')}
-        ${step('ส่งของ',s.shipped,'3')}
+        ${step('รอจัดส่ง',s.shipped,'3')}
         ${step('รับชำระ',s.paid,'4')}
       </div>
     </div>`;
