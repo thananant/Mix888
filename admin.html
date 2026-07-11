@@ -259,6 +259,13 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div class="row" style="margin-bottom:12px;align-items:center">
       <input id="p-search" placeholder="ค้นหาชื่อ / SKU…" style="flex:1;min-width:200px" oninput="renderProducts()">
+      <select id="p-prefix" onchange="renderProducts()" style="min-width:130px"><option value="all">ทุกหมวด SKU</option></select>
+      <select id="p-suffix" onchange="renderProducts()" style="min-width:150px">
+        <option value="all">ตัวท้าย: ทั้งหมด</option>
+        <option value="none">ว่าง (ยกลัง)</option>
+        <option value="S">S (ปลีก)</option>
+        <option value="T">T</option>
+      </select>
       <span class="count" id="p-count"></span>
       <button class="btn-s" onclick="document.getElementById('csv-file').click()">นำเข้า CSV</button>
       <input type="file" id="csv-file" accept=".csv" style="display:none" onchange="importCSV(this)">
@@ -931,12 +938,31 @@ function setProdTab(t){
   document.getElementById('pf-inactive').classList.toggle('active',t==='inactive');
   renderProducts();
 }
+function fillProdPrefixFilter(){
+  const sel=document.getElementById('p-prefix');
+  const cur=sel.value;
+  const prefixes=[...new Set(products.map(p=>(String(p.sku||'').match(/^[A-Z]+/)||[''])[0]).filter(Boolean))].sort();
+  sel.innerHTML='<option value="all">ทุกหมวด SKU</option>'+prefixes.map(pf=>{
+    const cat=(typeof skuCats!=='undefined'&&skuCats.find&&skuCats.find(c=>c.prefix===pf));
+    return `<option value="${pf}">${pf}${cat?' · '+esc(cat.name):''}</option>`;
+  }).join('');
+  if([...sel.options].some(o=>o.value===cur))sel.value=cur;
+}
 function renderProducts(){
+  fillProdPrefixFilter();
   const q=(document.getElementById('p-search').value||'').toLowerCase();
+  const pf=document.getElementById('p-prefix').value;
+  const sf=document.getElementById('p-suffix').value;
   const list=products.filter(p=>{
     const isActive=p.active!==false;
     if(prodTab==='active'&&!isActive)return false;
     if(prodTab==='inactive'&&isActive)return false;
+    if(pf!=='all'&&!(String(p.sku||'').startsWith(pf)))return false;
+    if(sf!=='all'){
+      const s=skuSuffix(p.sku);
+      if(sf==='none'&&s!=='')return false;
+      if(sf!=='none'&&s!==sf)return false;
+    }
     return !q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q);
   });
   document.getElementById('p-count').textContent=list.length+' รายการ';
