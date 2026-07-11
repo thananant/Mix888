@@ -284,7 +284,18 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div style="flex:1;min-width:160px"><label>ชื่อลูกค้า (ผู้ติดต่อ)</label><input id="c-contact" style="width:100%"></div>
       <div><label>เบอร์โทร (10 หลัก)</label><input id="c-phone" inputmode="numeric" maxlength="10" style="width:140px" placeholder="0812345678" oninput="this.value=this.value.replace(/\D/g,'')"></div>
       <div><label>เลขผู้เสียภาษี (13 หลัก)</label><input id="c-tax" inputmode="numeric" maxlength="13" style="width:170px" placeholder="ไม่มีก็เว้นว่าง" oninput="this.value=this.value.replace(/\D/g,'')"></div>
-      <div style="flex:2;min-width:240px"><label>ที่อยู่ออกบิล</label><input id="c-billaddr" style="width:100%"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:1;min-width:150px"><label>ชื่อสถานที่/อาคาร</label><input id="cb-name" style="width:100%"></div>
+      <div><label>เลขที่</label><input id="cb-no" style="width:90px"></div>
+      <div><label>ซอย</label><input id="cb-soi" style="width:110px"></div>
+      <div style="flex:1;min-width:120px"><label>ถนน</label><input id="cb-road" style="width:100%"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div><label>รหัสไปรษณีย์</label><input id="cb-postcode" inputmode="numeric" maxlength="5" style="width:110px" placeholder="10310" oninput="this.value=this.value.replace(/\D/g,'');postcodeLookup('cb')"></div>
+      <div style="flex:1;min-width:140px"><label>ตำบล/แขวง</label><select id="cb-subdistrict" style="width:100%"><option value="">—</option></select></div>
+      <div style="min-width:130px"><label>อำเภอ/เขต</label><input id="cb-district" style="width:100%" readonly></div>
+      <div style="min-width:130px"><label>จังหวัด</label><input id="cb-province" style="width:100%" readonly></div>
     </div>
 
     <h3 class="ct" style="margin-top:16px">🚚 ข้อมูลจัดส่ง <button class="btn-g mini" style="margin-left:8px;vertical-align:middle" onclick="copyBillToShip()">คัดลอกจากข้อมูลบิล</button></h3>
@@ -292,7 +303,18 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div style="flex:1;min-width:150px"><label>ชื่อร้าน (จุดส่ง)</label><input id="c-shipshop" style="width:100%"></div>
       <div style="flex:1;min-width:150px"><label>ชื่อผู้รับของ</label><input id="c-receiver" style="width:100%"></div>
       <div><label>เบอร์ผู้รับ (10 หลัก)</label><input id="c-shipphone" inputmode="numeric" maxlength="10" style="width:140px" placeholder="0812345678" oninput="this.value=this.value.replace(/\D/g,'')"></div>
-      <div style="flex:2;min-width:240px"><label>ที่อยู่ส่งสินค้า</label><input id="c-shipaddr" style="width:100%"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:1;min-width:150px"><label>ชื่อสถานที่/อาคาร</label><input id="cs-name" style="width:100%"></div>
+      <div><label>เลขที่</label><input id="cs-no" style="width:90px"></div>
+      <div><label>ซอย</label><input id="cs-soi" style="width:110px"></div>
+      <div style="flex:1;min-width:120px"><label>ถนน</label><input id="cs-road" style="width:100%"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div><label>รหัสไปรษณีย์</label><input id="cs-postcode" inputmode="numeric" maxlength="5" style="width:110px" placeholder="10310" oninput="this.value=this.value.replace(/\D/g,'');postcodeLookup('cs')"></div>
+      <div style="flex:1;min-width:140px"><label>ตำบล/แขวง</label><select id="cs-subdistrict" style="width:100%"><option value="">—</option></select></div>
+      <div style="min-width:130px"><label>อำเภอ/เขต</label><input id="cs-district" style="width:100%" readonly></div>
+      <div style="min-width:130px"><label>จังหวัด</label><input id="cs-province" style="width:100%" readonly></div>
     </div>
     <div class="row" style="margin-top:10px">
       <div style="flex:2;min-width:240px"><label>Google Map Link</label><input id="c-map" style="width:100%" placeholder="https://maps.app.goo.gl/…"></div>
@@ -985,27 +1007,61 @@ function editCustomer(id){
   document.getElementById('c-line').value=c.line_group_id||'';
   document.getElementById('c-contact').value=c.contact_name||'';
   document.getElementById('c-phone').value=c.phone||'';
-  document.getElementById('c-billaddr').value=c.billing_address||'';
   document.getElementById('c-shipshop').value=c.ship_shop_name||'';
   document.getElementById('c-receiver').value=c.ship_receiver||'';
   document.getElementById('c-shipphone').value=c.ship_phone||'';
-  document.getElementById('c-shipaddr').value=c.ship_address||'';
   document.getElementById('c-pgroup').value=c.price_group||'base';
   document.getElementById('c-tax').value=c.tax_id||'';
   document.getElementById('c-map').value=c.map_link||'';
   document.getElementById('c-rtime').value=c.receive_time||'';
   document.getElementById('c-delivery').value=c.delivery_method||'Lalamove';
   document.getElementById('c-note').value=c.note||'';
+  // ที่อยู่แยกช่อง — บิล
+  fillAddr('cb',{name:c.bill_addr_name,no:c.bill_no,soi:c.bill_soi,road:c.bill_road,
+    postcode:c.bill_postcode,subdistrict:c.bill_subdistrict,district:c.bill_district,province:c.bill_province});
+  // ที่อยู่แยกช่อง — จัดส่ง
+  fillAddr('cs',{name:c.ship_addr_name,no:c.ship_no,soi:c.ship_soi,road:c.ship_road,
+    postcode:c.ship_postcode,subdistrict:c.ship_subdistrict,district:c.ship_district,province:c.ship_province});
   showPage('customers');
   window.scrollTo({top:0,behavior:'smooth'});
+}
+// เติมค่าที่อยู่แยกช่อง + trigger auto-fill รหัสไปรษณีย์
+function fillAddr(prefix,a){
+  document.getElementById(prefix+'-name').value=a.name||'';
+  document.getElementById(prefix+'-no').value=a.no||'';
+  document.getElementById(prefix+'-soi').value=a.soi||'';
+  document.getElementById(prefix+'-road').value=a.road||'';
+  document.getElementById(prefix+'-postcode').value=a.postcode||'';
+  if(a.postcode){
+    postcodeLookup(prefix);
+    setTimeout(()=>{
+      document.getElementById(prefix+'-subdistrict').value=a.subdistrict||'';
+      document.getElementById(prefix+'-district').value=a.district||'';
+      document.getElementById(prefix+'-province').value=a.province||'';
+    },30);
+  }else{
+    document.getElementById(prefix+'-subdistrict').innerHTML='<option value="">—</option>';
+    document.getElementById(prefix+'-district').value=a.district||'';
+    document.getElementById(prefix+'-province').value=a.province||'';
+  }
+}
+// ประกอบที่อยู่บรรทัดเดียวจากช่องแยก
+function composeAddr(prefix){
+  const g=id=>document.getElementById(prefix+'-'+id).value.trim();
+  return [g('name'),g('no'),g('soi')?'ซ.'+g('soi'):'',g('road')?'ถ.'+g('road'):'',
+    g('subdistrict'),g('district'),g('province'),g('postcode')].filter(Boolean).join(' ')||null;
 }
 function resetCustomerForm(){
   editCustomerId=null;
   document.getElementById('cust-form-title').textContent='เพิ่มลูกค้า';
   document.getElementById('c-prefix-wrap').style.display='';
   document.getElementById('c-code-wrap').style.display='none';
-  ['c-prefix','c-code','c-name','c-sale','c-line','c-contact','c-phone','c-billaddr',
-   'c-shipshop','c-receiver','c-shipphone','c-shipaddr','c-tax','c-map','c-rtime','c-note'].forEach(id=>document.getElementById(id).value='');
+  ['c-prefix','c-code','c-name','c-sale','c-line','c-contact','c-phone',
+   'c-shipshop','c-receiver','c-shipphone','c-tax','c-map','c-rtime','c-note',
+   'cb-name','cb-no','cb-soi','cb-road','cb-postcode','cb-district','cb-province',
+   'cs-name','cs-no','cs-soi','cs-road','cs-postcode','cs-district','cs-province'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('cb-subdistrict').innerHTML='<option value="">—</option>';
+  document.getElementById('cs-subdistrict').innerHTML='<option value="">—</option>';
   document.getElementById('c-pgroup').value='base';
   document.getElementById('c-delivery').value='Lalamove';
 }
@@ -1013,7 +1069,16 @@ function copyBillToShip(){
   document.getElementById('c-shipshop').value=document.getElementById('c-name').value;
   document.getElementById('c-receiver').value=document.getElementById('c-contact').value;
   document.getElementById('c-shipphone').value=document.getElementById('c-phone').value;
-  document.getElementById('c-shipaddr').value=document.getElementById('c-billaddr').value;
+  // คัดลอกที่อยู่แยกช่อง
+  ['name','no','soi','road','postcode'].forEach(f=>{
+    document.getElementById('cs-'+f).value=document.getElementById('cb-'+f).value;
+  });
+  const pc=document.getElementById('cb-postcode').value;
+  if(pc){postcodeLookup('cs');setTimeout(()=>{
+    document.getElementById('cs-subdistrict').value=document.getElementById('cb-subdistrict').value;
+    document.getElementById('cs-district').value=document.getElementById('cb-district').value;
+    document.getElementById('cs-province').value=document.getElementById('cb-province').value;
+  },30);}
 }
 function updateCodePreview(){
   const el=document.getElementById('c-prefix'); if(!el)return;
@@ -1032,11 +1097,27 @@ async function saveCustomer(){
     line_group_id:document.getElementById('c-line').value.trim()||null,
     contact_name:document.getElementById('c-contact').value.trim()||null,
     phone:phone||null,
-    billing_address:document.getElementById('c-billaddr').value.trim()||null,
+    billing_address:composeAddr('cb'),
+    bill_addr_name:document.getElementById('cb-name').value.trim()||null,
+    bill_no:document.getElementById('cb-no').value.trim()||null,
+    bill_soi:document.getElementById('cb-soi').value.trim()||null,
+    bill_road:document.getElementById('cb-road').value.trim()||null,
+    bill_subdistrict:document.getElementById('cb-subdistrict').value||null,
+    bill_district:document.getElementById('cb-district').value.trim()||null,
+    bill_province:document.getElementById('cb-province').value.trim()||null,
+    bill_postcode:document.getElementById('cb-postcode').value.trim()||null,
     ship_shop_name:document.getElementById('c-shipshop').value.trim()||null,
     ship_receiver:document.getElementById('c-receiver').value.trim()||null,
     ship_phone:shipPhone||null,
-    ship_address:document.getElementById('c-shipaddr').value.trim()||null,
+    ship_address:composeAddr('cs'),
+    ship_addr_name:document.getElementById('cs-name').value.trim()||null,
+    ship_no:document.getElementById('cs-no').value.trim()||null,
+    ship_soi:document.getElementById('cs-soi').value.trim()||null,
+    ship_road:document.getElementById('cs-road').value.trim()||null,
+    ship_subdistrict:document.getElementById('cs-subdistrict').value||null,
+    ship_district:document.getElementById('cs-district').value.trim()||null,
+    ship_province:document.getElementById('cs-province').value.trim()||null,
+    ship_postcode:document.getElementById('cs-postcode').value.trim()||null,
     price_group:document.getElementById('c-pgroup').value,
     tax_id:document.getElementById('c-tax').value.trim()||null,
     map_link:document.getElementById('c-map').value.trim()||null,
