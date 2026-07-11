@@ -247,6 +247,10 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
   </div>
   <div class="card">
+    <div class="filters" style="margin-bottom:12px">
+      <button class="fbtn active" id="pf-active" onclick="setProdTab('active')">กำลังขาย</button>
+      <button class="fbtn" id="pf-inactive" onclick="setProdTab('inactive')">ยกเลิกการขาย</button>
+    </div>
     <div class="row" style="margin-bottom:12px;align-items:center">
       <input id="p-search" placeholder="ค้นหาชื่อ / SKU…" style="flex:1;min-width:200px" oninput="renderProducts()">
       <span class="count" id="p-count"></span>
@@ -783,16 +787,38 @@ async function loadProducts(){
   if(error){toast('โหลดสินค้าไม่ได้: '+error.message);return;}
   products = data||[]; renderProducts();
 }
+let prodTab='active';
+function setProdTab(t){
+  prodTab=t;
+  document.getElementById('pf-active').classList.toggle('active',t==='active');
+  document.getElementById('pf-inactive').classList.toggle('active',t==='inactive');
+  renderProducts();
+}
 function renderProducts(){
   const q=(document.getElementById('p-search').value||'').toLowerCase();
-  const list=products.filter(p=>!q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q));
+  const list=products.filter(p=>{
+    const isActive=p.active!==false;
+    if(prodTab==='active'&&!isActive)return false;
+    if(prodTab==='inactive'&&isActive)return false;
+    return !q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q);
+  });
   document.getElementById('p-count').textContent=list.length+' รายการ';
+  if(!list.length){
+    document.getElementById('p-body').innerHTML='<tr><td colspan="10" class="empty">'+(prodTab==='inactive'?'ยังไม่มีสินค้าที่ยกเลิกการขาย':'ไม่พบสินค้า')+'</td></tr>';
+    return;
+  }
   document.getElementById('p-body').innerHTML=list.map(p=>{
     const avail=Math.max(Number(p.stock_qty)-Number(p.reserved_qty||0),0);
     let tag = avail<=0 ? '<span class="tag tag-out">หมด</span>'
             : avail<=(p.low_stock_alert??10) ? '<span class="tag tag-low">ใกล้หมด</span>'
             : '<span class="tag tag-ok">มีของ</span>';
-    return `<tr>
+    const actions = prodTab==='inactive'
+      ? `<button class="btn-ok mini" onclick="restoreProduct(${p.id})">♻️ กู้คืน</button>
+         <button class="btn-d mini" onclick="hardDelProduct(${p.id})">ลบถาวร</button>`
+      : `<button class="btn-s mini" onclick="editProduct(${p.id})">แก้ไข</button>
+         <button class="btn-g mini" onclick="wasteProduct(${p.id})">ตีเสีย</button>
+         <button class="btn-d mini" onclick="delProduct(${p.id})">ลบ</button>`;
+    return `<tr${prodTab==='inactive'?' style="opacity:.7"':''}>
       <td>${p.image_url?`<img src="${esc(p.image_url)}" style="width:36px;height:36px;border-radius:6px;object-fit:cover;border:1px solid var(--line)">`:'<span style="color:var(--line)">—</span>'}</td>
       <td><b>${esc(p.sku)}</b></td><td>${esc(p.name)}</td>
       <td>${esc(p.unit)}${p.pack_info?'<div class="pack">'+esc(p.pack_info)+'</div>':''}</td>
@@ -800,11 +826,7 @@ function renderProducts(){
       <td class="num">${Number(p.stock_qty||0)}</td>
       <td class="num" style="color:var(--warn)">${Number(p.reserved_qty||0)}</td>
       <td class="num"><b>${avail}</b></td><td>${tag}</td>
-      <td style="white-space:nowrap">
-        <button class="btn-s mini" onclick="editProduct(${p.id})">แก้ไข</button>
-        <button class="btn-g mini" onclick="wasteProduct(${p.id})">ตีเสีย</button>
-        <button class="btn-d mini" onclick="delProduct(${p.id})">ลบ</button>
-      </td></tr>`;
+      <td style="white-space:nowrap">${actions}</td></tr>`;
   }).join('');
 }
 function editProduct(id){
@@ -898,12 +920,27 @@ async function saveProduct(){
 }
 async function delProduct(id){
   const p=products.find(x=>x.id===id);
-  if(!confirm('ลบ "'+p.name+'" ?'))return;
+  if(!confirm('ลบ "'+p.name+'" ?\n(ถ้าสินค้าเคยมีการสั่ง/ออกบิล จะเปลี่ยนเป็น "ยกเลิกการขาย" แทน — ดูได้ในแท็บยกเลิกการขาย)'))return;
   const {error}=await db.from('products').delete().eq('id',id);
   if(error){
     await db.from('products').update({active:false}).eq('id',id);
-    toast('ปิดการขายแล้ว (ลบถาวรไม่ได้เพราะมีประวัติ)');
+    toast('ย้ายไปแท็บ "ยกเลิกการขาย" แล้ว (ลบถาวรไม่ได้เพราะมีประวัติ)');
   } else toast('ลบแล้ว');
+  loadProducts();
+}
+async function restoreProduct(id){
+  const p=products.find(x=>x.id===id);if(!p)return;
+  const {error}=await db.from('products').update({active:true}).eq('id',id);
+  if(error){toast('กู้คืนไม่สำเร็จ: '+error.message);return;}
+  toast('กู้คืน "'+p.name+'" กลับมาขายแล้ว ✓');
+  loadProducts();
+}
+async function hardDelProduct(id){
+  const p=products.find(x=>x.id===id);if(!p)return;
+  if(!confirm('ลบ "'+p.name+'" ออกถาวร?\nถ้าสินค้ามีประวัติการขายจะลบไม่ได้ (ระบบจะคงไว้ในแท็บนี้)'))return;
+  const {error}=await db.from('products').delete().eq('id',id);
+  if(error){toast('ลบถาวรไม่ได้ — สินค้ามีประวัติการขายอยู่ ต้องเก็บไว้เพื่ออ้างอิงบิลเก่า');return;}
+  toast('ลบถาวรแล้ว');
   loadProducts();
 }
 async function wasteProduct(id){
@@ -1268,7 +1305,7 @@ function renderPricing(){
   const cust=customers.find(c=>String(c.id)===String(cid));
   const grp=cust?cust.price_group||'base':'base';
   const q=(document.getElementById('pr-search').value||'').toLowerCase();
-  const list=products.filter(p=>!q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q));
+  const list=products.filter(p=>p.active!==false&&(!q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q)));
   let onCount=0;
   products.forEach(p=>{ if(getState(p.id).on) onCount++; });
   const grpLabel={base:'ราคากลาง',r20:'เรท 20 ลัง',r50:'เรท 50 ลัง',upc:'รวมส่งตจว'}[grp];
@@ -1300,7 +1337,7 @@ function markPrice(pid,val){
 }
 function toggleShown(on){
   const q=(document.getElementById('pr-search').value||'').toLowerCase();
-  const list=products.filter(p=>!q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q));
+  const list=products.filter(p=>p.active!==false&&(!q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q)));
   list.forEach(p=>{
     const st=getState(p.id);
     if(st.on!==on) pending[p.id]={on:on, price:st.price};
@@ -1778,7 +1815,7 @@ function suggestRcv(){
   const q=document.getElementById('rc-search').value.trim().toLowerCase();
   const box=document.getElementById('sug-list');
   if(!q){box.style.display='none';return;}
-  const list=products.filter(p=>(p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q))
+  const list=products.filter(p=>p.active!==false&&(p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q))
     &&!rcv.some(r=>r.product.id===p.id)).slice(0,12);
   if(!list.length){box.style.display='none';return;}
   box.innerHTML=list.map(p=>`<div class="sug-item" onclick="addRcvItem(${p.id})">
