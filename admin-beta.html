@@ -350,7 +350,16 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div class="row" style="margin-top:10px">
       <div style="flex:2;min-width:240px"><label>Google Map Link</label><input id="c-map" style="width:100%" placeholder="https://maps.app.goo.gl/…"></div>
-      <div style="min-width:150px"><label>เวลารับของ</label><input id="c-rtime" style="width:100%" placeholder="เช่น 08.00-19.00"></div>
+      <div style="min-width:320px"><label>เวลารับของ (ตั้งแต่ – ถึง)</label>
+        <div style="display:flex;align-items:center;gap:5px">
+          <select id="c-rt-fh" onchange="composeRtime()" style="width:70px"></select><b>:</b>
+          <select id="c-rt-fm" onchange="composeRtime()" style="width:64px"></select>
+          <span style="color:var(--muted)">ถึง</span>
+          <select id="c-rt-th" onchange="composeRtime()" style="width:70px"></select><b>:</b>
+          <select id="c-rt-tm" onchange="composeRtime()" style="width:64px"></select>
+        </div>
+        <input id="c-rtime" type="hidden">
+      </div>
       <div><label>วิธีจัดส่ง</label><select id="c-delivery"><option value="Lalamove">Lalamove</option><option value="BI">BI</option><option value="แพ็คของ">แพ็คของ</option><option value="มารับเอง">มารับเอง</option></select></div>
       <div style="flex:2;min-width:200px"><label>หมายเหตุ</label><input id="c-note" style="width:100%" placeholder="เช่น เงื่อนไขวางบิล"></div>
     </div>
@@ -977,6 +986,7 @@ function resetProductForm(){
   editProductId=null;
   document.getElementById('prod-form-title').textContent='เพิ่มสินค้า';
   ['p-sku','p-name','p-pack','p-price','p-r20','p-r50','p-upc'].forEach(id=>document.getElementById(id).value='');
+  setRtime('');
   document.getElementById('p-sku-cat').value='';
   document.getElementById('p-sku').readOnly=true;
   document.getElementById('p-sku').placeholder='เลือกหมวด';
@@ -1247,7 +1257,7 @@ function editCustomer(id){
   document.getElementById('c-pgroup').value=c.price_group||'base';
   document.getElementById('c-tax').value=c.tax_id||'';
   document.getElementById('c-map').value=c.map_link||'';
-  document.getElementById('c-rtime').value=c.receive_time||'';
+  setRtime(c.receive_time||'');
   document.getElementById('c-delivery').value=c.delivery_method||'Lalamove';
   document.getElementById('c-note').value=c.note||'';
   // ที่อยู่แยกช่อง — บิล
@@ -1277,6 +1287,34 @@ function composeAddr(prefix){
   const g=id=>document.getElementById(prefix+'-'+id).value.trim();
   return [g('name'),g('no'),g('soi')?'ซ.'+g('soi'):'',g('road')?'ถ.'+g('road'):'',
     g('subdistrict'),g('district'),g('province'),g('postcode')].filter(Boolean).join(' ')||null;
+}
+/* ---------- เวลารับของ (dropdown ทุก 15 นาที) ---------- */
+function initRtimeSelects(){
+  const hOpts='<option value=""></option>'+Array.from({length:24},(_,h)=>`<option value="${String(h).padStart(2,'0')}">${String(h).padStart(2,'0')}</option>`).join('');
+  const mOpts='<option value=""></option>'+['00','15','30','45'].map(m=>`<option value="${m}">${m}</option>`).join('');
+  document.getElementById('c-rt-fh').innerHTML=hOpts;
+  document.getElementById('c-rt-th').innerHTML=hOpts;
+  document.getElementById('c-rt-fm').innerHTML=mOpts;
+  document.getElementById('c-rt-tm').innerHTML=mOpts;
+}
+function composeRtime(){
+  const fh=document.getElementById('c-rt-fh').value, fm=document.getElementById('c-rt-fm').value;
+  const th=document.getElementById('c-rt-th').value, tm=document.getElementById('c-rt-tm').value;
+  document.getElementById('c-rtime').value=(fh&&th)?`${fh}.${fm||'00'}-${th}.${tm||'00'}`:'';
+}
+function setRtime(val){
+  // รองรับค่าเดิมที่พิมพ์มือ เช่น "08.00-19.00", "8:30 - 17.45"
+  const ids=['c-rt-fh','c-rt-fm','c-rt-th','c-rt-tm'];
+  ids.forEach(id=>document.getElementById(id).value='');
+  document.getElementById('c-rtime').value=val||'';
+  const m=String(val||'').match(/(\d{1,2})[.:](\d{2})\s*[-–]\s*(\d{1,2})[.:](\d{2})/);
+  if(!m)return;
+  const snap=x=>['00','15','30','45'].includes(x)?x:String(Math.round(parseInt(x,10)/15)*15%60).padStart(2,'0');
+  document.getElementById('c-rt-fh').value=String(parseInt(m[1],10)).padStart(2,'0');
+  document.getElementById('c-rt-fm').value=snap(m[2]);
+  document.getElementById('c-rt-th').value=String(parseInt(m[3],10)).padStart(2,'0');
+  document.getElementById('c-rt-tm').value=snap(m[4]);
+  composeRtime();
 }
 function resetCustomerForm(){
   editCustomerId=null;
@@ -1416,9 +1454,28 @@ async function copyLink(id){
     c.order_token=tk;
   }
   const url=ORDER_URL+'?t='+encodeURIComponent(c.order_token);
+
+  // ผูกกลุ่ม LINE แล้ว → ส่งลิงก์เข้ากลุ่มเลย
+  if(c.line_group_id){
+    if(!confirm('ส่งลิงก์สั่งซื้อเข้ากลุ่ม LINE ของ "'+c.name+'" เลยไหม?'))return;
+    const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
+      to:c.line_group_id,
+      messages:[{type:'text',
+        text:'🛒 ลิงก์สั่งสินค้า Mix Fresh 168\nร้าน: '+c.name+' ('+c.code+')\n\nกดสั่งได้เลยครับ 👇\n'+url}]
+    }});
+    if(fnErr||!res||res.status!==200){
+      toast('ส่ง LINE ไม่สำเร็จ — คัดลอกลิงก์ให้แทนแล้ว');
+      try{await navigator.clipboard.writeText(url);}catch(e){prompt('คัดลอกลิงก์:',url);}
+      return;
+    }
+    toast('✓ ส่งลิงก์เข้ากลุ่ม LINE ของ '+c.name+' แล้ว');
+    return;
+  }
+
+  // ยังไม่ผูกกลุ่ม → คัดลอกเหมือนเดิม
   try{
     await navigator.clipboard.writeText(url);
-    toast('คัดลอกลิงก์ของ '+c.name+' แล้ว ส่งเข้ากลุ่ม LINE ได้เลย');
+    toast(c.name+' ยังไม่ผูกกลุ่ม LINE — คัดลอกลิงก์แล้ว ส่งเองได้เลย');
   }catch(e){
     prompt('คัดลอกลิงก์ของ '+c.name+':',url);
   }
@@ -2656,6 +2713,7 @@ async function startApp(){
   setRange('month');
 }
 (function(){
+  initRtimeSelects();
   try{
     const saved=localStorage.getItem('mix888_user');
     if(saved){enterApp(JSON.parse(saved));return;}
