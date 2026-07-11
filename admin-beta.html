@@ -433,7 +433,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th>เลขบิล</th><th>ลูกค้า</th><th class="num">ยอด</th><th>ออกเมื่อ</th><th>LINE</th><th>ส่ง</th><th>ชำระ</th><th>รับยอดโดย</th><th></th></tr></thead>
+      <thead><tr><th>เลขบิล / SO</th><th>ลูกค้า</th><th class="num">ยอด</th><th>ออกเมื่อ</th><th>LINE</th><th>ส่ง</th><th>ชำระ</th><th>รับยอดโดย</th><th></th></tr></thead>
       <tbody id="ac-body"></tbody>
     </table>
     </div>
@@ -1708,7 +1708,7 @@ document.addEventListener('click',e=>{
 /* ==================== บัญชี ==================== */
 async function loadBills(){
   const {data,error}=await db.from('bills')
-    .select('*, customers(code,name,line_group_id)')
+    .select('*, customers(code,name,line_group_id), orders(order_no)')
     .order('created_at',{ascending:false}).limit(500);
   if(error){toast('โหลดบิลไม่ได้: '+error.message);return;}
   bills=data||[]; renderAccount(); acStats();
@@ -1759,7 +1759,7 @@ function renderAccount(){
     if(shipF&&(b.ship_status||'pending')!==shipF)return false;
     if(from&&new Date(b.created_at)<new Date(from+'T00:00:00'))return false;
     if(to&&new Date(b.created_at)>new Date(to+'T23:59:59'))return false;
-    if(q&&!b.bill_no.toLowerCase().includes(q)&&!(b.customers?.name||'').toLowerCase().includes(q))return false;
+    if(q&&!b.bill_no.toLowerCase().includes(q)&&!(b.orders?.order_no||'').toLowerCase().includes(q)&&!(b.customers?.name||'').toLowerCase().includes(q))return false;
     return true;
   });
   const el=document.getElementById('ac-body');
@@ -1770,7 +1770,7 @@ function renderAccount(){
     const ss=b.ship_status||'pending';
     const pd=b.paid_at?new Date(b.paid_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
     return `<tr>
-      <td><b>${esc(b.bill_no)}</b></td>
+      <td><b>${esc(b.bill_no)}</b>${b.orders?.order_no?'<div style="font-size:12px;color:var(--muted)">'+esc(b.orders.order_no)+'</div>':''}</td>
       <td>${esc(b.customers?.code)} · ${esc(b.customers?.name)}</td>
       <td class="num"><b>${fmt(b.total)}</b></td>
       <td style="font-size:13px;color:var(--muted)">${d}</td>
