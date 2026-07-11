@@ -9,6 +9,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<script src="thai_postcode.js"></script>
 <style>
 :root{
   --ink:#2e1b16; --muted:#8a6f66; --line:#efe4db; --bg:#f7f2ec; --card:#ffffff;
@@ -137,6 +138,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div class="mi" data-page="pricing" onclick="showPage('pricing')"><span class="ic">🏷️</span>จัดสินค้า</div>
     <div class="mi" data-page="orders" onclick="showPage('orders')"><span class="ic">🧾</span>ทำบิล<span class="badge" id="ord-badge" style="display:none">0</span></div>
     <div class="mi" data-page="receive" onclick="showPage('receive')"><span class="ic">📥</span>รับสินค้า</div>
+    <div class="mi" data-page="warehouse" onclick="showPage('warehouse')"><span class="ic">🏭</span>คลังสินค้า</div>
     <div class="mi" data-page="account" onclick="showPage('account')"><span class="ic">💰</span>บัญชี</div>
     <div class="mi" data-page="users" id="tab-users" style="display:none" onclick="showPage('users')"><span class="ic">🔐</span>ผู้ใช้</div>
   </div>
@@ -254,7 +256,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th style="width:44px">รูป</th><th>SKU</th><th>ชื่อสินค้า</th><th>หน่วย / แพ็ค</th><th class="num">ราคากลาง</th><th class="num">กัลปพฤกษ์</th><th class="num">วังหิน</th><th class="num">จองรอส่ง</th><th class="num">พร้อมขาย</th><th>สถานะ</th><th></th></tr></thead>
+      <thead><tr><th style="width:44px">รูป</th><th>SKU</th><th>ชื่อสินค้า</th><th>หน่วย / แพ็ค</th><th class="num">ราคากลาง</th><th class="num">สต๊อกรวม</th><th class="num">จองรอส่ง</th><th class="num">พร้อมขาย</th><th>สถานะ</th><th></th></tr></thead>
       <tbody id="p-body"></tbody>
     </table>
     </div>
@@ -383,7 +385,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="card">
     <div class="row" style="margin-bottom:12px">
       <div style="flex:1;min-width:180px"><label>ผู้ขาย / ที่มา (ใส่หรือไม่ก็ได้)</label><input id="supplier" style="width:100%" placeholder="เช่น แม็คโคร, บ.ผู้ผลิต"></div>
-      <div style="min-width:170px"><label>รับเข้าคลัง</label><select id="rc-wh" style="width:100%"><option value="klp">โกดังกัลปพฤกษ์</option><option value="wh">โกดังวังหิน</option></select></div>
+      <div style="min-width:170px"><label>รับเข้าคลัง</label><select id="rc-wh" style="width:100%"></select></div>
       <div style="min-width:150px"><label>ผู้รับของ</label><input id="rc-staff" style="width:100%" placeholder="ชื่อคนคีย์"></div>
     </div>
     <div class="row">
@@ -408,6 +410,60 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="card">
     <h3 class="ct">ประวัติการรับเข้า</h3>
     <div id="rcv-hist"></div>
+  </div>
+</div>
+
+<!-- ============ คลังสินค้า ============ -->
+<div class="page" id="page-warehouse">
+  <div class="pagehead"><h2>คลังสินค้า</h2></div>
+  <div class="stats" id="wh-stats"></div>
+
+  <div class="card">
+    <div class="row" style="align-items:center;margin-bottom:12px">
+      <h3 class="ct" style="margin:0">สต๊อกแยกคลัง</h3>
+      <select id="wh-view" style="margin-left:auto" onchange="renderWhStock()"><option value="">— ทุกคลัง (ภาพรวม) —</option></select>
+      <input id="wh-search" placeholder="ค้นหาสินค้า…" style="min-width:160px" oninput="renderWhStock()">
+    </div>
+    <div style="overflow-x:auto"><table id="wh-table">
+      <thead id="wh-thead"></thead>
+      <tbody id="wh-body"></tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h3 class="ct" id="wh-form-title">เพิ่มคลัง</h3>
+    <div class="row">
+      <div style="flex:1;min-width:180px"><label>ชื่อคลัง</label><input id="w-name" style="width:100%" placeholder="เช่น โกดังกัลปพฤกษ์"></div>
+      <div style="flex:1;min-width:160px"><label>ชื่อผู้ติดต่อ</label><input id="w-contact" style="width:100%"></div>
+      <div><label>เบอร์โทร</label><input id="w-phone" inputmode="numeric" maxlength="10" style="width:140px" oninput="this.value=this.value.replace(/\D/g,'')"></div>
+      <div style="flex:2;min-width:220px"><label>Google Map Link</label><input id="w-map" style="width:100%" placeholder="https://maps.app.goo.gl/…"></div>
+    </div>
+    <h3 class="ct" style="margin-top:14px">📍 ที่อยู่</h3>
+    <div class="row">
+      <div><label>รหัสไปรษณีย์</label><input id="w-postcode" inputmode="numeric" maxlength="5" style="width:110px" placeholder="10310" oninput="this.value=this.value.replace(/\D/g,'');postcodeLookup('w')"></div>
+      <div style="flex:1;min-width:150px"><label>ตำบล/แขวง</label><select id="w-subdistrict" style="width:100%"><option value="">—</option></select></div>
+      <div style="min-width:140px"><label>อำเภอ/เขต</label><input id="w-district" style="width:100%" readonly></div>
+      <div style="min-width:140px"><label>จังหวัด</label><input id="w-province" style="width:100%" readonly></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:1;min-width:150px"><label>ชื่อสถานที่</label><input id="w-addrname" style="width:100%" placeholder="เช่น โกดัง A"></div>
+      <div><label>เลขที่</label><input id="w-no" style="width:100px"></div>
+      <div><label>ซอย</label><input id="w-soi" style="width:120px"></div>
+      <div style="flex:1;min-width:140px"><label>ถนน</label><input id="w-road" style="width:100%"></div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn-p" onclick="saveWarehouse()">บันทึกคลัง</button>
+      <button class="btn-g" onclick="resetWhForm()">ล้าง</button>
+    </div>
+    <p class="hint">พิมพ์รหัสไปรษณีย์ 5 หลัก → ระบบเติมจังหวัด/อำเภอให้อัตโนมัติ แล้วเลือกตำบลจากรายการ (ฐานข้อมูลไปรษณีย์ไทยฝังในแอป ใช้ได้แม้ไม่มีเน็ต)</p>
+  </div>
+
+  <div class="card">
+    <h3 class="ct">รายการคลังทั้งหมด</h3>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>ชื่อคลัง</th><th>ผู้ติดต่อ</th><th>เบอร์</th><th>ที่อยู่</th><th class="num">มูลค่าสต๊อก</th><th></th></tr></thead>
+      <tbody id="wh-list"></tbody>
+    </table></div>
   </div>
 </div>
 
@@ -533,6 +589,7 @@ function showPage(p){
   if(p==='orders') loadOrders();
   if(p==='account') loadBills();
   if(p==='receive') loadProducts();
+  if(p==='warehouse') loadWarehouse();
   if(p==='users') loadUsers();
 }
 
@@ -601,8 +658,7 @@ async function loadDashboard(){
   const sumToday=(tData||[]).reduce((s,x)=>s+Number(x.total),0);
   const sumMonth=(mData||[]).reduce((s,x)=>s+Number(x.total),0);
   const unpaidSum=bills.filter(b=>b.payment_status!=='paid'&&(b.ship_status||'pending')!=='cancelled').reduce((s,b)=>s+Number(b.total),0);
-  const stockKlp=products.reduce((s,p)=>s+Number(p.stock_klp||0)*Number(p.base_price),0);
-  const stockWh=products.reduce((s,p)=>s+Number(p.stock_wh||0)*Number(p.base_price),0);
+  const stockTotal=products.reduce((s,p)=>s+Number(p.stock_qty||0)*Number(p.base_price),0);
 
   // กำไรขั้นต้น = ยอดขาย − ต้นทุน(last_cost) ในช่วง
   let rev=0,cost=0;
@@ -615,8 +671,8 @@ async function loadDashboard(){
   document.getElementById('d-month').textContent='฿'+fmt0(sumMonth);
   document.getElementById('d-pending').textContent=orders.length+' ออเดอร์';
   document.getElementById('d-unpaid').textContent='฿'+fmt0(unpaidSum);
-  document.getElementById('d-stock').textContent='฿'+fmt0(stockKlp+stockWh);
-  document.getElementById('d-stock-sub').textContent='กัลปฯ ฿'+fmt0(stockKlp)+' · วังหิน ฿'+fmt0(stockWh);
+  document.getElementById('d-stock').textContent='฿'+fmt0(stockTotal);
+  document.getElementById('d-stock-sub').textContent='ดูแยกคลังในหน้าคลังสินค้า';
   document.getElementById('d-profit').textContent='฿'+fmt0(profit);
   document.getElementById('d-waste').textContent='฿'+fmt0(wasteVal);
 
@@ -716,8 +772,7 @@ function renderProducts(){
       <td><b>${esc(p.sku)}</b></td><td>${esc(p.name)}</td>
       <td>${esc(p.unit)}${p.pack_info?'<div class="pack">'+esc(p.pack_info)+'</div>':''}</td>
       <td class="num">${fmt(p.base_price)}</td>
-      <td class="num">${Number(p.stock_klp||0)}</td>
-      <td class="num">${Number(p.stock_wh||0)}</td>
+      <td class="num">${Number(p.stock_qty||0)}</td>
       <td class="num" style="color:var(--warn)">${Number(p.reserved_qty||0)}</td>
       <td class="num"><b>${avail}</b></td><td>${tag}</td>
       <td style="white-space:nowrap">
@@ -785,7 +840,7 @@ async function saveProduct(){
     price_upc:document.getElementById('p-upc').value?parseFloat(document.getElementById('p-upc').value):null,
     low_stock_alert:parseFloat(document.getElementById('p-alert').value)||10
   };
-  if(!editProductId) rec.stock_klp=parseFloat(document.getElementById('p-stock').value)||0;
+  const initStock = !editProductId ? (parseFloat(document.getElementById('p-stock').value)||0) : 0;
   if(!rec.sku||!rec.name){toast('กรอก SKU และชื่อสินค้าก่อน');return;}
 
   // อัปโหลดรูปถ้ามีเลือกใหม่
@@ -800,11 +855,20 @@ async function saveProduct(){
     rec.image_url=productImageUrl||null;
   }
 
-  const q = editProductId ? db.from('products').update(rec).eq('id',editProductId)
-                          : db.from('products').insert(rec);
-  const {error}=await q;
-  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
-  toast(editProductId?'อัพเดตสินค้าแล้ว':'เพิ่มสินค้าแล้ว');
+  if(editProductId){
+    const {error}=await db.from('products').update(rec).eq('id',editProductId);
+    if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+    toast('อัพเดตสินค้าแล้ว');
+  }else{
+    const {data:ins,error}=await db.from('products').insert(rec).select('id').single();
+    if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+    // ลงสต๊อกเริ่มต้นในคลังหลัก
+    if(initStock>0 && whList.length){
+      const defWh=(whList.find(w=>w.is_default)||whList[0]).id;
+      await db.rpc('stock_add',{p_product:ins.id,p_wh:defWh,p_qty:initStock});
+    }
+    toast('เพิ่มสินค้าแล้ว');
+  }
   resetProductForm(); loadProducts();
 }
 async function delProduct(id){
@@ -819,35 +883,55 @@ async function delProduct(id){
 }
 async function wasteProduct(id){
   const p=products.find(x=>x.id===id);if(!p)return;
+  if(!whList.length){toast('ยังไม่มีคลัง — ไปเพิ่มในหน้าคลังก่อน');return;}
   const q=prompt('ตีเสีย / ตัดของเสีย "'+p.name+'"\nจำนวน ('+p.unit+'):','1');
   if(q===null)return;
   const qty=parseFloat(q);if(!qty||qty<=0){toast('จำนวนไม่ถูกต้อง');return;}
-  const w=prompt('ตัดจากคลังไหน?\n1 = กัลปพฤกษ์ (มี '+Number(p.stock_klp||0)+')\n2 = วังหิน (มี '+Number(p.stock_wh||0)+')','1');
-  if(w===null)return;
+  const wid=await pickWarehouse('ตัดของเสียจากคลังไหน?');
+  if(!wid)return;
   const note=prompt('สาเหตุ (ไม่ใส่ก็ได้):','')||'';
   const {error}=await db.rpc('record_waste',{p_product_id:id,p_qty:qty,
-    p_warehouse:w.trim()==='2'?'wh':'klp',p_note:note,
+    p_warehouse:wid,p_note:note,
     p_by:currentUser?(currentUser.display_name||currentUser.username):null});
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
   toast('ตัดของเสีย '+p.name+' จำนวน '+qty+' '+p.unit+' แล้ว');
   loadProducts();
+}
+// เลือกคลังผ่าน prompt (คืน warehouse_id หรือ null)
+function pickWarehouse(title){
+  if(whList.length===1) return Promise.resolve(whList[0].id);
+  const menu=whList.map((w,i)=>(i+1)+' = '+w.name).join('\n');
+  const ans=prompt(title+'\n'+menu,'1');
+  if(ans===null)return Promise.resolve(null);
+  const idx=parseInt(ans.trim(),10)-1;
+  if(idx<0||idx>=whList.length){toast('เลือกไม่ถูกต้อง');return Promise.resolve(null);}
+  return Promise.resolve(whList[idx].id);
 }
 function importCSV(input){
   const f=input.files[0]; if(!f)return;
   const reader=new FileReader();
   reader.onload=async e=>{
     const lines=e.target.result.split(/\r?\n/).filter(l=>l.trim());
-    const rows=[];
+    const rows=[]; const stockMap=[];
     for(let i=1;i<lines.length;i++){
       const c=lines[i].split(',');
       if(c.length<2)continue;
-      rows.push({sku:c[0].trim(),name:c[1].trim(),unit:(c[2]||'ชิ้น').trim(),
-        base_price:parseFloat(c[3])||0,stock_klp:parseFloat(c[4])||0,
+      const sku=c[0].trim();
+      rows.push({sku,name:c[1].trim(),unit:(c[2]||'ชิ้น').trim(),
+        base_price:parseFloat(c[3])||0,
         pack_info:(c[5]||'').trim()||null});
+      const q=parseFloat(c[4])||0; if(q>0)stockMap.push({sku,qty:q});
     }
     if(!rows.length){toast('ไม่พบข้อมูลในไฟล์');return;}
     const {error}=await db.from('products').upsert(rows,{onConflict:'sku'});
     if(error){toast('นำเข้าไม่สำเร็จ: '+error.message);return;}
+    // ลงสต๊อกเริ่มต้นในคลังหลัก (เฉพาะแถวที่ระบุจำนวน)
+    if(stockMap.length && whList.length){
+      const defWh=(whList.find(w=>w.is_default)||whList[0]).id;
+      const {data:prods}=await db.from('products').select('id,sku').in('sku',stockMap.map(s=>s.sku));
+      const idBySku={};(prods||[]).forEach(p=>idBySku[p.sku]=p.id);
+      for(const s of stockMap){ if(idBySku[s.sku]) await db.rpc('stock_add',{p_product:idBySku[s.sku],p_wh:defWh,p_qty:s.qty}); }
+    }
     toast('นำเข้า '+rows.length+' รายการเรียบร้อย');
     loadProducts();
   };
@@ -1665,7 +1749,7 @@ async function saveReceive(){
     p_supplier:document.getElementById('supplier').value.trim()||null,
     p_items:items,
     p_created_by:document.getElementById('rc-staff').value.trim()||null,
-    p_warehouse:document.getElementById('rc-wh').value
+    p_warehouse:Number(document.getElementById('rc-wh').value)||null
   });
   btn.disabled=false;
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
@@ -1791,17 +1875,18 @@ function renderAccount(){
 }
 async function shipBillUI(id){
   const b=bills.find(x=>x.id===id);if(!b)return;
-  const w=prompt('บิล '+b.bill_no+' — ตัดสต๊อกจากคลังไหน?\n1 = กัลปพฤกษ์\n2 = วังหิน','1');
-  if(w===null)return;
-  const wh=w.trim()==='2'?'wh':'klp';
-  const {error}=await db.rpc('ship_bill',{p_bill_id:id,p_warehouse:wh});
+  if(!whList.length){toast('ยังไม่มีคลัง — ไปเพิ่มในหน้าคลังก่อน');return;}
+  const wid=await pickWarehouse('บิล '+b.bill_no+' — ตัดสต๊อกจากคลังไหน?');
+  if(!wid)return;
+  const whName=(whList.find(w=>w.id===wid)||{}).name||'';
+  const {error}=await db.rpc('ship_bill',{p_bill_id:id,p_warehouse:wid});
   if(error){
     if(error.message.includes('WH_STOCK')){
       const p=error.message.split('|'); toast('สต๊อกไม่พอ: '+(p[1]||'')+' '+(p[2]||''));
     }else toast('ทำไม่สำเร็จ: '+error.message);
     return;
   }
-  toast('บิล '+b.bill_no+' → ส่งแล้ว ตัดสต๊อกจาก'+(wh==='wh'?'วังหิน':'กัลปพฤกษ์')+'เรียบร้อย');
+  toast('บิล '+b.bill_no+' → ส่งแล้ว ตัดสต๊อกจาก'+whName+'เรียบร้อย');
   loadBills(); loadProducts();
 }
 async function cancelBillUI(id){
@@ -1951,6 +2036,167 @@ async function toggleUser(name,active){
   loadUsers();
 }
 
+/* ==================== คลังสินค้า ==================== */
+let warehouses=[], stockRows=[], editWhId=null, whList=[];
+
+// โหลดรายชื่อคลัง (เบา) ใช้เติม dropdown รับเข้า + prompt ส่ง/ตีเสีย
+async function loadWhList(){
+  const {data}=await db.from('warehouses').select('id,name,is_default,sort_order').eq('active',true).order('sort_order').order('id');
+  whList=data||[];
+  const sel=document.getElementById('rc-wh');
+  if(sel){const cur=sel.value;sel.innerHTML=whList.map(w=>`<option value="${w.id}">${esc(w.name)}</option>`).join('');if(cur)sel.value=cur;}
+}
+
+// auto-fill รหัสไปรษณีย์ (prefix = 'w' สำหรับหน้าคลัง)
+function postcodeLookup(prefix){
+  const pc=document.getElementById(prefix+'-postcode').value.trim();
+  const sub=document.getElementById(prefix+'-subdistrict');
+  const dis=document.getElementById(prefix+'-district');
+  const prov=document.getElementById(prefix+'-province');
+  if(pc.length!==5||typeof THAI_POSTCODE==='undefined'){return;}
+  const rows=THAI_POSTCODE[pc];
+  if(!rows||!rows.length){sub.innerHTML='<option value="">ไม่พบรหัสนี้</option>';dis.value='';prov.value='';return;}
+  // rows = [[tambon,amphoe,province],...]
+  sub.innerHTML=rows.map(r=>`<option value="${esc(r[0])}">${esc(r[0])}</option>`).join('');
+  dis.value=rows[0][1];
+  prov.value=rows[0][2];
+  // ถ้าเลือกตำบลแล้ว amphoe อาจต่างกัน (rare) → อัพเดตตามตำบลที่เลือก
+  sub.onchange=()=>{
+    const sel=rows.find(r=>r[0]===sub.value);
+    if(sel){dis.value=sel[1];prov.value=sel[2];}
+  };
+}
+
+async function loadWarehouse(){
+  const [{data:whs},{data:st},{data:sum}]=await Promise.all([
+    db.from('warehouses').select('*').eq('active',true).order('sort_order').order('id'),
+    db.from('stock').select('product_id,warehouse_id,qty'),
+    db.from('v_warehouse_summary').select('*')
+  ]);
+  warehouses=whs||[]; stockRows=st||[];
+  const summary=sum||[];
+
+  // การ์ดภาพรวม
+  const grandVal=summary.reduce((s,w)=>s+Number(w.total_value),0);
+  const grandQty=summary.reduce((s,w)=>s+Number(w.total_qty),0);
+  let html=`<div class="stat red"><div class="ic">🏭</div><div><div class="l">มูลค่าสต๊อกทุกคลัง</div><div class="v">฿${fmt0(grandVal)}</div><div class="l">${fmt0(grandQty)} หน่วยรวม</div></div></div>`;
+  summary.forEach(w=>{
+    html+=`<div class="stat"><div class="ic">📦</div><div><div class="l">${esc(w.name)}</div><div class="v">฿${fmt0(w.total_value)}</div><div class="l">${w.sku_count} รายการ · ${fmt0(w.total_qty)} หน่วย</div></div></div>`;
+  });
+  document.getElementById('wh-stats').innerHTML=html;
+
+  // dropdown เลือกคลัง
+  const sel=document.getElementById('wh-view');const cur=sel.value;
+  sel.innerHTML='<option value="">— ทุกคลัง (ภาพรวม) —</option>'+warehouses.map(w=>`<option value="${w.id}">${esc(w.name)}</option>`).join('');
+  if(cur)sel.value=cur;
+
+  renderWhStock();
+  renderWhList(summary);
+}
+
+function renderWhStock(){
+  const q=(document.getElementById('wh-search').value||'').toLowerCase();
+  const whId=document.getElementById('wh-view').value;
+  const thead=document.getElementById('wh-thead');
+  const tbody=document.getElementById('wh-body');
+  // map stock: product_id -> {wid:qty}
+  const smap={};
+  stockRows.forEach(s=>{(smap[s.product_id]=smap[s.product_id]||{})[s.warehouse_id]=Number(s.qty);});
+  const list=products.filter(p=>p.active!==false&&(!q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q)));
+
+  if(whId){
+    // คลังเดียว
+    const w=warehouses.find(x=>String(x.id)===String(whId));
+    thead.innerHTML=`<tr><th>SKU</th><th>สินค้า</th><th class="num">คงเหลือ</th><th class="num">มูลค่า</th></tr>`;
+    const rows=list.map(p=>({p,qty:(smap[p.id]||{})[whId]||0})).filter(r=>r.qty>0);
+    tbody.innerHTML=rows.length?rows.map(r=>`<tr><td><b>${esc(r.p.sku)}</b></td><td>${esc(r.p.name)}</td>
+      <td class="num"><b>${r.qty}</b> ${esc(r.p.unit)}</td><td class="num">฿${fmt0(r.qty*r.p.base_price)}</td></tr>`).join('')
+      :'<tr><td colspan="4" class="empty">คลังนี้ยังไม่มีสินค้า</td></tr>';
+  }else{
+    // ภาพรวมทุกคลัง — คอลัมน์ต่อคลัง
+    thead.innerHTML=`<tr><th>SKU</th><th>สินค้า</th>${warehouses.map(w=>`<th class="num">${esc(w.name)}</th>`).join('')}<th class="num">รวม</th></tr>`;
+    const rows=list.filter(p=>Number(p.stock_qty)>0);
+    tbody.innerHTML=rows.length?rows.map(p=>{
+      const cells=warehouses.map(w=>`<td class="num">${(smap[p.id]||{})[w.id]||0}</td>`).join('');
+      return `<tr><td><b>${esc(p.sku)}</b></td><td>${esc(p.name)}</td>${cells}<td class="num"><b>${Number(p.stock_qty)}</b></td></tr>`;
+    }).join(''):`<tr><td colspan="${warehouses.length+3}" class="empty">ยังไม่มีสต๊อก</td></tr>`;
+  }
+}
+
+function renderWhList(summary){
+  const valMap={};(summary||[]).forEach(w=>valMap[w.warehouse_id]=w.total_value);
+  document.getElementById('wh-list').innerHTML=warehouses.map(w=>{
+    const addr=[w.addr_name,w.addr_no,w.addr_soi?'ซ.'+w.addr_soi:'',w.addr_road?'ถ.'+w.addr_road:'',
+      w.subdistrict,w.district,w.province,w.postcode].filter(Boolean).join(' ');
+    return `<tr>
+      <td><b>${esc(w.name)}</b>${w.is_default?' <span class="tag tag-ov">หลัก</span>':''}</td>
+      <td>${esc(w.contact_name||'—')}</td>
+      <td>${esc(w.phone||'—')}</td>
+      <td style="font-size:12.5px;max-width:280px">${esc(addr||'—')}${w.map_link?' <a href="'+esc(w.map_link)+'" target="_blank">🗺️</a>':''}</td>
+      <td class="num">฿${fmt0(valMap[w.id]||0)}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-s mini" onclick="editWarehouse(${w.id})">แก้ไข</button>
+        ${w.is_default?'':`<button class="btn-d mini" onclick="delWarehouse(${w.id})">ลบ</button>`}
+      </td></tr>`;
+  }).join('');
+}
+
+function editWarehouse(id){
+  const w=warehouses.find(x=>x.id===id);if(!w)return;
+  editWhId=id;
+  document.getElementById('wh-form-title').textContent='แก้ไข: '+w.name;
+  document.getElementById('w-name').value=w.name||'';
+  document.getElementById('w-contact').value=w.contact_name||'';
+  document.getElementById('w-phone').value=w.phone||'';
+  document.getElementById('w-map').value=w.map_link||'';
+  document.getElementById('w-postcode').value=w.postcode||'';
+  document.getElementById('w-addrname').value=w.addr_name||'';
+  document.getElementById('w-no').value=w.addr_no||'';
+  document.getElementById('w-soi').value=w.addr_soi||'';
+  document.getElementById('w-road').value=w.addr_road||'';
+  if(w.postcode){postcodeLookup('w');setTimeout(()=>{document.getElementById('w-subdistrict').value=w.subdistrict||'';
+    document.getElementById('w-district').value=w.district||'';document.getElementById('w-province').value=w.province||'';},50);}
+  else{document.getElementById('w-district').value=w.district||'';document.getElementById('w-province').value=w.province||'';}
+  window.scrollTo({top:document.getElementById('wh-form-title').offsetTop-80,behavior:'smooth'});
+}
+function resetWhForm(){
+  editWhId=null;
+  document.getElementById('wh-form-title').textContent='เพิ่มคลัง';
+  ['w-name','w-contact','w-phone','w-map','w-postcode','w-addrname','w-no','w-soi','w-road','w-district','w-province'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('w-subdistrict').innerHTML='<option value="">—</option>';
+}
+async function saveWarehouse(){
+  const rec={
+    name:document.getElementById('w-name').value.trim(),
+    contact_name:document.getElementById('w-contact').value.trim()||null,
+    phone:document.getElementById('w-phone').value.trim()||null,
+    map_link:document.getElementById('w-map').value.trim()||null,
+    addr_name:document.getElementById('w-addrname').value.trim()||null,
+    addr_no:document.getElementById('w-no').value.trim()||null,
+    addr_soi:document.getElementById('w-soi').value.trim()||null,
+    addr_road:document.getElementById('w-road').value.trim()||null,
+    subdistrict:document.getElementById('w-subdistrict').value||null,
+    district:document.getElementById('w-district').value.trim()||null,
+    province:document.getElementById('w-province').value.trim()||null,
+    postcode:document.getElementById('w-postcode').value.trim()||null
+  };
+  if(!rec.name){toast('กรอกชื่อคลังก่อน');return;}
+  const q=editWhId?db.from('warehouses').update(rec).eq('id',editWhId):db.from('warehouses').insert(rec);
+  const {error}=await q;
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  toast(editWhId?'อัพเดตคลังแล้ว':'เพิ่มคลัง '+rec.name+' แล้ว');
+  resetWhForm(); loadWarehouse();
+}
+async function delWarehouse(id){
+  const w=warehouses.find(x=>x.id===id);if(!w)return;
+  const hasStock=stockRows.some(s=>s.warehouse_id===id&&Number(s.qty)>0);
+  if(hasStock){toast('ลบไม่ได้ คลัง "'+w.name+'" ยังมีสินค้าเหลืออยู่ ต้องย้าย/ตัดออกก่อน');return;}
+  if(!confirm('ลบคลัง "'+w.name+'" ?'))return;
+  const {error}=await db.from('warehouses').update({active:false}).eq('id',id);
+  if(error){toast('ลบไม่สำเร็จ: '+error.message);return;}
+  toast('ลบคลังแล้ว'); loadWarehouse();
+}
+
 /* ==================== ตั้งค่าระบบ ==================== */
 let appSettings={};
 async function loadSettings(){
@@ -2032,6 +2278,7 @@ async function startApp(){
   loadRcvHistory();
   loadUsers();
   loadSettings();
+  loadWhList();
   setRange('month');
 }
 (function(){
