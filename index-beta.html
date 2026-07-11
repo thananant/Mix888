@@ -10,21 +10,26 @@
 <style>
 :root{
   --ink:#3d2b28; --muted:#9a857f; --line:#efe6e0; --bg:#faf6f2; --card:#ffffff;
-  --accent:#d14d6a; --accent-soft:#fce9ee; --accent-deep:#b02a45;
-  --warn:#c47d2a; --warn-soft:#fbf0dd; --danger:#c0405f; --danger-soft:#fae2e8;
+  --accent:#c0201f; --accent-soft:#fce8e6; --accent-deep:#9e1414;
+  --warn:#c47d2a; --warn-soft:#fbf0dd; --danger:#b52020; --danger-soft:#fae0de;
   --ok:#159b78; --ok-soft:#ddf4ee; --radius:18px;
   --display:'Mali','IBM Plex Sans Thai',sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 body{font-family:'IBM Plex Sans Thai',sans-serif;background:var(--bg);color:var(--ink);font-size:15px;padding-bottom:90px}
-header{background:var(--side1,#7a1230);background:linear-gradient(135deg,#7a1230,#a82848);color:#fff;padding:14px 16px;position:sticky;top:0;z-index:10;box-shadow:0 3px 14px rgba(122,18,48,.18)}
+header{background:linear-gradient(135deg,#9e1414,#c0201f);color:#fff;padding:14px 16px;position:sticky;top:0;z-index:10;box-shadow:0 3px 14px rgba(158,20,20,.18)}
 header h1{font-size:17px;font-weight:700;font-family:var(--display)}
-header h1 span{color:#f5c9d4;font-weight:500}
+header h1 span{color:#ffd0cc;font-weight:500}
 .cust{font-size:13px;color:rgba(255,255,255,.88);margin-top:2px}
 main{max-width:640px;margin:0 auto;padding:12px}
 .searchbox{width:100%;font:inherit;padding:12px 16px;border:1.5px solid var(--line);border-radius:99px;background:var(--card);margin-bottom:10px}
 .searchbox:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .item{background:var(--card);border:1px solid #fbeef0;border-radius:var(--radius);padding:12px 14px;margin-bottom:9px;display:flex;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(217,74,106,.05)}
+.pimg{width:58px;height:58px;border-radius:12px;object-fit:cover;border:1px solid var(--line);flex-shrink:0;background:#f6f0ec;cursor:pointer}
+.pimg-ph{width:58px;height:58px;border-radius:12px;border:1px dashed var(--line);flex-shrink:0;background:#faf5f1;display:flex;align-items:center;justify-content:center;font-size:22px;color:#d9c9c0}
+#imgview{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:50;display:none;align-items:center;justify-content:center;padding:20px}
+#imgview.show{display:flex}
+#imgview img{max-width:100%;max-height:85vh;border-radius:14px;background:#fff}
 .item.out{opacity:.55}
 .info{flex:1;min-width:0}
 .name{font-weight:600;line-height:1.35}
@@ -183,6 +188,7 @@ main{max-width:640px;margin:0 auto;padding:12px}
   <button class="btn btn-p" onclick="backToShop()">สั่งสินค้าเพิ่ม</button>
 </div>
 
+<div id="imgview" onclick="this.classList.remove('show')"><img id="imgview-img" src="" alt=""></div>
 <div id="toast"></div>
 
 <script>
@@ -224,6 +230,13 @@ async function loadCatalog(){
     .select('*').eq('customer_id',customer.id).order('sku');
   if(error){toast('โหลดสินค้าไม่ได้: '+error.message);return;}
   items=data||[];
+  // เติมรูปสินค้า (เผื่อ view ไม่มี image_url)
+  if(items.length&&items[0].image_url===undefined){
+    const ids=items.map(it=>it.product_id);
+    const {data:imgs}=await db.from('products').select('id,image_url').in('id',ids);
+    const im={};(imgs||[]).forEach(r=>im[r.id]=r.image_url);
+    items.forEach(it=>it.image_url=im[it.product_id]||null);
+  }
   for(const it of items){
     if(cart[it.product_id]>it.stock_qty) cart[it.product_id]=Math.max(0,Math.floor(it.stock_qty));
   }
@@ -243,7 +256,11 @@ function render(){
     let stockHtml = out ? '<span class="stock zero">สินค้าหมด</span>'
       : stock<=10 ? `<span class="stock low">เหลือ ${stock} ${esc(it.unit)}</span>`
       : `<span class="stock ok">เหลือ ${stock} ${esc(it.unit)}</span>`;
+    const img=it.image_url
+      ?`<img class="pimg" src="${esc(it.image_url)}" loading="lazy" alt="" onclick="showImg('${esc(it.image_url)}')">`
+      :`<div class="pimg-ph">🧺</div>`;
     return `<div class="item ${out?'out':''}">
+      ${img}
       <div class="info">
         <div class="name">${esc(it.name)}</div>
         ${it.pack_info?`<div class="pack">${esc(it.pack_info)}</div>`:''}
@@ -261,6 +278,10 @@ function render(){
   updateCartBar();
 }
 
+function showImg(u){
+  document.getElementById('imgview-img').src=u;
+  document.getElementById('imgview').classList.add('show');
+}
 function step(pid,d){
   const it=items.find(x=>x.product_id===pid);if(!it)return;
   let q=(cart[pid]||0)+d;
