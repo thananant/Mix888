@@ -2041,8 +2041,9 @@ let warehouses=[], stockRows=[], editWhId=null, whList=[];
 
 // โหลดรายชื่อคลัง (เบา) ใช้เติม dropdown รับเข้า + prompt ส่ง/ตีเสีย
 async function loadWhList(){
-  const {data}=await db.from('warehouses').select('id,name,is_default,sort_order').eq('active',true).order('sort_order').order('id');
-  whList=data||[];
+  const {data,error}=await db.from('warehouses').select('id,name,is_default,sort_order,active').order('sort_order').order('id');
+  if(error){console.warn('loadWhList',error);return;}
+  whList=(data||[]).filter(w=>w.active!==false);
   const sel=document.getElementById('rc-wh');
   if(sel){const cur=sel.value;sel.innerHTML=whList.map(w=>`<option value="${w.id}">${esc(w.name)}</option>`).join('');if(cur)sel.value=cur;}
 }
@@ -2068,13 +2069,16 @@ function postcodeLookup(prefix){
 }
 
 async function loadWarehouse(){
-  const [{data:whs},{data:st},{data:sum}]=await Promise.all([
-    db.from('warehouses').select('*').eq('active',true).order('sort_order').order('id'),
+  const [whRes,stRes,sumRes]=await Promise.all([
+    db.from('warehouses').select('*').order('sort_order').order('id'),
     db.from('stock').select('product_id,warehouse_id,qty'),
     db.from('v_warehouse_summary').select('*')
   ]);
-  warehouses=whs||[]; stockRows=st||[];
-  const summary=sum||[];
+  if(whRes.error){toast('โหลดคลังไม่ได้: '+whRes.error.message);return;}
+  // เก็บเฉพาะคลังที่ active (ถ้า active เป็น null ให้ถือว่าใช้งาน)
+  warehouses=(whRes.data||[]).filter(w=>w.active!==false);
+  stockRows=stRes.data||[];
+  const summary=sumRes.data||[];
 
   // การ์ดภาพรวม
   const grandVal=summary.reduce((s,w)=>s+Number(w.total_value),0);
