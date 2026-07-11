@@ -60,6 +60,32 @@ main{max-width:640px;margin:0 auto;padding:12px}
 #success h2{font-size:20px;margin-bottom:6px}
 #success .ono{font-size:15px;color:var(--muted);margin-bottom:4px}
 #success .ot{font-size:26px;font-weight:700;color:var(--accent);margin-bottom:24px}
+.tabbar{display:flex;gap:8px;margin-bottom:14px}
+.ctab{flex:1;font:inherit;font-weight:600;padding:11px;border:none;border-radius:var(--radius);background:var(--card);color:var(--muted);cursor:pointer;border:1px solid var(--line)}
+.ctab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.datefilter{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px;margin-bottom:12px}
+.qbtns{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.qb{font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border:none;border-radius:99px;background:#f1ece6;color:var(--muted);cursor:pointer}
+.qb.active{background:var(--accent);color:#fff}
+.drow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.drow input{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px}
+.hsum{font-size:13.5px;color:var(--muted);margin-bottom:10px;padding:0 4px}
+.ocard{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:12px}
+.ocard .oh{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:4px}
+.ocard .ono{font-weight:700;font-size:15px}
+.ocard .od{font-size:12.5px;color:var(--muted)}
+.ocard .oa{font-weight:700;font-size:16px;white-space:nowrap}
+.oitems{font-size:13px;color:#5c4a42;margin:8px 0;padding:8px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.oitems div{display:flex;justify-content:space-between;padding:2px 0}
+.steps{display:flex;gap:0;margin-top:10px}
+.step{flex:1;text-align:center;position:relative;font-size:11px;color:#c3b4ab}
+.step::before{content:'';position:absolute;top:11px;left:-50%;width:100%;height:2px;background:#eee;z-index:0}
+.step:first-child::before{display:none}
+.step .dot{width:24px;height:24px;border-radius:50%;background:#eee;color:#fff;display:flex;align-items:center;justify-content:center;margin:0 auto 4px;font-size:12px;position:relative;z-index:1}
+.step.done{color:var(--ok);font-weight:600}
+.step.done .dot{background:var(--ok)}
+.step.done::before{background:var(--ok)}
+.step.wait .dot{background:#e0d5cc}
 .hist{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-top:16px}
 .hist h3{font-size:14px;font-weight:700;margin-bottom:8px;color:var(--muted)}
 .hline{display:flex;justify-content:space-between;font-size:13.5px;padding:6px 0;border-bottom:1px solid var(--line)}
@@ -89,10 +115,30 @@ main{max-width:640px;margin:0 auto;padding:12px}
   </div>
 
   <div id="shop" style="display:none">
-    <input class="searchbox" id="search" placeholder="🔍 ค้นหาสินค้า…" oninput="render()">
-    <div id="list"></div>
-    <div class="hist" id="hist" style="display:none">
-      <h3>ออเดอร์ล่าสุดของคุณ</h3>
+    <div class="tabbar">
+      <button class="ctab active" id="tab-order" onclick="showTab('order')">🛒 สั่งของ</button>
+      <button class="ctab" id="tab-history" onclick="showTab('history')">📋 ประวัติการสั่ง</button>
+    </div>
+
+    <div id="page-order">
+      <input class="searchbox" id="search" placeholder="🔍 ค้นหาสินค้า…" oninput="render()">
+      <div id="list"></div>
+    </div>
+
+    <div id="page-history" style="display:none">
+      <div class="datefilter">
+        <div class="qbtns">
+          <button class="qb" onclick="histRange('7')">7 วัน</button>
+          <button class="qb active" onclick="histRange('30')">30 วัน</button>
+          <button class="qb" onclick="histRange('90')">90 วัน</button>
+          <button class="qb" onclick="histRange('all')">ทั้งหมด</button>
+        </div>
+        <div class="drow">
+          <label>จาก</label><input type="date" id="h-from" onchange="renderHistory()">
+          <label>ถึง</label><input type="date" id="h-to" onchange="renderHistory()">
+        </div>
+      </div>
+      <div id="hist-summary" class="hsum"></div>
       <div id="hist-body"></div>
     </div>
   </div>
@@ -160,7 +206,6 @@ async function init(){
   document.getElementById('cartbar').style.display='flex';
   await loadCatalog();
   subscribeStock();
-  loadHistory();
 }
 
 async function loadCatalog(){
@@ -274,7 +319,8 @@ async function placeOrder(){
   document.getElementById('s-total').textContent=fmt(data.total);
   document.getElementById('success').classList.add('show');
   notifyCentral(data,ci);
-  loadCatalog(); loadHistory();
+  loadCatalog();
+  allOrders=[]; // ให้โหลดใหม่เมื่อเปิดแท็บประวัติ
 }
 async function notifyCentral(data,ci){
   try{
@@ -302,17 +348,82 @@ function backToShop(){
   window.scrollTo(0,0);
 }
 
+let allOrders=[];
+function showTab(t){
+  document.getElementById('tab-order').classList.toggle('active',t==='order');
+  document.getElementById('tab-history').classList.toggle('active',t==='history');
+  document.getElementById('page-order').style.display=t==='order'?'':'none';
+  document.getElementById('page-history').style.display=t==='history'?'':'none';
+  document.getElementById('cartbar').style.display=t==='order'?'flex':'none';
+  if(t==='history') loadHistory();
+}
+function histRange(r){
+  document.querySelectorAll('.qb').forEach(b=>b.classList.remove('active'));
+  event.target.classList.add('active');
+  const to=new Date(), from=new Date();
+  const fmtd=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  document.getElementById('h-to').value=fmtd(to);
+  if(r==='all'){document.getElementById('h-from').value='';document.getElementById('h-to').value='';}
+  else{from.setDate(to.getDate()-Number(r));document.getElementById('h-from').value=fmtd(from);}
+  renderHistory();
+}
 async function loadHistory(){
-  const {data}=await db.from('orders')
-    .select('order_no,total,status,created_at')
-    .eq('customer_id',customer.id)
-    .order('created_at',{ascending:false}).limit(5);
-  if(!data||!data.length)return;
-  document.getElementById('hist').style.display='';
-  document.getElementById('hist-body').innerHTML=data.map(o=>{
-    const d=new Date(o.created_at).toLocaleDateString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
-    const st=o.status==='billed'?'<span class="tag tag-billed">ออกบิลแล้ว</span>':'<span class="tag tag-new">รอทำบิล</span>';
-    return `<div class="hline"><span>${esc(o.order_no)}<br><small style="color:var(--muted)">${d}</small></span><span style="text-align:right">${fmt(o.total)}<br>${st}</span></div>`;
+  const {data,error}=await db.from('orders')
+    .select('id,order_no,total,status,created_at, bills(bill_no,ship_status,payment_status,line_sent)')
+    .eq('customer_id',customer.id).order('created_at',{ascending:false}).limit(500);
+  if(error){console.warn(error);return;}
+  allOrders=data||[];
+  if(!document.getElementById('h-from').value && !document.getElementById('h-to').value){
+    // ตั้งค่าเริ่มต้น 30 วัน
+    const to=new Date(), from=new Date();from.setDate(to.getDate()-30);
+    const fmtd=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    document.getElementById('h-from').value=fmtd(from);
+    document.getElementById('h-to').value=fmtd(to);
+  }
+  renderHistory();
+}
+function orderSteps(o){
+  const bill=(o.bills&&o.bills[0])||null;
+  const cancelled=o.status==='cancelled'||(bill&&bill.ship_status==='cancelled');
+  const billed=!!bill;
+  const shipped=bill&&bill.ship_status==='shipped';
+  const paid=bill&&bill.payment_status==='paid';
+  return {cancelled,ordered:true,billed,shipped,paid};
+}
+function renderHistory(){
+  const from=document.getElementById('h-from').value;
+  const to=document.getElementById('h-to').value;
+  let list=allOrders.filter(o=>{
+    if(from&&new Date(o.created_at)<new Date(from+'T00:00:00'))return false;
+    if(to&&new Date(o.created_at)>new Date(to+'T23:59:59'))return false;
+    return true;
+  });
+  const total=list.reduce((s,o)=>s+Number(o.total),0);
+  document.getElementById('hist-summary').textContent=list.length+' ออเดอร์ · รวม ฿'+fmt(total);
+  const body=document.getElementById('hist-body');
+  if(!list.length){body.innerHTML='<div class="empty">ไม่มีออเดอร์ในช่วงนี้</div>';return;}
+  body.innerHTML=list.map(o=>{
+    const d=new Date(o.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+    const s=orderSteps(o);
+    const bill=(o.bills&&o.bills[0])||null;
+    if(s.cancelled){
+      return `<div class="ocard" style="opacity:.65">
+        <div class="oh"><div><div class="ono">${esc(o.order_no)}</div><div class="od">${d}</div></div>
+          <div class="oa">฿${fmt(o.total)}<br><span class="tag tag-new" style="background:var(--danger-soft);color:var(--danger)">ยกเลิกแล้ว</span></div></div></div>`;
+    }
+    const step=(label,done,icon)=>`<div class="step ${done?'done':'wait'}"><div class="dot">${done?'✓':icon}</div>${label}</div>`;
+    return `<div class="ocard">
+      <div class="oh">
+        <div><div class="ono">${esc(o.order_no)}</div><div class="od">${d}${bill?' · บิล '+esc(bill.bill_no):''}</div></div>
+        <div class="oa">฿${fmt(o.total)}</div>
+      </div>
+      <div class="steps">
+        ${step('รับออเดอร์',s.ordered,'1')}
+        ${step('ออกบิล',s.billed,'2')}
+        ${step('ส่งของ',s.shipped,'3')}
+        ${step('รับชำระ',s.paid,'4')}
+      </div>
+    </div>`;
   }).join('');
 }
 
