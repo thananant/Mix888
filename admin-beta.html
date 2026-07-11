@@ -1954,6 +1954,15 @@ function renderAccount(){
       </td></tr>`;
   }).join('');
 }
+// ส่งข้อความแจ้งสถานะเข้ากลุ่ม LINE ของลูกค้า (ใช้ร่วมทุกจังหวะ)
+async function notifyCustomer(gid,text){
+  if(!gid)return {ok:false,noline:true};
+  try{
+    const {data:res,error}=await db.functions.invoke('line-push',{body:{
+      to:gid,messages:[{type:'text',text}]}});
+    return {ok:!(error||!res||res.status!==200)};
+  }catch(e){return {ok:false};}
+}
 async function shipBillUI(id){
   const b=bills.find(x=>x.id===id);if(!b)return;
   if(!whList.length){toast('ยังไม่มีคลัง — ไปเพิ่มในหน้าคลังก่อน');return;}
@@ -1968,6 +1977,9 @@ async function shipBillUI(id){
     return;
   }
   toast('บิล '+b.bill_no+' → ส่งแล้ว ตัดสต๊อกจาก'+whName+'เรียบร้อย');
+  const r=await notifyCustomer(b.customers?.line_group_id,
+    '🚚 บิลเลขที่ '+b.bill_no+'\nสถานะ: จัดส่งแล้ว กำลังนำส่งถึงมือลูกค้า\nยอด ฿'+fmt(b.total));
+  if(b.customers?.line_group_id&&!r.ok) toast('ส่งแล้ว แต่แจ้ง LINE ไม่สำเร็จ');
   loadBills(); loadProducts();
 }
 async function cancelBillUI(id){
@@ -1976,6 +1988,9 @@ async function cancelBillUI(id){
   const {error}=await db.rpc('cancel_bill',{p_bill_id:id});
   if(error){toast('ยกเลิกไม่สำเร็จ: '+error.message);return;}
   toast('ยกเลิกบิล '+b.bill_no+' และคืนของจองแล้ว');
+  if(b.customers?.line_group_id && confirm('แจ้งลูกค้าในกลุ่ม LINE ว่าบิลนี้ถูกยกเลิกไหม?')){
+    await notifyCustomer(b.customers.line_group_id,'❌ บิลเลขที่ '+b.bill_no+' ถูกยกเลิกแล้ว\nหากมีข้อสงสัยติดต่อร้านได้เลยครับ');
+  }
   loadBills(); loadProducts();
 }
 async function resendBill(id,btn){
