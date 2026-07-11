@@ -1917,7 +1917,7 @@ async function drawBill(o,billNo){
   // ขอบขวาของแต่ละคอลัมน์ตัวเลข (right-aligned) — เว้นระยะไม่ให้ชน
   const colQtyR = Wmm-290;   // ขอบขวาคอลัมน์จำนวน
   const colPriceR = Wmm-135; // ขอบขวาคอลัมน์มูลค่าต่อหน่วย
-  const colSumR = R;         // ขอบขวาคอลัมน์รวม
+  const colSumR = R-14;      // ขอบขวาคอลัมน์รวม (เว้น 14px จากเส้นขอบตาราง ไม่ให้ชน)
   const cX={no:PAD+6, img:PAD+30, code:PAD+90, name:PAD+178, nameEnd:Wmm-370};
   x.fillStyle='#111';x.lineWidth=1;
   x.strokeRect(PAD,y,Wmm-2*PAD,tableHeadH);
