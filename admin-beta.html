@@ -286,7 +286,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-p" onclick="saveSkuCat()">บันทึก</button>
       <button class="btn-g" onclick="resetSkuCatForm()">ล้าง</button>
     </div>
-    <p class="hint">รหัสหมวดคือตัวนำหน้า SKU เช่น หมวด "WTR" → สินค้าจะเป็น WTR001, WTR002… (ระบบรันเลขต่อให้อัตโนมัติ)</p>
+    <p class="hint">รหัสหมวดคือตัวนำหน้า SKU เช่น หมวด "WTR" → สินค้าจะเป็น WTR0001, WTR0002… (ระบบรันเลขต่อให้อัตโนมัติ)</p>
   </div>
   <div class="card">
     <h3 class="ct">หมวดทั้งหมด</h3>
@@ -838,7 +838,7 @@ function nextSkuLocal(prefix){
   const re=new RegExp('^'+prefix+'(\\d+)$');
   let max=0;
   products.forEach(p=>{const m=(p.sku||'').match(re); if(m)max=Math.max(max,parseInt(m[1],10));});
-  return prefix+String(max+1).padStart(3,'0');
+  return prefix+String(max+1).padStart(4,'0');
 }
 function onSkuCat(){
   if(editProductId)return; // ตอนแก้ไขไม่เปลี่ยน SKU
@@ -1213,8 +1213,9 @@ function renderCustomers(){
   const pc=window._priceCounts||{};
   document.getElementById('c-body').innerHTML=list.map(c=>{
     const sname=saleName(c.sale_id)||c.sale_name;
-    return `<tr>
-    <td><b>${esc(c.code)}</b></td><td>${esc(c.name)}</td>
+    const inactive=c.active===false;
+    return `<tr${inactive?' style="opacity:.5"':''}>
+    <td><b>${esc(c.code)}</b>${inactive?' <span class="tag tag-out">ปิดใช้งาน</span>':''}</td><td>${esc(c.name)}</td>
     <td>${sname?esc(sname):'<span style="color:var(--muted)">—</span>'}</td>
     <td style="font-variant-numeric:tabular-nums">${c.phone?esc(c.phone):'<span style="color:var(--muted)">—</span>'}</td>
     <td style="font-size:12.5px;color:var(--muted)">${c.line_group_id?esc(c.line_group_id.slice(0,14))+'…':'<span class="tag tag-low">ยังไม่ผูก</span>'}</td>
@@ -1223,6 +1224,9 @@ function renderCustomers(){
       <button class="btn-s mini" onclick="editCustomer(${c.id})">แก้ไข</button>
       <button class="btn-g mini" onclick="gotoPricing(${c.id})">จัดสินค้า</button>
       <button class="btn-g mini" onclick="copyLink(${c.id})">🔗 ลิงก์</button>
+      ${inactive
+        ?`<button class="btn-ok mini" onclick="toggleCustomerActive(${c.id},true)">เปิดใช้</button>`
+        :`<button class="btn-d mini" onclick="deleteCustomer(${c.id})">ลบ</button>`}
     </td></tr>`;}).join('');
 }
 function editCustomer(id){
@@ -1369,6 +1373,35 @@ async function saveCustomer(){
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
   toast(editCustomerId?'อัพเดตลูกค้าแล้ว':'เพิ่มลูกค้า '+rec.code+' แล้ว');
   resetCustomerForm(); loadCustomers();
+}
+async function deleteCustomer(id){
+  const c=customers.find(x=>x.id===id);if(!c)return;
+  // เช็คว่ามีประวัติออเดอร์/บิลไหม
+  const [{count:nOrd},{count:nBill}]=await Promise.all([
+    db.from('orders').select('id',{count:'exact',head:true}).eq('customer_id',id),
+    db.from('bills').select('id',{count:'exact',head:true}).eq('customer_id',id)
+  ]);
+  const hist=(nOrd||0)+(nBill||0);
+  if(hist>0){
+    // มีประวัติ — ลบถาวรไม่ได้ เสนอปิดการใช้งานแทน
+    if(!confirm(`⚠️ "${c.name}" (${c.code}) มีประวัติ ${nOrd||0} ออเดอร์ / ${nBill||0} บิล\nลบถาวรไม่ได้เพราะประวัติจะหาย\n\nต้องการ "ปิดการใช้งาน" แทนไหม?\n(ลิงก์สั่งของจะใช้ไม่ได้ทันที และเปิดกลับได้ภายหลัง)`))return;
+    await toggleCustomerActive(id,false);
+    return;
+  }
+  if(!confirm(`ลบลูกค้า "${c.name}" (${c.code}) ถาวร?\nรายการจัดสินค้า/ราคาที่ผูกไว้จะถูกลบด้วย`))return;
+  const {error:e1}=await db.from('customer_prices').delete().eq('customer_id',id);
+  if(e1){toast('ลบราคาที่ผูกไว้ไม่ได้: '+e1.message);return;}
+  const {error}=await db.from('customers').delete().eq('id',id);
+  if(error){toast('ลบไม่สำเร็จ: '+error.message);return;}
+  toast('ลบลูกค้า '+c.code+' แล้ว');
+  loadCustomers();
+}
+async function toggleCustomerActive(id,on){
+  const c=customers.find(x=>x.id===id);if(!c)return;
+  const {error}=await db.from('customers').update({active:on}).eq('id',id);
+  if(error){toast((on?'เปิดใช้':'ปิดใช้งาน')+'ไม่สำเร็จ: '+error.message);return;}
+  toast((on?'เปิดใช้งาน ':'ปิดการใช้งาน ')+c.code+' แล้ว');
+  loadCustomers();
 }
 function gotoPricing(id){
   showPage('pricing');
