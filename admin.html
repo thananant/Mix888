@@ -235,7 +235,8 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div><label>หน่วยขาย</label><input id="p-unit" style="width:80px" value="ลัง"></div>
       <div style="flex:1;min-width:170px"><label>ข้อมูลแพ็ค</label><input id="p-pack" style="width:100%" placeholder="เช่น 1 ลัง = 24 กระป๋อง"></div>
       <div><label>ราคากลาง</label><input id="p-price" type="number" step="0.01" style="width:100px" class="num"></div>
-      <div><label>สต๊อกเริ่มต้น (เข้ากัลปฯ)</label><input id="p-stock" type="number" step="1" style="width:110px" class="num" value="0" title="ใช้ตอนเพิ่มสินค้าใหม่เท่านั้น — สต๊อกเดิมปรับผ่านหน้ารับสินค้า/ตีเสีย"></div>
+      <div><label>สต๊อกเริ่มต้น</label><input id="p-stock" type="number" step="1" style="width:90px" class="num" value="0" title="ใช้ตอนเพิ่มสินค้าใหม่เท่านั้น — สต๊อกเดิมปรับผ่านหน้ารับสินค้า/ตีเสีย"></div>
+      <div><label>เข้าโกดัง</label><select id="p-stock-wh" style="min-width:110px"></select></div>
       <div><label>เตือนใกล้หมด</label><input id="p-alert" type="number" step="1" style="width:90px" class="num" value="10"></div>
       <div><label>เรท 20 ลัง</label><input id="p-r20" type="number" step="0.01" style="width:100px" class="num" placeholder="ว่าง=กลาง"></div>
       <div><label>เรท 50 ลัง</label><input id="p-r50" type="number" step="0.01" style="width:100px" class="num" placeholder="ว่าง=กลาง"></div>
@@ -273,7 +274,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th style="width:44px">รูป</th><th>SKU</th><th>ชื่อสินค้า</th><th>หน่วย / แพ็ค</th><th class="num">ราคากลาง</th><th class="num">สต๊อกรวม</th><th class="num">จองรอส่ง</th><th class="num">พร้อมขาย</th><th>สถานะ</th><th></th></tr></thead>
+      <thead><tr id="p-head"><th style="width:44px">รูป</th><th>SKU</th><th>ชื่อสินค้า</th><th>หน่วย / แพ็ค</th><th class="num">ราคากลาง</th><th class="num">สต๊อกรวม</th><th class="num">จองรอส่ง</th><th class="num">พร้อมขาย</th><th>สถานะ</th><th></th></tr></thead>
       <tbody id="p-body"></tbody>
     </table>
     </div>
@@ -556,6 +557,13 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="fbtn active" data-f="unpaid" onclick="setFilter('unpaid')">ค้างจ่าย</button>
       <button class="fbtn" data-f="paid" onclick="setFilter('paid')">จ่ายแล้ว</button>
       <button class="fbtn" data-f="all" onclick="setFilter('all')">ทั้งหมด</button>
+      <select id="ac-delivery" onchange="renderAccount()" title="กรองตามวิธีขนส่ง">
+        <option value="">ขนส่ง: ทั้งหมด</option>
+        <option value="Lalamove">Lalamove</option>
+        <option value="BI">BI</option>
+        <option value="แพ็คของ">แพ็คของ</option>
+        <option value="มารับเอง">มารับเอง</option>
+      </select>
       <select id="ac-ship" onchange="renderAccount()" title="กรองสถานะจัดส่ง"><option value="">ส่ง: ทั้งหมด</option><option value="pending">รอส่ง</option><option value="shipped">ส่งแล้ว</option><option value="cancelled">ยกเลิก</option></select>
       <input type="date" id="ac-from" onchange="renderAccount()" title="ตั้งแต่วันที่">
       <input type="date" id="ac-to" onchange="renderAccount()" title="ถึงวันที่">
@@ -926,10 +934,17 @@ async function delSkuCat(id){
 }
 
 /* ==================== สินค้า ==================== */
+let stockByProd={};
 async function loadProducts(){
   const {data,error} = await db.from('products').select('*').order('sku');
   if(error){toast('โหลดสินค้าไม่ได้: '+error.message);return;}
-  products = data||[]; renderProducts();
+  products = data||[];
+  try{
+    const {data:st}=await db.from('stock').select('product_id,warehouse_id,qty');
+    stockByProd={};
+    (st||[]).forEach(s=>{(stockByProd[s.product_id]=stockByProd[s.product_id]||{})[s.warehouse_id]=Number(s.qty)||0;});
+  }catch(e){console.warn('stock per wh',e);}
+  renderProducts();
 }
 let prodTab='active';
 function setProdTab(t){
@@ -966,8 +981,11 @@ function renderProducts(){
     return !q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q);
   });
   document.getElementById('p-count').textContent=list.length+' รายการ';
+  const whCols=whList.map(w=>`<th class="num" title="สต๊อกใน ${esc(w.name)}">${esc(w.name)}</th>`).join('');
+  document.getElementById('p-head').innerHTML='<th style="width:44px">รูป</th><th>SKU</th><th>ชื่อสินค้า</th><th>หน่วย / แพ็ค</th><th class="num">ราคากลาง</th>'+whCols+'<th class="num">สต๊อกรวม</th><th class="num">จองรอส่ง</th><th class="num">พร้อมขาย</th><th>สถานะ</th><th></th>';
+  const nCols=10+whList.length;
   if(!list.length){
-    document.getElementById('p-body').innerHTML='<tr><td colspan="10" class="empty">'+(prodTab==='inactive'?'ยังไม่มีสินค้าที่ยกเลิกการขาย':'ไม่พบสินค้า')+'</td></tr>';
+    document.getElementById('p-body').innerHTML='<tr><td colspan="'+nCols+'" class="empty">'+(prodTab==='inactive'?'ยังไม่มีสินค้าที่ยกเลิกการขาย':'ไม่พบสินค้า')+'</td></tr>';
     return;
   }
   document.getElementById('p-body').innerHTML=list.map(p=>{
@@ -980,12 +998,14 @@ function renderProducts(){
          <button class="btn-d mini" onclick="hardDelProduct(${p.id})">ลบถาวร</button>`
       : `<button class="btn-s mini" onclick="editProduct(${p.id})">แก้ไข</button>
          <button class="btn-g mini" onclick="wasteProduct(${p.id})">ตีเสีย</button>
+         <button class="btn-g mini" onclick="deactivateProduct(${p.id})">ปิดขาย</button>
          <button class="btn-d mini" onclick="delProduct(${p.id})">ลบ</button>`;
     return `<tr${prodTab==='inactive'?' style="opacity:.7"':''}>
       <td>${p.image_url?`<img src="${esc(p.image_url)}" style="width:36px;height:36px;border-radius:6px;object-fit:cover;border:1px solid var(--line)">`:'<span style="color:var(--line)">—</span>'}</td>
       <td><b>${esc(p.sku)}</b></td><td>${esc(p.name)}</td>
       <td>${esc(p.unit)}${p.pack_info?'<div class="pack">'+esc(p.pack_info)+'</div>':''}</td>
       <td class="num">${fmt(p.base_price)}</td>
+      ${whList.map(w=>{const q=(stockByProd[p.id]||{})[w.id]||0;return '<td class="num" style="color:'+(q>0?'inherit':'var(--muted)')+'">'+q+'</td>';}).join('')}
       <td class="num"><a href="javascript:void(0)" onclick="showStockDetail(${p.id})" style="color:var(--accent);font-weight:600;text-decoration:underline dotted">${Number(p.stock_qty||0)}</a></td>
       <td class="num" style="color:var(--warn)">${Number(p.reserved_qty||0)}</td>
       <td class="num"><b>${avail}</b></td><td>${tag}</td>
@@ -1082,8 +1102,8 @@ async function saveProduct(){
     if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
     // ลงสต๊อกเริ่มต้นในคลังหลัก
     if(initStock>0 && whList.length){
-      const defWh=(whList.find(w=>w.is_default)||whList[0]).id;
-      await db.rpc('stock_add',{p_product:ins.id,p_wh:defWh,p_qty:initStock});
+      const selWh=Number(document.getElementById('p-stock-wh').value)||(whList.find(w=>w.is_default)||whList[0]).id;
+      await db.rpc('stock_add',{p_product:ins.id,p_wh:selWh,p_qty:initStock});
     }
     toast('เพิ่มสินค้าแล้ว');
   }
@@ -1097,6 +1117,14 @@ async function delProduct(id){
     await db.from('products').update({active:false}).eq('id',id);
     toast('ย้ายไปแท็บ "ยกเลิกการขาย" แล้ว (ลบถาวรไม่ได้เพราะมีประวัติ)');
   } else toast('ลบแล้ว');
+  loadProducts();
+}
+async function deactivateProduct(id){
+  const p=products.find(x=>x.id===id);if(!p)return;
+  if(!confirm('ปิดการขาย "'+p.name+'" ?\nสินค้าจะย้ายไปแท็บ "ยกเลิกการขาย" (กู้คืนได้ตลอด) และลูกค้าจะไม่เห็นสินค้านี้'))return;
+  const {error}=await db.from('products').update({active:false}).eq('id',id);
+  if(error){toast('ปิดการขายไม่สำเร็จ: '+error.message);return;}
+  toast('ปิดการขาย "'+p.name+'" แล้ว — ดูได้ในแท็บยกเลิกการขาย');
   loadProducts();
 }
 async function restoreProduct(id){
@@ -1759,7 +1787,12 @@ function renderOrders(){
           <td class="num">${fmt(it.amount)}</td></tr>`).join('')}
         </tbody>
       </table>
-      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
+      <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap;align-items:flex-end">
+        <div><label style="font-size:12px;color:var(--muted)">ค่าขนส่ง (฿)</label><br><input id="bs-ship-${o.id}" type="number" step="0.01" min="0" value="0" class="num" style="width:100px" oninput="updGrand(${o.id},${o.total})"></div>
+        <div><label style="font-size:12px;color:var(--muted)">ส่วนลด (฿)</label><br><input id="bs-disc-${o.id}" type="number" step="0.01" min="0" value="0" class="num" style="width:100px" oninput="updGrand(${o.id},${o.total})"></div>
+        <div style="font-weight:700;padding-bottom:6px">ยอดเรียกเก็บ: ฿<span id="bs-grand-${o.id}">${fmt(o.total)}</span></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
         <button class="btn-p" onclick="makeBill(${o.id},this,true)">🧾 ออกบิล + ส่ง LINE</button>
         <button class="btn-g" onclick="makeBill(${o.id},this,false)">ออกบิลเฉย ๆ</button>
         ${hasLine?'':'<span class="tag tag-low">ลูกค้ายังไม่ผูกกลุ่ม LINE — บิลจะออกเป็นรูปให้เปิดดูแทน</span>'}
@@ -1832,7 +1865,11 @@ function billContact(c){
     addr: appSettings.shop_address||''
   };
 }
-async function drawBill(o,billNo){
+async function drawBill(o,billNo,extra){
+  extra=extra||{};
+  const _ship=Number(extra.shipFee)||0, _disc=Number(extra.discount)||0;
+  const _grand=extra.grand!=null?Number(extra.grand):Number(o.total);
+  const _rev=extra.revision||1;
   await document.fonts.load('700 30px "IBM Plex Sans Thai"');
   await document.fonts.load('400 20px "IBM Plex Sans Thai"');
   const c=o.customers, items=o.order_items;
@@ -1856,7 +1893,7 @@ async function drawBill(o,billNo){
   // คำนวณความสูงเนื้อหา
   const headH=210, custH=150, tableHeadH=46;
   const bodyH=items.length*rowH;
-  const totalH=120, signH=210, footH=40;
+  const totalH=120+((_ship||_disc)?52:0), signH=210, footH=40;
   const Hlogic=headH+custH+tableHeadH+bodyH+totalH+signH+footH;
   const H=Math.max(Hlogic,1050);
 
@@ -1968,15 +2005,23 @@ async function drawBill(o,billNo){
   x.textAlign='left';
   y+=44;
 
+  // ค่าขนส่ง / ส่วนลด (ถ้ามี)
+  if(_ship||_disc){
+    y+=28;
+    x.textAlign='right';x.font='400 13.5px "IBM Plex Sans Thai"';x.fillStyle='#333';
+    if(_ship){x.fillText('ค่าขนส่ง',R-160,y);x.fillText(fmt(_ship),R,y);y+=22;}
+    if(_disc){x.fillText('ส่วนลด',R-160,y);x.fillText('-'+fmt(_disc),R,y);y+=22;}
+    y-=22;
+  }
   // มูลค่ารวมสุทธิ
   y+=34;
   x.textAlign='right';x.font='700 15px "IBM Plex Sans Thai"';x.fillStyle='#111';
   x.fillText('มูลค่ารวมสุทธิ',R-160,y);
   x.font='700 16px "IBM Plex Sans Thai"';
-  x.fillText(fmt(o.total)+' บาท',R,y);
+  x.fillText(fmt(_grand)+' บาท',R,y);
   y+=22;
   x.font='400 12.5px "IBM Plex Sans Thai"';x.fillStyle='#555';
-  x.fillText('('+bahtText(o.total)+')',R,y);
+  x.fillText('('+bahtText(_grand)+')',R,y);
   x.textAlign='left';
 
   // ---------- ช่องเซ็น 3 จุด ----------
@@ -1999,7 +2044,7 @@ async function drawBill(o,billNo){
 
   // เวอร์ชันบิล (ไว้เช็คว่าใช้ไฟล์ใหม่หรือเก่า)
   x.font='400 9px "IBM Plex Sans Thai"';x.fillStyle='#bbb';x.textAlign='right';
-  x.fillText('bill v2 · '+new Date().toLocaleTimeString('th-TH'),R,y+118);
+  x.fillText('Bill v.'+_rev+' · '+new Date().toLocaleDateString('th-TH',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+new Date().toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'}),R,y+118);
   x.textAlign='left';
 
   return {cv, contentH:(y+120)};
@@ -2041,12 +2086,22 @@ async function nextBillNo(){
   if(data&&data.length){const last=parseInt(data[0].bill_no.slice(prefix.length),10);if(!isNaN(last))n=last+1;}
   return prefix+String(n).padStart(4,'0');
 }
+function updGrand(oid,total){
+  const s=Number(document.getElementById('bs-ship-'+oid)?.value)||0;
+  const d=Number(document.getElementById('bs-disc-'+oid)?.value)||0;
+  const g=Math.max(0,Number(total)+s-d);
+  const el=document.getElementById('bs-grand-'+oid);
+  if(el)el.textContent=fmt(g);
+}
 async function makeBill(orderId,btn,sendLine){
   const o=orders.find(x=>x.id===orderId);if(!o)return;
+  const shipFee=Number(document.getElementById('bs-ship-'+orderId)?.value)||0;
+  const discount=Number(document.getElementById('bs-disc-'+orderId)?.value)||0;
+  const grand=Math.max(0,Number(o.total)+shipFee-discount);
   btn.disabled=true;btn.textContent='กำลังออกบิล…';
   try{
     const billNo=await nextBillNo();
-    const result=await drawBill(o,billNo);
+    const result=await drawBill(o,billNo,{shipFee,discount,grand,revision:1});
     const cv=result.cv;
     const blob=await new Promise(res=>cv.toBlob(res,'image/png'));
 
@@ -2064,7 +2119,8 @@ async function makeBill(orderId,btn,sendLine){
 
     const {error:insErr}=await db.from('bills').insert({
       bill_no:billNo,order_id:o.id,customer_id:o.customers.id,
-      total:o.total,image_url:imageUrl,line_sent:false});
+      total:grand,shipping_fee:shipFee,discount:discount,revision:1,
+      image_url:imageUrl,line_sent:false});
     if(insErr)throw new Error('บันทึกบิลไม่สำเร็จ: '+insErr.message);
     await db.from('orders').update({status:'billed'}).eq('id',o.id);
 
@@ -2073,7 +2129,10 @@ async function makeBill(orderId,btn,sendLine){
         to:o.customers.line_group_id,
         messages:[
           {type:'image',originalContentUrl:imageUrl,previewImageUrl:imageUrl},
-          {type:'text',text:'🧾 บิลเลขที่ '+billNo+'\nยอดรวม ฿'+fmt(o.total)+'\nขอบคุณที่สั่งสินค้าครับ'}
+          {type:'text',text:'🧾 บิลเลขที่ '+billNo
+            +(shipFee?'\nค่าขนส่ง ฿'+fmt(shipFee):'')
+            +(discount?'\nส่วนลด -฿'+fmt(discount):'')
+            +'\nยอดรวม ฿'+fmt(grand)+'\nขอบคุณที่สั่งสินค้าครับ'}
         ]}});
       if(fnErr||!res||res.status!==200){
         toast('ออกบิล '+billNo+' แล้ว แต่ส่ง LINE ไม่สำเร็จ — ไปกดส่งซ้ำได้ในหน้าบัญชี');
@@ -2099,15 +2158,23 @@ async function sendDailySummary(btn){
   }
   btn.disabled=true;btn.textContent='กำลังดึงออเดอร์…';
   const today=new Date();today.setHours(0,0,0,0);
-  const {data,error}=await db.from('orders')
+  const {data:raw,error}=await db.from('orders')
     .select(`order_no,created_at,total,status,
       customers(code,name,sale_name,contact_name,phone,billing_address,map_link,receive_time,note,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address),
-      order_items(qty,products(name,unit))`)
+      order_items(qty,products(name,unit)),
+      bills(bill_no,ship_status)`)
     .gte('created_at',today.toISOString()).neq('status','cancelled')
     .order('delivery_method',{foreignTable:'customers',ascending:true});
+  // ตัดออเดอร์ที่ "ส่งแล้ว" หรือบิลถูก "ยกเลิก" — สรุปเฉพาะที่รอจัดส่งจริง
+  const data=(raw||[]).filter(o=>{
+    const bs=(o.bills||[]).filter(b=>b.ship_status!=='cancelled');
+    if((o.bills||[]).length && !bs.length) return false;
+    if(bs.some(b=>b.ship_status==='shipped')) return false;
+    return true;
+  });
   btn.disabled=false;btn.textContent='📋 ส่งสรุปออเดอร์วันนี้เข้าไลน์กลาง';
   if(error){toast('ดึงออเดอร์ไม่สำเร็จ: '+error.message);return;}
-  if(!data||!data.length){toast('วันนี้ยังไม่มีออเดอร์');return;}
+  if(!data.length){toast('วันนี้ไม่มีออเดอร์ที่รอจัดส่ง (ส่งแล้ว/ยกเลิก ไม่นำมาสรุป)');return;}
 
   // จัดกลุ่มตามวิธีจัดส่ง
   const groups={};
@@ -2122,6 +2189,8 @@ async function sendDailySummary(btn){
     list.forEach((o,i)=>{
       const c=o.customers||{};
       t+='\n\n('+(i+1)+')';
+      const bill=(o.bills||[]).find(b=>b.ship_status!=='cancelled');
+      if(bill) t+='\nเลขที่บิล : '+bill.bill_no;
       if(c.sale_name) t+='\nSale : '+c.sale_name;
       t+='\nผู้รับ : '+(c.ship_receiver||c.contact_name||c.name||'-');
       const ph=c.ship_phone||c.phone; if(ph) t+='\nเบอร์ติดต่อ : '+ph;
@@ -2244,7 +2313,7 @@ document.addEventListener('click',e=>{
 /* ==================== บัญชี ==================== */
 async function loadBills(){
   const {data,error}=await db.from('bills')
-    .select('*, customers(code,name,line_group_id), orders(order_no)')
+    .select('*, customers(code,name,line_group_id,delivery_method), orders(order_no)')
     .order('created_at',{ascending:false}).limit(500);
   if(error){toast('โหลดบิลไม่ได้: '+error.message);return;}
   bills=data||[]; renderAccount(); acStats();
@@ -2293,6 +2362,8 @@ function renderAccount(){
     if(acFilter==='unpaid'&&b.payment_status==='paid')return false;
     if(acFilter==='paid'&&b.payment_status!=='paid')return false;
     if(shipF&&(b.ship_status||'pending')!==shipF)return false;
+    const dlvF=document.getElementById('ac-delivery').value;
+    if(dlvF&&(b.customers?.delivery_method||'')!==dlvF)return false;
     if(from&&new Date(b.created_at)<new Date(from+'T00:00:00'))return false;
     if(to&&new Date(b.created_at)>new Date(to+'T23:59:59'))return false;
     if(q&&!b.bill_no.toLowerCase().includes(q)&&!(b.orders?.order_no||'').toLowerCase().includes(q)&&!(b.customers?.name||'').toLowerCase().includes(q))return false;
@@ -2511,6 +2582,8 @@ async function loadWhList(){
   const {data,error}=await db.from('warehouses').select('id,name,is_default,sort_order,active').order('sort_order').order('id');
   if(error){console.warn('loadWhList',error);return;}
   whList=(data||[]).filter(w=>w.active!==false);
+  const psw=document.getElementById('p-stock-wh');
+  if(psw){psw.innerHTML=whList.map(w=>`<option value="${w.id}"${w.is_default?' selected':''}>${esc(w.name)}</option>`).join('');}
   const sel=document.getElementById('rc-wh');
   if(sel){const cur=sel.value;sel.innerHTML=whList.map(w=>`<option value="${w.id}">${esc(w.name)}</option>`).join('');if(cur)sel.value=cur;}
 }
