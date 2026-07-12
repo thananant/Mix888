@@ -557,6 +557,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="fbtn active" data-f="unpaid" onclick="setFilter('unpaid')">ค้างจ่าย</button>
       <button class="fbtn" data-f="paid" onclick="setFilter('paid')">จ่ายแล้ว</button>
       <button class="fbtn" data-f="all" onclick="setFilter('all')">ทั้งหมด</button>
+      <button class="fbtn" data-f="slip" onclick="setFilter('slip')">🧾 มีสลิป</button>
       <select id="ac-delivery" onchange="renderAccount()" title="กรองตามวิธีขนส่ง">
         <option value="">ขนส่ง: ทั้งหมด</option>
         <option value="Lalamove">Lalamove</option>
@@ -645,6 +646,54 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 <div id="toast"></div>
 
 <!-- Modal: สต๊อกแยกคลัง -->
+<!-- ===== แก้ไขบิล ===== -->
+<div id="editbill-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)closeEditBill()">
+  <div class="card" style="max-width:760px;width:100%;margin-top:30px">
+    <h3 style="margin:0 0 4px">✏️ แก้ไขบิล <span id="eb-no"></span> <span id="eb-rev" class="tag tag-low"></span></h3>
+    <div id="eb-cust" style="color:var(--muted);font-size:13px;margin-bottom:10px"></div>
+    <table><thead><tr><th>รายการ</th><th class="num" style="width:90px">จำนวน</th><th class="num" style="width:110px">ราคา</th><th class="num" style="width:110px">รวม</th><th style="width:40px"></th></tr></thead>
+    <tbody id="eb-items"></tbody></table>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:flex-end">
+      <div style="flex:1;min-width:220px"><label>เพิ่มสินค้า / ของแถม</label>
+        <input id="eb-add-search" list="eb-prodlist" placeholder="พิมพ์ชื่อหรือ SKU…" style="width:100%">
+        <datalist id="eb-prodlist"></datalist></div>
+      <div><label>จำนวน</label><input id="eb-add-qty" type="number" min="1" value="1" class="num" style="width:80px"></div>
+      <button class="btn-s" onclick="ebAdd(false)">+ เพิ่ม</button>
+      <button class="btn-g" onclick="ebAdd(true)" title="เพิ่มด้วยราคา 0 บาท">🎁 แถม/Tester</button>
+    </div>
+    <div style="display:flex;gap:14px;margin-top:14px;flex-wrap:wrap;align-items:flex-end">
+      <div><label>ค่าขนส่ง (฿)</label><input id="eb-ship" type="number" step="0.01" min="0" class="num" style="width:110px" oninput="ebTotals()"></div>
+      <div><label>ส่วนลด (฿)</label><input id="eb-disc" type="number" step="0.01" min="0" class="num" style="width:110px" oninput="ebTotals()"></div>
+      <div style="margin-left:auto;text-align:right">
+        <div style="font-size:13px;color:var(--muted)">รวมสินค้า ฿<span id="eb-sub">0</span></div>
+        <div style="font-weight:700;font-size:18px">ยอดเรียกเก็บ ฿<span id="eb-grand">0</span></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn-p" id="eb-save" onclick="saveEditBill(this)">💾 บันทึก + ออกบิลใหม่ (v.ถัดไป)</button>
+      <button class="btn-g" onclick="closeEditBill()">ปิด</button>
+    </div>
+    <p class="hint" style="margin-top:8px">แก้ได้เฉพาะบิลที่ยังไม่จัดส่ง · ระบบจะปรับยอดจองสต๊อกให้อัตโนมัติ และสร้างรูปบิลเวอร์ชันใหม่</p>
+  </div>
+</div>
+<!-- ===== รับยอด + สลิป ===== -->
+<div id="slip-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)closeSlipModal()">
+  <div class="card" style="max-width:420px;width:100%">
+    <h3 style="margin:0 0 6px">✓ รับยอดบิล <span id="sp-no"></span></h3>
+    <div id="sp-info" style="color:var(--muted);font-size:13.5px;margin-bottom:10px"></div>
+    <label>รูปสลิปโอน (แนบหรือไม่ก็ได้)</label>
+    <input type="file" id="sp-file" accept="image/*" style="width:100%;margin:4px 0 6px">
+    <img id="sp-preview" style="display:none;max-width:100%;max-height:220px;border-radius:10px;border:1px solid var(--line)">
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn-ok" id="sp-confirm" onclick="confirmPaid(this)">✓ ยืนยันรับยอด</button>
+      <button class="btn-g" onclick="closeSlipModal()">ยกเลิก</button>
+    </div>
+  </div>
+</div>
+<!-- ===== ดูรูปเต็มจอ ===== -->
+<div id="imgview" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:120;align-items:center;justify-content:center;padding:20px" onclick="this.style.display='none'">
+  <img id="imgview-img" style="max-width:96%;max-height:92vh;border-radius:12px;background:#fff">
+</div>
 <div id="stock-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)closeStockDetail()">
   <div style="background:#fff;border-radius:16px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,.2)">
     <div style="padding:18px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
@@ -2311,12 +2360,19 @@ document.addEventListener('click',e=>{
 });
 
 /* ==================== บัญชี ==================== */
+let acPendingOrders=[];
 async function loadBills(){
-  const {data,error}=await db.from('bills')
-    .select('*, customers(code,name,line_group_id,delivery_method), orders(order_no)')
-    .order('created_at',{ascending:false}).limit(500);
+  const [{data,error},{data:po}]=await Promise.all([
+    db.from('bills')
+      .select('*, customers(code,name,line_group_id,delivery_method), orders(order_no)')
+      .order('created_at',{ascending:false}).limit(500),
+    db.from('orders')
+      .select('id,order_no,total,created_at, customers(code,name,delivery_method)')
+      .eq('status','new').order('created_at',{ascending:false})
+  ]);
   if(error){toast('โหลดบิลไม่ได้: '+error.message);return;}
-  bills=data||[]; renderAccount(); acStats();
+  bills=data||[]; acPendingOrders=po||[];
+  renderAccount(); acStats();
 }
 function acStats(){
   const unpaid=bills.filter(b=>b.payment_status!=='paid');
@@ -2361,6 +2417,7 @@ function renderAccount(){
   const list=bills.filter(b=>{
     if(acFilter==='unpaid'&&b.payment_status==='paid')return false;
     if(acFilter==='paid'&&b.payment_status!=='paid')return false;
+    if(acFilter==='slip'&&!b.slip_url)return false;
     if(shipF&&(b.ship_status||'pending')!==shipF)return false;
     const dlvF=document.getElementById('ac-delivery').value;
     if(dlvF&&(b.customers?.delivery_method||'')!==dlvF)return false;
@@ -2370,14 +2427,33 @@ function renderAccount(){
     return true;
   });
   const el=document.getElementById('ac-body');
-  if(!list.length){el.innerHTML='<tr><td colspan="9" class="empty">ไม่มีบิลในหมวดนี้</td></tr>';return;}
-  el.innerHTML=list.map(b=>{
+  // ออเดอร์ที่ยังไม่ออกบิล (แสดงเฉพาะ filter ค้างจ่าย/ทั้งหมด และผ่านตัวกรองอื่น)
+  const dlvF2=document.getElementById('ac-delivery').value;
+  const showPending=(acFilter==='unpaid'||acFilter==='all')&&!shipF;
+  const pendRows=!showPending?[]:acPendingOrders.filter(o=>{
+    if(dlvF2&&(o.customers?.delivery_method||'')!==dlvF2)return false;
+    if(from&&new Date(o.created_at)<new Date(from+'T00:00:00'))return false;
+    if(to&&new Date(o.created_at)>new Date(to+'T23:59:59'))return false;
+    if(q&&!(o.order_no||'').toLowerCase().includes(q)&&!(o.customers?.name||'').toLowerCase().includes(q))return false;
+    return true;
+  }).map(o=>{
+    const d=new Date(o.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+    return `<tr style="background:#fdf6ee">
+      <td><span class="tag tag-low">ยังไม่ออกบิล</span><div style="font-size:12px;color:var(--muted)">${esc(o.order_no)}</div></td>
+      <td>${esc(o.customers?.code)} · ${esc(o.customers?.name)}</td>
+      <td class="num"><b>${fmt(o.total)}</b></td>
+      <td style="font-size:13px;color:var(--muted)">${d}</td>
+      <td colspan="4" style="color:var(--muted);font-size:13px">รอออกบิลที่หน้า "ทำบิล"</td>
+      <td><button class="btn-p mini" onclick="showPage('orders')">🧾 ไปออกบิล</button></td></tr>`;
+  });
+  if(!list.length&&!pendRows.length){el.innerHTML='<tr><td colspan="9" class="empty">ไม่มีบิลในหมวดนี้</td></tr>';return;}
+  el.innerHTML=pendRows.join('')+list.map(b=>{
     const d=new Date(b.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
     const paid=b.payment_status==='paid';
     const ss=b.ship_status||'pending';
     const pd=b.paid_at?new Date(b.paid_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
     return `<tr>
-      <td><b>${esc(b.bill_no)}</b>${b.orders?.order_no?'<div style="font-size:12px;color:var(--muted)">'+esc(b.orders.order_no)+'</div>':''}</td>
+      <td><b>${esc(b.bill_no)}</b>${(b.revision||1)>1?' <span class="tag tag-low">v.'+b.revision+'</span>':''}${b.orders?.order_no?'<div style="font-size:12px;color:var(--muted)">'+esc(b.orders.order_no)+'</div>':''}</td>
       <td>${esc(b.customers?.code)} · ${esc(b.customers?.name)}</td>
       <td class="num"><b>${fmt(b.total)}</b></td>
       <td style="font-size:13px;color:var(--muted)">${d}</td>
@@ -2388,6 +2464,9 @@ function renderAccount(){
       <td style="white-space:nowrap">
         <button class="btn-g mini" onclick="window.open('${b.image_url}','_blank')">ดูบิล</button>
         <button class="btn-g mini" onclick="downloadBillPDF(${b.id},this)">PDF</button>
+        <button class="btn-g mini" onclick="makeLabel(${b.id},this)" title="ใบปะหน้า 100×150 มม.">🏷️ ปะหน้า</button>
+        ${ss==='pending'?`<button class="btn-s mini" onclick="openEditBill(${b.id})">✏️ แก้บิล</button>`:''}
+        ${b.slip_url?`<button class="btn-g mini" onclick="showImgView('${esc(b.slip_url)}')">🧾 สลิป</button>`:''}
         ${b.customers?.line_group_id&&!b.line_sent?`<button class="btn-s mini" onclick="resendBill(${b.id},this)">ส่ง LINE</button>`:''}
         ${ss==='pending'?`<button class="btn-ok mini" onclick="shipBillUI(${b.id})">🚚 ส่งแล้ว</button><button class="btn-d mini" onclick="cancelBillUI(${b.id})">ยกเลิกบิล</button>`:''}
         ${ss!=='cancelled'?(paid
@@ -2450,31 +2529,258 @@ async function resendBill(id,btn){
   toast('ส่งบิล '+b.bill_no+' เข้ากลุ่มแล้ว ✓');
   loadBills();
 }
-async function markPaid(id,btn){
+/* ==================== เฟส 2: แก้ไขบิล ==================== */
+let ebState=null; // {bill, order, items:[{id?,product_id,name,unit,qty,price,orig_qty}], removed:[ids]}
+function showImgView(u){document.getElementById('imgview-img').src=u;document.getElementById('imgview').style.display='flex';}
+
+async function openEditBill(billId){
+  const b=bills.find(x=>x.id===billId);if(!b)return;
+  if((b.ship_status||'pending')!=='pending'){toast('แก้ได้เฉพาะบิลที่ยังไม่จัดส่ง');return;}
+  const {data:o,error}=await db.from('orders')
+    .select('*, customers(id,code,name,line_group_id,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(id,product_id,qty,price,amount,products(name,unit))')
+    .eq('id',b.order_id).single();
+  if(error||!o){toast('โหลดออเดอร์ไม่ได้: '+(error?.message||''));return;}
+  ebState={bill:b,order:o,removed:[],
+    items:o.order_items.map(it=>({id:it.id,product_id:it.product_id,
+      name:it.products?.name||'?',unit:it.products?.unit||'',
+      qty:Number(it.qty),price:Number(it.price),orig_qty:Number(it.qty)}))};
+  document.getElementById('eb-no').textContent=b.bill_no;
+  document.getElementById('eb-rev').textContent='ตอนนี้ v.'+(b.revision||1);
+  document.getElementById('eb-cust').textContent=(o.customers?.code||'')+' · '+(o.customers?.name||'');
+  document.getElementById('eb-ship').value=Number(b.shipping_fee)||0;
+  document.getElementById('eb-disc').value=Number(b.discount)||0;
+  document.getElementById('eb-prodlist').innerHTML=products.filter(p=>p.active!==false)
+    .map(p=>`<option value="${esc(p.sku)} · ${esc(p.name)}"></option>`).join('');
+  ebRender();
+  document.getElementById('editbill-modal').style.display='flex';
+}
+function closeEditBill(){document.getElementById('editbill-modal').style.display='none';ebState=null;}
+function ebRender(){
+  document.getElementById('eb-items').innerHTML=ebState.items.map((it,i)=>`<tr>
+    <td>${esc(it.name)}${it.price===0?' <span class="tag tag-low">แถม</span>':''}</td>
+    <td class="num"><input type="number" min="1" value="${it.qty}" class="num" style="width:70px" onchange="ebQty(${i},this.value)"> ${esc(it.unit)}</td>
+    <td class="num"><input type="number" min="0" step="0.01" value="${it.price}" class="num" style="width:95px" onchange="ebPrice(${i},this.value)"></td>
+    <td class="num">${fmt(it.qty*it.price)}</td>
+    <td><button class="btn-d mini" onclick="ebRemove(${i})">✕</button></td></tr>`).join('');
+  ebTotals();
+}
+function ebQty(i,v){ebState.items[i].qty=Math.max(1,Number(v)||1);ebRender();}
+function ebPrice(i,v){ebState.items[i].price=Math.max(0,Number(v)||0);ebRender();}
+function ebRemove(i){
+  const it=ebState.items[i];
+  if(!confirm('เอา "'+it.name+'" ออกจากบิล?'))return;
+  if(it.id)ebState.removed.push(it.id);
+  ebState.items.splice(i,1);ebRender();
+}
+function ebAdd(free){
+  const val=document.getElementById('eb-add-search').value.trim();
+  if(!val){toast('พิมพ์เลือกสินค้าก่อน');return;}
+  const sku=val.split('·')[0].trim();
+  const p=products.find(x=>x.sku===sku)||products.find(x=>x.active!==false&&(x.name===val||x.sku===val));
+  if(!p){toast('ไม่พบสินค้า "'+val+'" — เลือกจากรายการที่ขึ้นมา');return;}
+  const qty=Math.max(1,Number(document.getElementById('eb-add-qty').value)||1);
+  // ราคา: ราคาพิเศษของลูกค้าถ้ามี ไม่งั้นราคาตามกลุ่ม
+  let price=0;
+  if(!free){
+    const c=customers.find(x=>x.id===ebState.order.customers.id);
+    const grp=c?(c.price_group||'base'):'base';
+    price=Number(grp==='r20'?p.price_r20:grp==='r50'?p.price_r50:grp==='upc'?p.price_upc:p.base_price)||Number(p.base_price)||0;
+  }
+  const ex=ebState.items.find(x=>x.product_id===p.id&&x.price===price);
+  if(ex){ex.qty+=qty;}
+  else ebState.items.push({id:null,product_id:p.id,name:p.name,unit:p.unit||'',qty,price,orig_qty:0});
+  document.getElementById('eb-add-search').value='';
+  document.getElementById('eb-add-qty').value=1;
+  ebRender();
+}
+function ebTotals(){
+  const sub=ebState?ebState.items.reduce((s,it)=>s+it.qty*it.price,0):0;
+  const ship=Number(document.getElementById('eb-ship').value)||0;
+  const disc=Number(document.getElementById('eb-disc').value)||0;
+  document.getElementById('eb-sub').textContent=fmt(sub);
+  document.getElementById('eb-grand').textContent=fmt(Math.max(0,sub+ship-disc));
+}
+async function saveEditBill(btn){
+  if(!ebState)return;
+  if(!ebState.items.length){toast('บิลต้องมีอย่างน้อย 1 รายการ');return;}
+  btn.disabled=true;btn.textContent='กำลังบันทึก…';
+  try{
+    const b=ebState.bill,o=ebState.order;
+    const sub=ebState.items.reduce((s,it)=>s+it.qty*it.price,0);
+    const ship=Number(document.getElementById('eb-ship').value)||0;
+    const disc=Number(document.getElementById('eb-disc').value)||0;
+    const grand=Math.max(0,sub+ship-disc);
+    const newRev=(b.revision||1)+1;
+
+    // 1) ปรับยอดจองสต๊อกตามส่วนต่างจำนวน
+    const delta={};
+    ebState.items.forEach(it=>{delta[it.product_id]=(delta[it.product_id]||0)+(it.qty-it.orig_qty);});
+    // รายการที่ถูกลบ: คืนจองทั้งจำนวนเดิม
+    for(const rid of ebState.removed){
+      const orig=o.order_items.find(x=>x.id===rid);
+      if(orig)delta[orig.product_id]=(delta[orig.product_id]||0)-Number(orig.qty);
+    }
+    for(const [pid,d] of Object.entries(delta)){
+      if(!d)continue;
+      const {data:pr}=await db.from('products').select('reserved_qty').eq('id',pid).single();
+      const nv=Math.max(0,Number(pr?.reserved_qty||0)+d);
+      const {error:re}=await db.from('products').update({reserved_qty:nv}).eq('id',pid);
+      if(re)throw new Error('ปรับจองสต๊อกไม่สำเร็จ: '+re.message);
+    }
+
+    // 2) order_items: ลบ / อัปเดต / เพิ่ม
+    if(ebState.removed.length){
+      const {error:de}=await db.from('order_items').delete().in('id',ebState.removed);
+      if(de)throw new Error('ลบรายการไม่สำเร็จ: '+de.message);
+    }
+    for(const it of ebState.items){
+      const rec={qty:it.qty,price:it.price,amount:it.qty*it.price};
+      if(it.id){
+        const {error:ue}=await db.from('order_items').update(rec).eq('id',it.id);
+        if(ue)throw new Error('อัปเดตรายการไม่สำเร็จ: '+ue.message);
+      }else{
+        const {error:ie}=await db.from('order_items').insert({order_id:o.id,product_id:it.product_id,...rec});
+        if(ie)throw new Error('เพิ่มรายการไม่สำเร็จ: '+ie.message);
+      }
+    }
+    // 3) ยอดออเดอร์
+    await db.from('orders').update({total:sub}).eq('id',o.id);
+
+    // 4) วาดบิลใหม่ (เวอร์ชันใหม่)
+    const {data:o2}=await db.from('orders')
+      .select('*, customers(id,code,name,line_group_id,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(qty,price,amount,product_id,products(name,unit))')
+      .eq('id',o.id).single();
+    const result=await drawBill(o2,b.bill_no,{shipFee:ship,discount:disc,grand,revision:newRev});
+    const blob=await new Promise(res=>result.cv.toBlob(res,'image/png'));
+    const path=b.bill_no+'_v'+newRev+'.png';
+    const {error:upErr}=await db.storage.from('bills').upload(path,blob,{contentType:'image/png',upsert:true});
+    if(upErr)throw new Error('อัพรูปบิลไม่สำเร็จ: '+upErr.message);
+    const imageUrl=db.storage.from('bills').getPublicUrl(path).data.publicUrl;
+
+    // 5) อัปเดตบิล
+    const {error:be}=await db.from('bills').update({
+      total:grand,shipping_fee:ship,discount:disc,revision:newRev,image_url:imageUrl
+    }).eq('id',b.id);
+    if(be)throw new Error('อัปเดตบิลไม่สำเร็จ: '+be.message);
+
+    // 6) แจ้งลูกค้า (ถาม)
+    if(o2.customers?.line_group_id&&confirm('ส่งบิลฉบับแก้ไข (v.'+newRev+') เข้ากลุ่ม LINE ลูกค้าเลยไหม?')){
+      await db.functions.invoke('line-push',{body:{to:o2.customers.line_group_id,messages:[
+        {type:'image',originalContentUrl:imageUrl,previewImageUrl:imageUrl},
+        {type:'text',text:'🧾 บิลเลขที่ '+b.bill_no+' (แก้ไขครั้งที่ '+newRev+')'
+          +(ship?'\nค่าขนส่ง ฿'+fmt(ship):'')+(disc?'\nส่วนลด -฿'+fmt(disc):'')
+          +'\nยอดรวม ฿'+fmt(grand)+'\nขออภัยในความไม่สะดวกครับ 🙏'}]}});
+    }
+    toast('แก้บิล '+b.bill_no+' เป็น v.'+newRev+' แล้ว ✓');
+    closeEditBill(); loadBills(); loadProducts();
+  }catch(e){toast(String(e.message||e));}
+  btn.disabled=false;btn.textContent='💾 บันทึก + ออกบิลใหม่ (v.ถัดไป)';
+}
+
+/* ==================== เฟส 2: ใบปะหน้า 100x150 ==================== */
+async function makeLabel(billId,btn){
+  const b=bills.find(x=>x.id===billId);if(!b)return;
+  btn.disabled=true;
+  try{
+    const {data:o}=await db.from('orders')
+      .select('order_no, customers(code,name,sale_name,contact_name,phone,billing_address,map_link,receive_time,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address), order_items(qty,products(name,unit))')
+      .eq('id',b.order_id).single();
+    if(!o)throw new Error('ไม่พบออเดอร์');
+    const c=o.customers||{};
+    await document.fonts.load('700 34px "IBM Plex Sans Thai"');
+    const W=600,H=900,cv=document.createElement('canvas');cv.width=W;cv.height=H;
+    const x=cv.getContext('2d');
+    x.fillStyle='#fff';x.fillRect(0,0,W,H);
+    // หัว
+    x.fillStyle='#111';x.font='700 30px "IBM Plex Sans Thai"';x.textAlign='left';
+    x.fillText('MIX FRESH 168',24,44);
+    x.font='400 20px "IBM Plex Sans Thai"';x.textAlign='right';
+    x.fillText(c.delivery_method||'',W-24,42);
+    x.textAlign='left';
+    const bc=makeBarcode(b.bill_no);
+    if(bc){const bi=await loadImg(bc);if(bi)x.drawImage(bi,24,58,300,50);}
+    x.font='400 18px "IBM Plex Sans Thai"';x.fillText(b.bill_no,24,130);
+    x.strokeStyle='#111';x.beginPath();x.moveTo(24,144);x.lineTo(W-24,144);x.stroke();
+    // ผู้รับ
+    let y=190;
+    function wrap(txt,maxW,font){x.font=font;const words=String(txt||'').split(' ');const lines=[];let cur='';
+      for(const w of words){const t=cur?cur+' '+w:w;if(x.measureText(t).width>maxW&&cur){lines.push(cur);cur=w;}else cur=t;}
+      if(cur)lines.push(cur);return lines;}
+    x.font='700 34px "IBM Plex Sans Thai"';
+    x.fillText('ผู้รับ: '+(c.ship_receiver||c.contact_name||c.name||'-'),24,y);y+=44;
+    x.font='700 30px "IBM Plex Sans Thai"';
+    x.fillText('โทร: '+(c.ship_phone||c.phone||'-'),24,y);y+=44;
+    const shop=c.ship_shop_name||c.name;
+    if(shop){x.font='400 22px "IBM Plex Sans Thai"';x.fillText(shop,24,y);y+=32;}
+    for(const l of wrap(c.ship_address||c.billing_address||'-',W-48,'400 22px "IBM Plex Sans Thai"').slice(0,4)){x.fillText(l,24,y);y+=30;}
+    if(c.receive_time){x.font='700 24px "IBM Plex Sans Thai"';x.fillText('เวลารับของ: '+c.receive_time,24,y+8);y+=44;}
+    x.beginPath();x.moveTo(24,y);x.lineTo(W-24,y);x.stroke();y+=34;
+    // รายการ
+    x.font='700 22px "IBM Plex Sans Thai"';x.fillText('รายการ ('+o.order_items.length+')',24,y);y+=32;
+    x.font='400 21px "IBM Plex Sans Thai"';
+    const maxRows=Math.floor((H-60-y)/30);
+    o.order_items.slice(0,maxRows).forEach(it=>{
+      x.fillText('• '+(it.products?.name||'?')+'  ×'+Number(it.qty)+' '+(it.products?.unit||''),24,y);y+=30;});
+    if(o.order_items.length>maxRows){x.fillText('…และอีก '+(o.order_items.length-maxRows)+' รายการ',24,y);y+=30;}
+    // ท้าย
+    x.font='400 18px "IBM Plex Sans Thai"';x.fillStyle='#555';
+    x.fillText('Sale: '+(c.sale_name||'-')+'   '+new Date().toLocaleDateString('th-TH'),24,H-24);
+    // PDF 100x150 มม.
+    const {jsPDF}=window.jspdf;
+    const pdf=new jsPDF({unit:'mm',format:[100,150],orientation:'portrait'});
+    pdf.addImage(cv.toDataURL('image/jpeg',0.95),'JPEG',0,0,100,150);
+    pdf.save(b.bill_no+'_label.pdf');
+    toast('สร้างใบปะหน้า '+b.bill_no+' แล้ว (100×150มม.)');
+  }catch(e){toast(String(e.message||e));}
+  btn.disabled=false;
+}
+
+/* ==================== เฟส 2: รับยอด + สลิป ==================== */
+let spBillId=null;
+function markPaid(id,btn){
   const b=bills.find(x=>x.id===id);if(!b)return;
   const staff=document.getElementById('ac-staff').value.trim();
   if(!staff){toast('ใส่ชื่อผู้ตรวจก่อน จะได้รู้ว่าใครติ๊ก');return;}
-  if(!confirm('ยืนยันรับยอดบิล '+b.bill_no+'\nลูกค้า: '+b.customers?.name+'\nยอด ฿'+fmt(b.total)+'\n\n(เช็ครูปสลิปในกลุ่ม LINE เรียบร้อยแล้วใช่ไหม)'))return;
-  btn.disabled=true;
-  const {error}=await db.from('bills').update({
-    payment_status:'paid',paid_at:new Date().toISOString(),paid_by:staff
-  }).eq('id',id);
-  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);btn.disabled=false;return;}
-
-  if(b.customers?.line_group_id){
-    const polite=document.getElementById('polite').value;
-    const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
-      to:b.customers.line_group_id,
-      messages:[{type:'text',
-        text:'✅ รับยอดบิลเลขที่ '+b.bill_no+'\nจำนวน ฿'+fmt(b.total)+' เรียบร้อย\nขอบคุณ'+polite+' 🙏'}]
-    }});
-    if(fnErr||!res||res.status!==200) toast('รับยอดแล้ว แต่ส่งข้อความ LINE ไม่สำเร็จ');
-    else toast('รับยอด '+b.bill_no+' และส่งขอบคุณเข้ากลุ่มแล้ว ✓');
-  }else{
-    toast('รับยอด '+b.bill_no+' แล้ว (ลูกค้าไม่ได้ผูกกลุ่ม LINE)');
-  }
-  loadBills();
+  spBillId=id;
+  document.getElementById('sp-no').textContent=b.bill_no;
+  document.getElementById('sp-info').textContent=(b.customers?.name||'')+' · ยอด ฿'+fmt(b.total)+' · ผู้ตรวจ: '+staff;
+  const f=document.getElementById('sp-file');f.value='';
+  const pv=document.getElementById('sp-preview');pv.style.display='none';pv.src='';
+  f.onchange=()=>{if(f.files[0]){pv.src=URL.createObjectURL(f.files[0]);pv.style.display='block';}};
+  document.getElementById('slip-modal').style.display='flex';
 }
+function closeSlipModal(){document.getElementById('slip-modal').style.display='none';spBillId=null;}
+async function confirmPaid(btn){
+  const b=bills.find(x=>x.id===spBillId);if(!b)return;
+  const staff=document.getElementById('ac-staff').value.trim();
+  btn.disabled=true;btn.textContent='กำลังบันทึก…';
+  try{
+    let slipUrl=null;
+    const f=document.getElementById('sp-file');
+    if(f.files[0]){
+      const ext=(f.files[0].name.split('.').pop()||'jpg').toLowerCase();
+      const path='slip_'+b.bill_no+'_'+Date.now()+'.'+ext;
+      const {error:se}=await db.storage.from('slips').upload(path,f.files[0],{upsert:true});
+      if(se)throw new Error('อัพสลิปไม่สำเร็จ: '+se.message+' (เช็คว่าสร้าง bucket slips แล้ว)');
+      slipUrl=db.storage.from('slips').getPublicUrl(path).data.publicUrl;
+    }
+    const upd={payment_status:'paid',paid_at:new Date().toISOString(),paid_by:staff};
+    if(slipUrl)upd.slip_url=slipUrl;
+    const {error}=await db.from('bills').update(upd).eq('id',b.id);
+    if(error)throw new Error('บันทึกไม่สำเร็จ: '+error.message);
+    if(b.customers?.line_group_id){
+      const polite=document.getElementById('polite').value;
+      const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
+        to:b.customers.line_group_id,
+        messages:[{type:'text',text:'✅ รับยอดบิลเลขที่ '+b.bill_no+'\nจำนวน ฿'+fmt(b.total)+' เรียบร้อย\nขอบคุณ'+polite+' 🙏'}]}});
+      if(fnErr||!res||res.status!==200)toast('รับยอดแล้ว แต่ส่งข้อความ LINE ไม่สำเร็จ');
+      else toast('รับยอด '+b.bill_no+(slipUrl?' + แนบสลิป':'')+' และส่งขอบคุณเข้ากลุ่มแล้ว ✓');
+    }else toast('รับยอด '+b.bill_no+(slipUrl?' + แนบสลิป':'')+' แล้ว');
+    closeSlipModal(); loadBills();
+  }catch(e){toast(String(e.message||e));}
+  btn.disabled=false;btn.textContent='✓ ยืนยันรับยอด';
+}
+
 async function unmarkPaid(id){
   const b=bills.find(x=>x.id===id);if(!b)return;
   if(!confirm('ยกเลิกการรับยอดบิล '+b.bill_no+' ? (กลับเป็นค้างจ่าย ไม่มีการส่งข้อความหาลูกค้า)'))return;
