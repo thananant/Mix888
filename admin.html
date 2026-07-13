@@ -731,6 +731,23 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 <div id="toast"></div>
 
 <!-- Modal: สต๊อกแยกคลัง -->
+<!-- ===== ลิงก์สั่งซื้อลูกค้า ===== -->
+<div id="link-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)this.style.display='none'">
+  <div class="card" style="max-width:520px;width:100%">
+    <h3 style="margin:0 0 4px">🔗 ลิงก์สั่งซื้อ</h3>
+    <div id="lk-cust" style="color:var(--muted);font-size:13.5px;margin-bottom:10px"></div>
+    <div style="display:flex;gap:8px">
+      <input id="lk-url" readonly style="flex:1;font-size:13px;background:var(--bg,#faf7f2)" onclick="this.select()">
+      <button class="btn-s" onclick="lkCopy()">📋 คัดลอก</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      <button class="btn-p" id="lk-send" onclick="lkSend(this)">📲 ส่งเข้ากลุ่ม LINE</button>
+      <button class="btn-g" onclick="window.open(document.getElementById('lk-url').value,'_blank')">👁️ เปิดดู</button>
+      <button class="btn-g" style="margin-left:auto" onclick="document.getElementById('link-modal').style.display='none'">ปิด</button>
+    </div>
+    <p class="hint" id="lk-hint" style="margin-top:8px"></p>
+  </div>
+</div>
 <!-- ===== ปรับสต๊อก ===== -->
 <div id="adjust-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)this.style.display='none'">
   <div class="card" style="max-width:420px;width:100%">
@@ -1716,6 +1733,7 @@ function gotoPricing(id){
   showPage('pricing');
   setTimeout(()=>{document.getElementById('pr-customer').value=id;loadPricing();},50);
 }
+let lkCustomerId=null;
 async function copyLink(id){
   let c=customers.find(x=>x.id===id);if(!c)return;
   if(!c.order_token){
@@ -1724,32 +1742,36 @@ async function copyLink(id){
     if(error){toast('สร้างลิงก์ไม่ได้: '+error.message);return;}
     c.order_token=tk;
   }
+  lkCustomerId=id;
   const url=ORDER_URL+'?t='+encodeURIComponent(c.order_token);
-
-  // ผูกกลุ่ม LINE แล้ว → ส่งลิงก์เข้ากลุ่มเลย
-  if(c.line_group_id){
-    if(!confirm('ส่งลิงก์สั่งซื้อเข้ากลุ่ม LINE ของ "'+c.name+'" เลยไหม?'))return;
-    const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
-      to:c.line_group_id,
-      messages:[{type:'text',
-        text:'🛒 ลิงก์สั่งสินค้า Mix Fresh 168\nร้าน: '+c.name+' ('+c.code+')\n\nกดสั่งได้เลยครับ 👇\n'+url}]
-    }});
-    if(fnErr||!res||res.status!==200){
-      toast('ส่ง LINE ไม่สำเร็จ — คัดลอกลิงก์ให้แทนแล้ว');
-      try{await navigator.clipboard.writeText(url);}catch(e){prompt('คัดลอกลิงก์:',url);}
-      return;
-    }
-    toast('✓ ส่งลิงก์เข้ากลุ่ม LINE ของ '+c.name+' แล้ว');
-    return;
-  }
-
-  // ยังไม่ผูกกลุ่ม → คัดลอกเหมือนเดิม
-  try{
-    await navigator.clipboard.writeText(url);
-    toast(c.name+' ยังไม่ผูกกลุ่ม LINE — คัดลอกลิงก์แล้ว ส่งเองได้เลย');
-  }catch(e){
-    prompt('คัดลอกลิงก์ของ '+c.name+':',url);
-  }
+  document.getElementById('lk-cust').textContent=c.code+' · '+c.name;
+  document.getElementById('lk-url').value=url;
+  const send=document.getElementById('lk-send');
+  send.style.display=c.line_group_id?'inline-block':'none';
+  document.getElementById('lk-hint').textContent=c.line_group_id
+    ?'ลูกค้าผูกกลุ่ม LINE แล้ว — กดส่งเข้ากลุ่มได้เลย หรือคัดลอกไปใช้เอง'
+    :'ลูกค้ายังไม่ผูกกลุ่ม LINE — คัดลอกลิงก์ส่งเองได้เลย (พิมพ์ "ผูกกลุ่ม '+c.code+'" ในกลุ่มที่มีบอทเพื่อผูก)';
+  document.getElementById('link-modal').style.display='flex';
+}
+async function lkCopy(){
+  const url=document.getElementById('lk-url').value;
+  try{await navigator.clipboard.writeText(url);toast('คัดลอกลิงก์แล้ว ✓');}
+  catch(e){document.getElementById('lk-url').select();document.execCommand&&document.execCommand('copy');toast('กด Ctrl+C เพื่อคัดลอก');}
+}
+async function lkSend(btn){
+  const c=customers.find(x=>x.id===lkCustomerId);if(!c||!c.line_group_id)return;
+  const url=document.getElementById('lk-url').value;
+  if(!confirm('ส่งลิงก์สั่งซื้อเข้ากลุ่ม LINE ของ "'+c.name+'" เลยไหม?'))return;
+  btn.disabled=true;
+  const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
+    to:c.line_group_id,
+    messages:[{type:'text',
+      text:'🛒 ลิงก์สั่งสินค้า Mix Fresh 168\nร้าน: '+c.name+' ('+c.code+')\n\nกดสั่งได้เลยครับ 👇\n'+url}]
+  }});
+  btn.disabled=false;
+  if(fnErr||!res||res.status!==200){toast('ส่ง LINE ไม่สำเร็จ — คัดลอกลิงก์ส่งเองได้');return;}
+  toast('✓ ส่งลิงก์เข้ากลุ่ม LINE ของ '+c.name+' แล้ว');
+  document.getElementById('link-modal').style.display='none';
 }
 
 /* ==================== เซลล์ ==================== */
