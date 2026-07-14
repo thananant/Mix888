@@ -377,6 +377,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <input id="c-rtime" type="hidden">
       </div>
       <div><label>วิธีจัดส่ง</label><select id="c-delivery"><option value="Lalamove">Lalamove</option><option value="BI">BI</option><option value="แพ็คของ">แพ็คของ</option><option value="มารับเอง">มารับเอง</option></select></div>
+      <div><label>ประเภทบิล</label><select id="c-doctype" title="ใช้เป็นค่าเริ่มต้นทุกครั้งที่ออกบิลให้ลูกค้ารายนี้"><option value="บิลเงินสด">บิลเงินสด</option><option value="ใบแจ้งหนี้ / ใบวางบิล">ใบแจ้งหนี้ / ใบวางบิล</option></select></div>
       <div style="flex:2;min-width:200px"><label>หมายเหตุ</label><input id="c-note" style="width:100%" placeholder="เช่น เงื่อนไขวางบิล"></div>
     </div>
     <div class="row" style="margin-top:14px">
@@ -724,6 +725,9 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="fbtn" data-f="paid" onclick="setFilter('paid')">จ่ายแล้ว</button>
       <button class="fbtn" data-f="all" onclick="setFilter('all')">ทั้งหมด</button>
       <button class="fbtn" data-f="slip" onclick="setFilter('slip')">🧾 มีสลิป</button>
+      <select id="ac-sale" onchange="renderAccount()" title="กรองตามเซลล์">
+        <option value="">เซลล์: ทั้งหมด</option>
+      </select>
       <select id="ac-delivery" onchange="renderAccount()" title="กรองตามวิธีขนส่ง">
         <option value="">ขนส่ง: ทั้งหมด</option>
         <option value="Lalamove">Lalamove</option>
@@ -1613,6 +1617,7 @@ function editCustomer(id){
   document.getElementById('c-map').value=c.map_link||'';
   setRtime(c.receive_time||'');
   document.getElementById('c-delivery').value=c.delivery_method||'Lalamove';
+  document.getElementById('c-doctype').value=c.doc_type||'บิลเงินสด';
   document.getElementById('c-note').value=c.note||'';
   // ที่อยู่แยกช่อง — บิล
   fillAddr('cb',{name:c.bill_addr_name,no:c.bill_no,soi:c.bill_soi,road:c.bill_road,
@@ -1683,6 +1688,7 @@ function resetCustomerForm(){
   document.getElementById('cs-sub-dl').innerHTML='';
   document.getElementById('c-pgroup').value='base';
   document.getElementById('c-delivery').value='Lalamove';
+  document.getElementById('c-doctype').value='บิลเงินสด';
 }
 function copyBillToShip(){
   document.getElementById('c-shipshop').value=document.getElementById('c-name').value;
@@ -1737,6 +1743,7 @@ async function saveCustomer(){
     map_link:document.getElementById('c-map').value.trim()||null,
     receive_time:document.getElementById('c-rtime').value.trim()||null,
     delivery_method:document.getElementById('c-delivery').value,
+    doc_type:document.getElementById('c-doctype').value,
     note:document.getElementById('c-note').value.trim()||null};
   if(!rec.name){toast('กรอกชื่อร้านก่อน');return;}
   if(phone&&!/^[0-9]{10}$/.test(phone)){toast('เบอร์โทรออกบิลต้องเป็นตัวเลข 10 หลักเท่านั้น');return;}
@@ -2056,7 +2063,7 @@ async function savePricing(){
 /* ==================== ทำบิล ==================== */
 async function loadOrders(){
   const {data,error}=await db.from('orders')
-    .select(`*, customers(id,code,name,line_group_id,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address),
+    .select(`*, customers(id,code,name,line_group_id,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,ship_shop_name,ship_receiver,ship_phone,ship_address),
              order_items(qty,price,amount,product_id,products(name,unit))`)
     .eq('status','new').order('created_at',{ascending:true});
   if(error){toast('โหลดออเดอร์ไม่ได้: '+error.message);return;}
@@ -2087,9 +2094,9 @@ function renderOrders(){
         </tbody>
       </table>
       <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap;align-items:flex-end">
-        <div><label style="font-size:12px;color:var(--muted)">ประเภทบิล</label><br><select id="bs-doctype-${o.id}" style="min-width:150px">
-          <option value="บิลเงินสด">บิลเงินสด</option>
-          <option value="ใบแจ้งหนี้ / ใบวางบิล">ใบแจ้งหนี้ / ใบวางบิล</option>
+        <div><label style="font-size:12px;color:var(--muted)">ประเภทบิล (ตั้งไว้ที่ลูกค้า)</label><br><select id="bs-doctype-${o.id}" style="min-width:150px">
+          <option value="บิลเงินสด"${(o.customers?.doc_type||'บิลเงินสด')==='บิลเงินสด'?' selected':''}>บิลเงินสด</option>
+          <option value="ใบแจ้งหนี้ / ใบวางบิล"${o.customers?.doc_type==='ใบแจ้งหนี้ / ใบวางบิล'?' selected':''}>ใบแจ้งหนี้ / ใบวางบิล</option>
         </select></div>
         <div><label style="font-size:12px;color:var(--muted)">ค่าขนส่ง (฿)</label><br><input id="bs-ship-${o.id}" type="number" step="0.01" min="0" value="0" class="num" style="width:100px" oninput="updGrand(${o.id},${o.total})"></div>
         <button class="btn-g mini" style="margin-bottom:6px" onclick="fillBIShip(${o.id})" title="คำนวณค่าส่ง BI ตามเรทลูกค้า">🧮 ค่าส่ง BI</button>
@@ -2424,7 +2431,7 @@ async function makeBill(orderId,btn,sendLine){
   const o=orders.find(x=>x.id===orderId);if(!o)return;
   const shipFee=Number(document.getElementById('bs-ship-'+orderId)?.value)||0;
   const discount=Number(document.getElementById('bs-disc-'+orderId)?.value)||0;
-  const docType=document.getElementById('bs-doctype-'+orderId)?.value||'บิลเงินสด';
+  const docType=document.getElementById('bs-doctype-'+orderId)?.value||o.customers?.doc_type||'บิลเงินสด';
   const grand=Math.max(0,Number(o.total)+shipFee-discount);
   btn.disabled=true;btn.textContent='กำลังออกบิล…';
   try{
@@ -2646,11 +2653,22 @@ async function loadBills(){
       .select('*, customers(code,name,line_group_id,delivery_method,sale_name), orders(order_no)')
       .order('created_at',{ascending:false}).limit(500),
     db.from('orders')
-      .select('id,order_no,total,created_at, customers(code,name,delivery_method)')
+      .select('id,order_no,total,created_at, customers(code,name,delivery_method,sale_name)')
       .eq('status','new').order('created_at',{ascending:false})
   ]);
   if(error){toast('โหลดบิลไม่ได้: '+error.message);return;}
   bills=data||[]; acPendingOrders=po||[];
+  // เติมตัวเลือกเซลล์ (จากข้อมูลจริงในบิล + ตาราง sales)
+  const saleSel=document.getElementById('ac-sale');
+  if(saleSel){
+    const cur=saleSel.value;
+    const names=[...new Set([
+      ...(typeof sales!=='undefined'?sales.map(s=>s.code||s.name):[]),
+      ...bills.map(b=>b.customers?.sale_name).filter(Boolean)
+    ])].sort();
+    saleSel.innerHTML='<option value="">เซลล์: ทั้งหมด</option>'+names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+    if([...saleSel.options].some(o=>o.value===cur))saleSel.value=cur;
+  }
   renderAccount(); acStats();
 }
 function acStats(){
@@ -2704,6 +2722,8 @@ function renderAccount(){
     if(shipF&&(b.ship_status||'pending')!==shipF)return false;
     const dlvF=document.getElementById('ac-delivery').value;
     if(dlvF&&(b.customers?.delivery_method||'')!==dlvF)return false;
+    const saleF=document.getElementById('ac-sale').value;
+    if(saleF&&(b.customers?.sale_name||'')!==saleF)return false;
     if(from&&new Date(b.created_at)<new Date(from+'T00:00:00'))return false;
     if(to&&new Date(b.created_at)>new Date(to+'T23:59:59'))return false;
     if(q&&!b.bill_no.toLowerCase().includes(q)&&!(b.orders?.order_no||'').toLowerCase().includes(q)&&!(b.customers?.name||'').toLowerCase().includes(q))return false;
@@ -2713,8 +2733,10 @@ function renderAccount(){
   // ออเดอร์ที่ยังไม่ออกบิล (แสดงเฉพาะ filter ค้างจ่าย/ทั้งหมด และผ่านตัวกรองอื่น)
   const dlvF2=document.getElementById('ac-delivery').value;
   const showPending=(acFilter==='unpaid'||acFilter==='all')&&!shipF;
+  const saleF2=document.getElementById('ac-sale').value;
   const pendRows=!showPending?[]:acPendingOrders.filter(o=>{
     if(dlvF2&&(o.customers?.delivery_method||'')!==dlvF2)return false;
+    if(saleF2&&(o.customers?.sale_name||'')!==saleF2)return false;
     if(from&&new Date(o.created_at)<new Date(from+'T00:00:00'))return false;
     if(to&&new Date(o.created_at)>new Date(to+'T23:59:59'))return false;
     if(q&&!(o.order_no||'').toLowerCase().includes(q)&&!(o.customers?.name||'').toLowerCase().includes(q))return false;
@@ -3105,12 +3127,12 @@ function qtReuse(id){
 /* ---- ออกบิลจากหน้าบัญชี (บิลเงินสด ไม่มีค่าส่ง/ส่วนลด — ถ้าต้องใส่ ใช้หน้าทำบิล) ---- */
 async function acIssueBill(orderId,btn){
   const {data:o,error}=await db.from('orders')
-    .select(`*, customers(id,code,name,line_group_id,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address),
+    .select(`*, customers(id,code,name,line_group_id,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,ship_shop_name,ship_receiver,ship_phone,ship_address),
              order_items(qty,price,amount,product_id,products(name,unit))`)
     .eq('id',orderId).single();
   if(error||!o){toast('โหลดออเดอร์ไม่ได้: '+(error?.message||''));return;}
   if(o.status!=='new'){toast('ออเดอร์นี้ถูกออกบิล/ยกเลิกไปแล้ว');loadBills();return;}
-  if(!confirm('ออกบิล '+o.order_no+' (บิลเงินสด)\nยอด ฿'+fmt(o.total)+'\n\n✓ ระบบจะดาวน์โหลด PDF ให้ทันที\n✗ ยังไม่ส่งเข้ากลุ่ม LINE — กดปุ่ม "ส่ง LINE" ที่แถวบิลทีหลังได้'))return;
+  if(!confirm('ออกบิล '+o.order_no+' ('+(o.customers?.doc_type||'บิลเงินสด')+')\nยอด ฿'+fmt(o.total)+'\n\n✓ ระบบจะดาวน์โหลด PDF ให้ทันที\n✗ ยังไม่ส่งเข้ากลุ่ม LINE — กดปุ่ม "ส่ง LINE" ที่แถวบิลทีหลังได้'))return;
   if(!orders.some(x=>x.id===o.id))orders.push(o);
   await makeBill(o.id,btn,false);   // ออกบิลอย่างเดียว ไม่ยิง LINE
   // ดาวน์โหลด PDF ของบิลที่เพิ่งออก
