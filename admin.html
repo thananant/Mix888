@@ -699,7 +699,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <label>ผู้ตรวจ</label><input id="ac-staff" style="width:100px" placeholder="ชื่อ">
       <input type="month" id="ac-month" style="width:140px" title="เดือนสำหรับ Export Excel">
       <button class="btn-g" onclick="exportMonthExcel(this)">📊 Excel รายเดือน</button>
-      <button class="btn-g" onclick="exportAccountXlsx()" title="ดาวน์โหลดรายการตามตัวกรองปัจจุบันเป็น Excel">⬇️ Excel รายการนี้</button>
+      <button class="btn-g" onclick="exportAccountXlsx(this)" title="ดาวน์โหลดรายการตามตัวกรองปัจจุบันเป็น Excel (2 ชีต: สรุปรายบิล + รายการสินค้าพร้อมต้นทุน/กำไร)">⬇️ Excel รายการนี้</button>
       <select id="polite"><option value="ครับ">ครับ</option><option value="ค่ะ">ค่ะ</option></select>
     </div>
     <div style="overflow-x:auto">
@@ -3460,25 +3460,60 @@ async function exportMonthExcel(btn){
 }
 
 /* ---- Export รายการหน้าบัญชีตามที่กรองอยู่ ---- */
-function exportAccountXlsx(){
+async function exportAccountXlsx(btn){
   const list=window.acLastList||[];
   if(!list.length){toast('ไม่มีรายการในหน้าจอ (ตาม filter ปัจจุบัน)');return;}
-  const dstr=dt=>{const d=new Date(dt);return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear()+' '+d.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});};
-  const aoa=[['รายการบัญชี (ตามตัวกรอง) · ดึงเมื่อ '+new Date().toLocaleString('th-TH')],
-    ['#','เลขที่บิล','SO','v.','ลูกค้า','เซลล์','ขนส่ง','ประเภทบิล','ยอดสินค้า','ค่าขนส่ง','ส่วนลด','ยอดบิล','ออกเมื่อ','สถานะส่ง','ชำระ','รับยอดโดย','สลิป'],
-    ...list.map((b,i)=>[i+1,b.bill_no,b.orders?.order_no||'',b.revision||1,
-      (b.customers?.code||'')+' '+(b.customers?.name||''),b.customers?.sale_name||'',
-      b.customers?.delivery_method||'',b.doc_type||'บิลเงินสด',
-      Number(b.total)-Number(b.shipping_fee||0)+Number(b.discount||0),
-      Number(b.shipping_fee||0),Number(b.discount||0),Number(b.total),
-      dstr(b.created_at),(b.ship_status==='shipped'?'ส่งแล้ว':b.ship_status==='cancelled'?'ยกเลิก':'รอส่ง'),
-      b.payment_status==='paid'?'จ่ายแล้ว':'ค้างจ่าย',b.paid_by||'',b.slip_url?'มี':''])];
-  const ws=XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols']=aoa[1].map((c,ci)=>({wch:Math.max(9,...aoa.slice(1,60).map(r=>String(r[ci]??'').length+2))}));
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'บัญชี');
-  XLSX.writeFile(wb,'บัญชี_ตามตัวกรอง_'+new Date().toISOString().slice(0,10)+'.xlsx');
-  toast('ดาวน์โหลด '+list.length+' รายการแล้ว');
+  if(btn){btn.disabled=true;btn.textContent='กำลังดึงข้อมูล…';}
+  try{
+    // ดึงรายการสินค้าของทุกบิลที่กรองอยู่ (พร้อมต้นทุน)
+    const orderIds=[...new Set(list.map(b=>b.order_id).filter(Boolean))];
+    let itemsByOrder={};
+    if(orderIds.length){
+      const {data:its,error}=await db.from('order_items')
+        .select('order_id,qty,price,amount,products(sku,name,unit,last_cost)')
+        .in('order_id',orderIds);
+      if(error)throw new Error(error.message);
+      (its||[]).forEach(it=>{(itemsByOrder[it.order_id]=itemsByOrder[it.order_id]||[]).push(it);});
+    }
+    const dstr=dt=>{const d=new Date(dt);return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear()+' '+d.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});};
+
+    // ===== ชีต 1: สรุปรายบิล (+ ต้นทุน/กำไรต่อบิล) =====
+    const costOf=b=>(itemsByOrder[b.order_id]||[]).reduce((s,it)=>s+Number(it.products?.last_cost||0)*Number(it.qty),0);
+    const aoa=[['รายการบัญชี (ตามตัวกรอง) · ดึงเมื่อ '+new Date().toLocaleString('th-TH')],
+      ['#','เลขที่บิล','SO','v.','ลูกค้า','เซลล์','ขนส่ง','ประเภทบิล','ยอดสินค้า','ค่าขนส่ง','ส่วนลด','ยอดบิล','ต้นทุนสินค้า','กำไรขั้นต้น','ออกเมื่อ','สถานะส่ง','ชำระ','รับยอดโดย','สลิป'],
+      ...list.map((b,i)=>{
+        const goods=Number(b.total)-Number(b.shipping_fee||0)+Number(b.discount||0);
+        const cost=costOf(b);
+        return [i+1,b.bill_no,b.orders?.order_no||'',b.revision||1,
+          (b.customers?.code||'')+' '+(b.customers?.name||''),b.customers?.sale_name||'',
+          b.customers?.delivery_method||'',b.doc_type||'บิลเงินสด',
+          goods,Number(b.shipping_fee||0),Number(b.discount||0),Number(b.total),
+          cost,goods-cost,
+          dstr(b.created_at),(b.ship_status==='shipped'?'ส่งแล้ว':b.ship_status==='cancelled'?'ยกเลิก':'รอส่ง'),
+          b.payment_status==='paid'?'จ่ายแล้ว':'ค้างจ่าย',b.paid_by||'',b.slip_url?'มี':''];})];
+
+    // ===== ชีต 2: รายการสินค้าแต่ละบิล + ต้นทุน + กำไร =====
+    const aoa2=[['รายการสินค้าในแต่ละบิล (ตามตัวกรอง)'],
+      ['#','เลขที่บิล','SO','วันที่','ลูกค้า','SKU','สินค้า','จำนวน','หน่วย','ราคาขาย/หน่วย','ยอดขาย','ต้นทุน/หน่วย','ต้นทุนรวม','กำไรขั้นต้น']];
+    let n=0;
+    list.forEach(b=>{(itemsByOrder[b.order_id]||[]).forEach(it=>{
+      const cost=Number(it.products?.last_cost||0)*Number(it.qty);
+      const amt=Number(it.amount);
+      aoa2.push([++n,b.bill_no,b.orders?.order_no||'',dstr(b.created_at),
+        (b.customers?.name||''),it.products?.sku||'',it.products?.name||'',
+        Number(it.qty),it.products?.unit||'',Number(it.price),amt,
+        Number(it.products?.last_cost||0),cost,amt-cost]);});});
+
+    const mk=a=>{const ws=XLSX.utils.aoa_to_sheet(a);
+      ws['!cols']=a[1].map((c,ci)=>({wch:Math.max(9,...a.slice(1,60).map(r=>String(r[ci]??'').length+2))}));
+      return ws;};
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,mk(aoa),'สรุปรายบิล');
+    XLSX.utils.book_append_sheet(wb,mk(aoa2),'รายการสินค้า');
+    XLSX.writeFile(wb,'บัญชี_ตามตัวกรอง_'+new Date().toISOString().slice(0,10)+'.xlsx');
+    toast('ดาวน์โหลด '+list.length+' บิล / '+(aoa2.length-2)+' รายการสินค้าแล้ว');
+  }catch(e){toast(String(e.message||e));}
+  if(btn){btn.disabled=false;btn.textContent='⬇️ Excel รายการนี้';}
 }
 
 /* ==================== เฟส 3: โอนของจากโกดัง ==================== */
@@ -3596,6 +3631,73 @@ async function saveTransfer(btn){
   }catch(e){toast('บันทึกใบโอนไม่สำเร็จ: '+String(e.message||e));}
   btn.disabled=false;btn.textContent='💾 บันทึกใบโอน + แจ้ง LINE';
 }
+/* ---- ใบโอนสินค้า PDF A4 (ให้โกดังพิมพ์แพ็คของ/เซ็นรับ) ---- */
+async function makeTfPDF(id,btn){
+  const t=transfers.find(x=>x.id===id);if(!t)return;
+  if(btn)btn.disabled=true;
+  try{
+    await document.fonts.load('700 24px "IBM Plex Sans Thai"');
+    const items=t.transfer_items||[];
+    const {jsPDF}=window.jspdf;
+    const pdf=new jsPDF({unit:'pt',format:'a4'});
+    const W=794,rowH=42,headH=170,rowsPerPage=Math.floor((1050-headH)/rowH);
+    const d=new Date(t.created_at).toLocaleString('th-TH',{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    for(let pg=0;pg*rowsPerPage<items.length||pg===0;pg++){
+      const slice=items.slice(pg*rowsPerPage,(pg+1)*rowsPerPage);
+      const cv=document.createElement('canvas');cv.width=W;cv.height=headH+slice.length*rowH+120;
+      const x=cv.getContext('2d');
+      x.fillStyle='#fff';x.fillRect(0,0,cv.width,cv.height);
+      x.fillStyle='#111';
+      x.font='700 26px "IBM Plex Sans Thai"';x.fillText('ใบโอนสินค้าระหว่างโกดัง',30,44);
+      x.textAlign='right';x.font='700 20px "IBM Plex Sans Thai"';x.fillText(t.tf_no,W-30,44);
+      x.font='400 13px "IBM Plex Sans Thai"';x.fillText('หน้า '+(pg+1)+' / '+Math.max(1,Math.ceil(items.length/rowsPerPage)),W-30,66);
+      x.textAlign='left';x.font='400 15px "IBM Plex Sans Thai"';
+      x.fillText('จาก: '+(t.wf?.name||'')+'   →   ไป: '+(t.wt?.name||''),30,80);
+      x.fillText('วันที่สร้าง: '+d+'   โดย: '+(t.created_by||'-'),30,104);
+      if(t.note)x.fillText('หมายเหตุ: '+t.note,30,128);
+      x.strokeStyle='#111';x.beginPath();x.moveTo(30,headH-28);x.lineTo(W-30,headH-28);x.stroke();
+      x.font='700 14px "IBM Plex Sans Thai"';
+      x.fillText('#',36,headH-8);x.fillText('SKU',70,headH-8);x.fillText('สินค้า',180,headH-8);
+      x.textAlign='right';x.fillText('จำนวนเรียก',W-200,headH-8);x.fillText('รับจริง',W-60,headH-8);
+      x.textAlign='left';
+      x.font='400 15px "IBM Plex Sans Thai"';
+      slice.forEach((it,i)=>{
+        const y=headH+i*rowH, my=y+rowH/2+6;
+        x.fillStyle=i%2?'#faf7f2':'#fff';x.fillRect(30,y,W-60,rowH);
+        x.fillStyle='#111';
+        x.fillText(String(pg*rowsPerPage+i+1),36,my);
+        const p=products.find(pp=>pp.id===it.product_id);
+        x.fillText(p?.sku||'',70,my);
+        const nm=(it.products?.name||p?.name||'?');
+        x.fillText(nm.length>38?nm.slice(0,38)+'…':nm,180,my);
+        x.textAlign='right';
+        x.fillText(Number(it.qty)+' '+(it.products?.unit||p?.unit||''),W-200,my);
+        x.textAlign='left';
+        if(t.status==='received'){
+          x.textAlign='right';x.font='700 15px "IBM Plex Sans Thai"';
+          x.fillText(String(Number(it.received_qty??it.qty)),W-70,my);
+          x.textAlign='left';x.font='400 15px "IBM Plex Sans Thai"';
+        }else{
+          x.strokeStyle='#333';x.strokeRect(W-130,y+7,100,rowH-14); // ช่องกรอกรับจริง
+        }
+        x.strokeStyle='#e5e5e5';x.beginPath();x.moveTo(30,y+rowH);x.lineTo(W-30,y+rowH);x.stroke();
+      });
+      // ท้าย: ลายเซ็น
+      const fy=headH+slice.length*rowH+70;
+      x.fillStyle='#111';x.font='400 14px "IBM Plex Sans Thai"';x.textAlign='center';
+      x.fillText('ผู้จัดของ (ต้นทาง) ..............................',200,fy);
+      x.fillText('ผู้รับของ (ปลายทาง) ..............................',W-220,fy);
+      x.textAlign='left';
+      if(pg>0)pdf.addPage();
+      const pw=pdf.internal.pageSize.getWidth(),ph=pdf.internal.pageSize.getHeight();
+      const ratio=cv.width/cv.height;let w2=pw,h2=pw/ratio;if(h2>ph){h2=ph;w2=ph*ratio;}
+      pdf.addImage(cv.toDataURL('image/jpeg',0.92),'JPEG',(pw-w2)/2,0,w2,h2);
+    }
+    pdf.save(t.tf_no+'.pdf');
+    toast('ดาวน์โหลดใบโอน '+t.tf_no+' (A4) แล้ว');
+  }catch(e){toast(String(e.message||e));}
+  if(btn)btn.disabled=false;
+}
 async function loadTransfers(){
   const {data,error}=await db.from('transfers')
     .select('*, wf:warehouses!transfers_from_wh_fkey(name), wt:warehouses!transfers_to_wh_fkey(name), transfer_items(id,product_id,qty,received_qty,products(name,unit))')
@@ -3626,6 +3728,7 @@ function renderTfHistory(){
         ${tfStatusTag(t)}
         <span style="margin-left:auto;color:var(--muted);font-size:13px">${items.length} รายการ</span>
         <button class="btn-g mini" onclick="tfToggleDetail(${t.id})">▾ รายการ</button>
+        <button class="btn-g mini" onclick="makeTfPDF(${t.id},this)">📄 A4</button>
         ${t.status==='pending'?`<button class="btn-d mini" onclick="cancelTransfer(${t.id})">ยกเลิก</button>`:''}
       </div>
       <div id="tfd-${t.id}" style="display:none;margin-top:8px;font-size:13.5px">
@@ -3664,7 +3767,8 @@ function renderTfPending(){
         <b>${esc(t.tf_no)}</b>
         <span style="color:var(--muted);font-size:13px">${esc(t.wf?.name||'')} → ${esc(t.wt?.name||'')} · ${d}</span>
         <span class="tag tag-low">${items.length} รายการ</span>
-        <button class="btn-p mini" style="margin-left:auto" onclick="tfOpenReceive(${t.id})">📥 รับเข้า</button>
+        <button class="btn-g mini" style="margin-left:auto" onclick="makeTfPDF(${t.id},this)">📄 A4</button>
+        <button class="btn-p mini" onclick="tfOpenReceive(${t.id})">📥 รับเข้า</button>
       </div>
       <div id="tfr-${t.id}" style="display:none;margin-top:10px">
         <table><thead><tr><th>สินค้า</th><th class="num">เรียก</th><th class="num" style="width:120px">รับจริง</th></tr></thead>
