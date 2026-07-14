@@ -145,6 +145,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div class="mi" data-page="orders" onclick="showPage('orders')"><span class="ic">🧾</span>ทำบิล<span class="badge" id="ord-badge" style="display:none">0</span></div>
     <div class="mi" data-page="transfer" onclick="showPage('transfer')"><span class="ic">🚛</span>โอนโกดัง<span class="badge" id="tf-badge" style="display:none">0</span></div>
     <div class="mi" data-page="receive" onclick="showPage('receive')"><span class="ic">📥</span>รับสินค้า<span class="badge" id="rc-badge" style="display:none">0</span></div>
+    <div class="mi" data-page="quote" onclick="showPage('quote')"><span class="ic">📝</span>ใบเสนอราคา</div>
     <div class="mi" data-page="stockops" onclick="showPage('stockops')"><span class="ic">📋</span>นับ/ปรับสต๊อก</div>
     <div class="mi" data-page="warehouse" onclick="showPage('warehouse')"><span class="ic">🏭</span>คลังสินค้า</div>
     <div class="mi" data-page="account" onclick="showPage('account')"><span class="ic">💰</span>บัญชี</div>
@@ -243,6 +244,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div><label>เตือนใกล้หมด</label><input id="p-alert" type="number" step="1" style="width:90px" class="num" value="10"></div>
       <div><label>Safety Stock</label><input id="p-safety" type="number" step="1" min="0" style="width:90px" class="num" value="0" title="ขั้นต่ำที่ต้องมีในโกดังขาย — ใช้คำนวณเรียกของจากโกดัง"></div>
       <div><label>Max Stock</label><input id="p-max" type="number" step="1" min="0" style="width:90px" class="num" value="0" title="เป้าเติมเต็มตอนเรียกของ (0 = ใช้ Safety)"></div>
+      <div class="chk" style="padding-top:18px"><input type="checkbox" id="p-big"><span>ชิ้นใหญ่ (ค่าส่ง BI 20/ลัง)</span></div>
       <div><label>เรท 20 ลัง</label><input id="p-r20" type="number" step="0.01" style="width:100px" class="num" placeholder="ว่าง=กลาง"></div>
       <div><label>เรท 50 ลัง</label><input id="p-r50" type="number" step="0.01" style="width:100px" class="num" placeholder="ว่าง=กลาง"></div>
       <div><label>รวมส่งตจว</label><input id="p-upc" type="number" step="0.01" style="width:100px" class="num" placeholder="ว่าง=กลาง"></div>
@@ -462,6 +464,37 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 </div>
 
 <!-- ============ รับสินค้า ============ -->
+<div class="page" id="page-quote">
+  <div class="pagehead"><h2>📝 ใบเสนอราคา</h2></div>
+  <div class="card">
+    <div class="row" style="align-items:flex-end;margin-bottom:8px">
+      <div style="min-width:220px"><label>ลูกค้าในระบบ (หรือพิมพ์ชื่อเองด้านขวา)</label>
+        <select id="qt-cust" style="width:100%" onchange="qtPickCust()"><option value="">— ไม่เลือก —</option></select></div>
+      <div style="flex:1;min-width:200px"><label>ชื่อลูกค้า/ร้าน (บนใบเสนอราคา)</label><input id="qt-name" style="width:100%" placeholder="เช่น ร้านหม่าล่าใจดี"></div>
+      <div><label>ยืนราคา (วัน)</label><input id="qt-days" type="number" min="1" value="7" class="num" style="width:80px"></div>
+    </div>
+    <div class="row" style="align-items:flex-end;margin-bottom:8px">
+      <div style="flex:1;min-width:240px"><label>เพิ่มสินค้า</label>
+        <input id="qt-add" list="qt-prodlist" placeholder="พิมพ์ชื่อหรือ SKU…" style="width:100%">
+        <datalist id="qt-prodlist"></datalist></div>
+      <div><label>จำนวน</label><input id="qt-add-qty" type="number" min="1" value="1" class="num" style="width:80px"></div>
+      <button class="btn-s" onclick="qtAdd()">+ เพิ่ม</button>
+    </div>
+    <table><thead><tr><th>สินค้า</th><th class="num" style="width:90px">จำนวน</th><th class="num" style="width:110px">ราคา/หน่วย</th><th class="num">รวม</th><th style="width:36px"></th></tr></thead>
+    <tbody id="qt-body"><tr><td colspan="5" class="empty">ยังไม่มีรายการ — ราคาดึงตามกลุ่มราคาลูกค้า แก้เองได้</td></tr></tbody></table>
+    <div style="display:flex;gap:12px;margin-top:10px;align-items:flex-end;flex-wrap:wrap">
+      <input id="qt-note" placeholder="หมายเหตุท้ายใบ (ถ้ามี)" style="flex:1;min-width:220px">
+      <div style="font-weight:700;font-size:18px">รวม ฿<span id="qt-total">0.00</span></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <button class="btn-p" onclick="makeQuote(this,'png')">🖼️ สร้างใบเสนอราคา (PNG)</button>
+      <button class="btn-g" onclick="makeQuote(this,'pdf')">📄 PDF</button>
+      <button class="btn-g" id="qt-line" onclick="makeQuote(this,'line')" style="display:none">📲 สร้าง + ส่งเข้ากลุ่ม LINE</button>
+    </div>
+  </div>
+  <div class="card"><h3 style="margin:0 0 10px">ประวัติใบเสนอราคา</h3><div id="qt-history"><div class="empty">ยังไม่มี</div></div></div>
+</div>
+
 <div class="page" id="page-stockops">
   <div class="pagehead"><h2>📋 นับ / ปรับสต๊อก</h2></div>
   <div class="card">
@@ -470,6 +503,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="fbtn" id="so-tab-adj" onclick="soTab('adj')">ประวัติปรับสต๊อก</button>
       <button class="fbtn" id="so-tab-cv" onclick="soTab('cv')">ประวัติแปลงสินค้า</button>
       <button class="fbtn" id="so-tab-cnt" onclick="soTab('cnt')">ประวัติการนับ</button>
+      <button class="fbtn" id="so-tab-mv" onclick="soTab('mv')">🔎 เดินสินค้า</button>
     </div>
 
     <div id="so-count">
@@ -500,6 +534,16 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div id="so-cnt" style="display:none">
       <div id="cnt-log"><div class="empty">ยังไม่มีประวัติการนับ</div></div>
+    </div>
+    <div id="so-mv" style="display:none">
+      <div class="row" style="align-items:flex-end;margin-bottom:10px">
+        <div style="flex:1;min-width:260px"><label>เลือกสินค้า</label>
+          <input id="mv-prod" list="mv-prodlist" placeholder="พิมพ์ชื่อหรือ SKU…" style="width:100%">
+          <datalist id="mv-prodlist"></datalist></div>
+        <button class="btn-p" onclick="loadMovements(this)">🔎 ดูเดินสินค้า</button>
+      </div>
+      <div id="mv-sum" style="display:none;margin-bottom:10px"></div>
+      <div id="mv-body"><div class="empty">เลือกสินค้าแล้วกดดู — รวมทุกความเคลื่อนไหว: รับเข้า / ขายออก / ตีเสีย / โอนโกดัง / ปรับสต๊อก / แปลงสินค้า</div></div>
     </div>
   </div>
 </div>
@@ -655,6 +699,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <label>ผู้ตรวจ</label><input id="ac-staff" style="width:100px" placeholder="ชื่อ">
       <input type="month" id="ac-month" style="width:140px" title="เดือนสำหรับ Export Excel">
       <button class="btn-g" onclick="exportMonthExcel(this)">📊 Excel รายเดือน</button>
+      <button class="btn-g" onclick="exportAccountXlsx()" title="ดาวน์โหลดรายการตามตัวกรองปัจจุบันเป็น Excel">⬇️ Excel รายการนี้</button>
       <select id="polite"><option value="ครับ">ครับ</option><option value="ค่ะ">ค่ะ</option></select>
     </div>
     <div style="overflow-x:auto">
@@ -826,6 +871,11 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="card" style="max-width:420px;width:100%">
     <h3 style="margin:0 0 6px">✓ รับยอดบิล <span id="sp-no"></span></h3>
     <div id="sp-info" style="color:var(--muted);font-size:13.5px;margin-bottom:10px"></div>
+    <div id="sp-others-wrap" style="display:none;margin-bottom:10px">
+      <label>ลูกค้าโอนรวมหลายบิล? เลือกบิลอื่นที่สลิปนี้ปิดด้วย:</label>
+      <div id="sp-others" style="max-height:150px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:4px"></div>
+      <div style="font-size:13px;margin-top:4px">รวมรับยอดครั้งนี้: <b id="sp-sum">0</b></div>
+    </div>
     <label>รูปสลิปโอน (แนบหรือไม่ก็ได้)</label>
     <input type="file" id="sp-file" accept="image/*" style="width:100%;margin:4px 0 6px">
     <img id="sp-preview" style="display:none;max-width:100%;max-height:220px;border-radius:10px;border:1px solid var(--line)">
@@ -1133,6 +1183,7 @@ async function loadProducts(){
   const {data,error} = await db.from('products').select('*').order('sku');
   if(error){toast('โหลดสินค้าไม่ได้: '+error.message);return;}
   products = data||[];
+  qtInit();
   try{
     const {data:st}=await db.from('stock').select('product_id,warehouse_id,qty');
     stockByProd={};
@@ -1223,6 +1274,7 @@ function editProduct(id){
   document.getElementById('p-price').value=p.base_price;
   document.getElementById('p-safety').value=p.safety_stock||0;
   document.getElementById('p-max').value=p.max_stock||0;
+  document.getElementById('p-big').checked=!!p.is_big;
   document.getElementById('p-r20').value=p.price_r20??'';
   document.getElementById('p-r50').value=p.price_r50??'';
   document.getElementById('p-upc').value=p.price_upc??'';
@@ -1243,7 +1295,7 @@ function resetProductForm(){
   document.getElementById('p-unit').value='ลัง';
   document.getElementById('p-stock').value='0';
   document.getElementById('p-alert').value='10';
-  document.getElementById('p-safety').value=0;document.getElementById('p-max').value=0;
+  document.getElementById('p-safety').value=0;document.getElementById('p-max').value=0;document.getElementById('p-big').checked=false;
   productImageFile=null; productImageUrl='';
   showProductPreview('');
 }
@@ -1277,7 +1329,8 @@ async function saveProduct(){
     price_upc:document.getElementById('p-upc').value?parseFloat(document.getElementById('p-upc').value):null,
     low_stock_alert:parseFloat(document.getElementById('p-alert').value)||10,
     safety_stock:parseFloat(document.getElementById('p-safety').value)||0,
-    max_stock:parseFloat(document.getElementById('p-max').value)||0
+    max_stock:parseFloat(document.getElementById('p-max').value)||0,
+    is_big:document.getElementById('p-big').checked
   };
   const initStock = !editProductId ? (parseFloat(document.getElementById('p-stock').value)||0) : 0;
   if(!rec.sku||!rec.name){toast('กรอก SKU และชื่อสินค้าก่อน');return;}
@@ -1473,6 +1526,7 @@ async function loadCustomers(){
   const {data,error}=await db.from('customers').select('*').order('code');
   if(error){toast('โหลดลูกค้าไม่ได้: '+error.message);return;}
   customers=data||[];
+  qtInit();
   const {data:cp}=await db.from('customer_prices').select('customer_id');
   window._priceCounts={};(cp||[]).forEach(r=>window._priceCounts[r.customer_id]=(window._priceCounts[r.customer_id]||0)+1);
   renderCustomers();
@@ -1994,7 +2048,12 @@ function renderOrders(){
         </tbody>
       </table>
       <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap;align-items:flex-end">
+        <div><label style="font-size:12px;color:var(--muted)">ประเภทบิล</label><br><select id="bs-doctype-${o.id}" style="min-width:150px">
+          <option value="บิลเงินสด">บิลเงินสด</option>
+          <option value="ใบแจ้งหนี้ / ใบวางบิล">ใบแจ้งหนี้ / ใบวางบิล</option>
+        </select></div>
         <div><label style="font-size:12px;color:var(--muted)">ค่าขนส่ง (฿)</label><br><input id="bs-ship-${o.id}" type="number" step="0.01" min="0" value="0" class="num" style="width:100px" oninput="updGrand(${o.id},${o.total})"></div>
+        <button class="btn-g mini" style="margin-bottom:6px" onclick="fillBIShip(${o.id})" title="คำนวณค่าส่ง BI ตามเรทลูกค้า">🧮 ค่าส่ง BI</button>
         <div><label style="font-size:12px;color:var(--muted)">ส่วนลด (฿)</label><br><input id="bs-disc-${o.id}" type="number" step="0.01" min="0" value="0" class="num" style="width:100px" oninput="updGrand(${o.id},${o.total})"></div>
         <div style="font-weight:700;padding-bottom:6px">ยอดเรียกเก็บ: ฿<span id="bs-grand-${o.id}">${fmt(o.total)}</span></div>
       </div>
@@ -2076,6 +2135,7 @@ async function drawBill(o,billNo,extra){
   const _ship=Number(extra.shipFee)||0, _disc=Number(extra.discount)||0;
   const _grand=extra.grand!=null?Number(extra.grand):Number(o.total);
   const _rev=extra.revision||1;
+  const _docType=extra.docType||'บิลเงินสด';
   await document.fonts.load('700 30px "IBM Plex Sans Thai"');
   await document.fonts.load('400 20px "IBM Plex Sans Thai"');
   const c=o.customers, items=o.order_items;
@@ -2115,7 +2175,7 @@ async function drawBill(o,billNo,extra){
 
   // ชื่อเอกสาร + บาร์โค้ด (ขวาบน)
   x.fillStyle='#111';x.textAlign='right';x.font='700 26px "IBM Plex Sans Thai"';
-  x.fillText('บิลเงินสด',R,y-2);
+  x.fillText(_docType,R,y-2);
   if(barcode){const bi=await loadImg(barcode); if(bi){const bw=230,bh=44;x.drawImage(bi,R-bw,y+12,bw,bh);}}
   x.font='400 12px "IBM Plex Sans Thai"';x.fillStyle='#333';
   x.fillText(billNo,R,y+74);
@@ -2292,6 +2352,45 @@ async function nextBillNo(){
   if(data&&data.length){const last=parseInt(data[0].bill_no.slice(prefix.length),10);if(!isNaN(last))n=last+1;}
   return prefix+String(n).padStart(4,'0');
 }
+// คำนวณค่าส่ง BI: นับเฉพาะหน่วยลัง (SKU ไม่ลงท้าย S)
+function calcBIShip(items,priceGroup){
+  let big=0,normal=0;
+  (items||[]).forEach(it=>{
+    const p=products.find(x=>x.id===it.product_id);
+    const sfx=p?skuSuffix(p.sku):'';
+    if(sfx==='S')return;
+    const q=Number(it.qty)||0;
+    if(p&&p.is_big)big+=q;else normal+=q;
+  });
+  let fee=0,detail=[];
+  if(priceGroup==='upc'){
+    if(big){fee+=big*20;detail.push('ชิ้นใหญ่ '+big+'×20='+(big*20));}
+    if(normal){
+      const even=normal%2===0;
+      const f=even?normal*10:(normal-1)*10+20;
+      fee+=f;detail.push('ปกติ '+normal+' ลัง'+(even?'×10':' (คู่×10 + เศษ 1×20)')+'='+f);
+    }
+  }else{
+    const n=big+normal;
+    if(n===1){fee=100;detail.push('1 ลัง = 100');}
+    else if(n>1){
+      const even=n%2===0;
+      fee=even?n*50:(n-1)*50+100;
+      detail.push(n+' ลัง'+(even?'×50':' (คู่×50 + เศษ 1×100)')+'='+fee);
+    }
+  }
+  return {fee,detail,cases:big+normal};
+}
+function fillBIShip(oid){
+  const o=orders.find(x=>x.id===oid);if(!o)return;
+  const c=customers.find(x=>x.id===o.customers?.id);
+  const grp=c?.price_group||'base';
+  const r=calcBIShip(o.order_items,grp);
+  if(!r.cases){toast('ออเดอร์นี้ไม่มีสินค้าหน่วยลัง (ปลีกไม่คิดค่าส่ง BI)');return;}
+  const el=document.getElementById('bs-ship-'+oid);
+  if(el){el.value=r.fee;updGrand(oid,o.total);}
+  toast('ค่าส่ง BI ('+(grp==='upc'?'เรทรวมส่งตจว':'เรทปกติ')+'): '+r.detail.join(' + ')+' = ฿'+fmt(r.fee));
+}
 function updGrand(oid,total){
   const s=Number(document.getElementById('bs-ship-'+oid)?.value)||0;
   const d=Number(document.getElementById('bs-disc-'+oid)?.value)||0;
@@ -2303,11 +2402,12 @@ async function makeBill(orderId,btn,sendLine){
   const o=orders.find(x=>x.id===orderId);if(!o)return;
   const shipFee=Number(document.getElementById('bs-ship-'+orderId)?.value)||0;
   const discount=Number(document.getElementById('bs-disc-'+orderId)?.value)||0;
+  const docType=document.getElementById('bs-doctype-'+orderId)?.value||'บิลเงินสด';
   const grand=Math.max(0,Number(o.total)+shipFee-discount);
   btn.disabled=true;btn.textContent='กำลังออกบิล…';
   try{
     const billNo=await nextBillNo();
-    const result=await drawBill(o,billNo,{shipFee,discount,grand,revision:1});
+    const result=await drawBill(o,billNo,{shipFee,discount,grand,revision:1,docType});
     const cv=result.cv;
     const blob=await new Promise(res=>cv.toBlob(res,'image/png'));
 
@@ -2325,7 +2425,7 @@ async function makeBill(orderId,btn,sendLine){
 
     const {error:insErr}=await db.from('bills').insert({
       bill_no:billNo,order_id:o.id,customer_id:o.customers.id,
-      total:grand,shipping_fee:shipFee,discount:discount,revision:1,
+      total:grand,shipping_fee:shipFee,discount:discount,revision:1,doc_type:docType,
       image_url:imageUrl,line_sent:false});
     if(insErr)throw new Error('บันทึกบิลไม่สำเร็จ: '+insErr.message);
     await db.from('orders').update({status:'billed'}).eq('id',o.id);
@@ -2521,7 +2621,7 @@ let acPendingOrders=[];
 async function loadBills(){
   const [{data,error},{data:po}]=await Promise.all([
     db.from('bills')
-      .select('*, customers(code,name,line_group_id,delivery_method), orders(order_no)')
+      .select('*, customers(code,name,line_group_id,delivery_method,sale_name), orders(order_no)')
       .order('created_at',{ascending:false}).limit(500),
     db.from('orders')
       .select('id,order_no,total,created_at, customers(code,name,delivery_method)')
@@ -2595,14 +2695,18 @@ function renderAccount(){
     return true;
   }).map(o=>{
     const d=new Date(o.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
-    return `<tr style="background:#fdf6ee">
+    return `<tr>
       <td><span class="tag tag-low">ยังไม่ออกบิล</span><div style="font-size:12px;color:var(--muted)">${esc(o.order_no)}</div></td>
       <td>${esc(o.customers?.code)} · ${esc(o.customers?.name)}</td>
       <td class="num"><b>${fmt(o.total)}</b></td>
       <td style="font-size:13px;color:var(--muted)">${d}</td>
-      <td colspan="4" style="color:var(--muted);font-size:13px">รอออกบิลที่หน้า "ทำบิล"</td>
-      <td><button class="btn-p mini" onclick="showPage('orders')">🧾 ไปออกบิล</button></td></tr>`;
+      <td>—</td><td>—</td><td>—</td><td>—</td>
+      <td style="white-space:nowrap">
+        <button class="btn-p mini" onclick="acIssueBill(${o.id},this)">🧾 ออกบิลเลย</button>
+        <button class="btn-g mini" onclick="showPage('orders')" title="ไปหน้าทำบิล (ใส่ค่าส่ง/ส่วนลด/ประเภทบิลได้)">หน้าทำบิล</button>
+      </td></tr>`;
   });
+  window.acLastList=list;
   if(!list.length&&!pendRows.length){el.innerHTML='<tr><td colspan="9" class="empty">ไม่มีบิลในหมวดนี้</td></tr>';return;}
   el.innerHTML=pendRows.join('')+list.map(b=>{
     const d=new Date(b.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
@@ -2622,7 +2726,7 @@ function renderAccount(){
         <button class="btn-g mini" onclick="window.open('${b.image_url}','_blank')">ดูบิล</button>
         <button class="btn-g mini" onclick="downloadBillPDF(${b.id},this)">PDF</button>
         <button class="btn-g mini" onclick="makeLabel(${b.id},this)" title="ใบปะหน้า 100×150 มม.">🏷️ ปะหน้า</button>
-        ${ss==='pending'?`<button class="btn-s mini" onclick="openEditBill(${b.id})">✏️ แก้บิล</button>`:''}
+        ${ss!=='cancelled'?`<button class="btn-s mini" onclick="openEditBill(${b.id})">✏️ แก้บิล</button>`:''}
         ${b.slip_url?`<button class="btn-g mini" onclick="showImgView('${esc(b.slip_url)}')">🧾 สลิป</button>`:''}
         ${b.customers?.line_group_id&&!b.line_sent?`<button class="btn-s mini" onclick="resendBill(${b.id},this)">ส่ง LINE</button>`:''}
         ${ss==='pending'?`<button class="btn-ok mini" onclick="shipBillUI(${b.id})">🚚 ส่งแล้ว</button><button class="btn-d mini" onclick="cancelBillUI(${b.id})">ยกเลิกบิล</button>`:''}
@@ -2686,6 +2790,217 @@ async function resendBill(id,btn){
   toast('ส่งบิล '+b.bill_no+' เข้ากลุ่มแล้ว ✓');
   loadBills();
 }
+/* ==================== ใบเสนอราคา ==================== */
+let qtItems=[];
+function qtInit(){
+  const sel=document.getElementById('qt-cust');
+  if(sel&&customers.length&&sel.options.length<=1){
+    sel.innerHTML='<option value="">— ไม่เลือก —</option>'+customers.filter(c=>c.active!==false)
+      .map(c=>`<option value="${c.id}">${esc(c.code)} · ${esc(c.name)}</option>`).join('');
+  }
+  const dl=document.getElementById('qt-prodlist');
+  if(dl)dl.innerHTML=products.filter(p=>p.active!==false)
+    .map(p=>`<option value="${esc(p.sku)} · ${esc(p.name)}"></option>`).join('');
+}
+function qtPickCust(){
+  const id=Number(document.getElementById('qt-cust').value);
+  const c=customers.find(x=>x.id===id);
+  if(c){document.getElementById('qt-name').value=c.name;
+    document.getElementById('qt-line').style.display=c.line_group_id?'inline-block':'none';
+    // อัปเดตราคาในรายการตามกลุ่มลูกค้า
+    qtItems.forEach(it=>{const p=products.find(x=>x.id===it.product_id);if(p)it.price=qtPriceFor(p,c);});
+    qtRender();
+  }else document.getElementById('qt-line').style.display='none';
+}
+function qtPriceFor(p,c){
+  const grp=c?(c.price_group||'base'):'base';
+  return Number(grp==='r20'?p.price_r20:grp==='r50'?p.price_r50:grp==='upc'?p.price_upc:p.base_price)||Number(p.base_price)||0;
+}
+function qtAdd(){
+  const val=document.getElementById('qt-add').value.trim();
+  if(!val){toast('พิมพ์เลือกสินค้าก่อน');return;}
+  const sku=val.split('·')[0].trim();
+  const p=products.find(x=>x.sku===sku)||products.find(x=>x.active!==false&&x.name===val);
+  if(!p){toast('ไม่พบสินค้า — เลือกจากรายการที่ขึ้น');return;}
+  const qty=Math.max(1,Number(document.getElementById('qt-add-qty').value)||1);
+  const c=customers.find(x=>x.id===Number(document.getElementById('qt-cust').value));
+  const ex=qtItems.find(x=>x.product_id===p.id);
+  if(ex)ex.qty+=qty;
+  else qtItems.push({product_id:p.id,sku:p.sku,name:p.name,unit:p.unit||'',qty,price:qtPriceFor(p,c)});
+  document.getElementById('qt-add').value='';document.getElementById('qt-add-qty').value=1;
+  qtRender();
+}
+function qtRender(){
+  const el=document.getElementById('qt-body');
+  if(!qtItems.length){el.innerHTML='<tr><td colspan="5" class="empty">ยังไม่มีรายการ — ราคาดึงตามกลุ่มราคาลูกค้า แก้เองได้</td></tr>';}
+  else el.innerHTML=qtItems.map((it,i)=>`<tr>
+    <td>${esc(it.name)}<div style="font-size:12px;color:var(--muted)">${esc(it.sku)}</div></td>
+    <td class="num"><input type="number" min="1" value="${it.qty}" class="num" style="width:70px" onchange="qtItems[${i}].qty=Math.max(1,Number(this.value)||1);qtRender()"> ${esc(it.unit)}</td>
+    <td class="num"><input type="number" min="0" step="0.01" value="${it.price}" class="num" style="width:95px" onchange="qtItems[${i}].price=Math.max(0,Number(this.value)||0);qtRender()"></td>
+    <td class="num">${fmt(it.qty*it.price)}</td>
+    <td><button class="btn-d mini" onclick="qtItems.splice(${i},1);qtRender()">✕</button></td></tr>`).join('');
+  document.getElementById('qt-total').textContent=fmt(qtItems.reduce((s,it)=>s+it.qty*it.price,0));
+}
+async function drawQuote(qtNo){
+  await document.fonts.load('700 26px "IBM Plex Sans Thai"');
+  const name=document.getElementById('qt-name').value.trim()||'-';
+  const days=Math.max(1,Number(document.getElementById('qt-days').value)||7);
+  const note=document.getElementById('qt-note').value.trim();
+  const total=qtItems.reduce((s,it)=>s+it.qty*it.price,0);
+  const W=794,PAD=40,R=W-PAD,rowH=34;
+  const H=300+qtItems.length*rowH+(note?60:0)+220;
+  const cv=document.createElement('canvas');cv.width=W;cv.height=H;
+  const x=cv.getContext('2d');
+  x.fillStyle='#fff';x.fillRect(0,0,W,H);
+  x.fillStyle='#111';x.textAlign='right';
+  x.font='700 30px "IBM Plex Sans Thai"';x.fillText('ใบเสนอราคา',R,PAD+16);
+  x.font='400 14px "IBM Plex Sans Thai"';x.fillText(qtNo,R,PAD+40);
+  x.textAlign='left';x.font='700 20px "IBM Plex Sans Thai"';
+  x.fillText('MIX FRESH 168',PAD,PAD+16);
+  x.font='400 13.5px "IBM Plex Sans Thai"';x.fillStyle='#444';
+  x.fillText('ระบบสั่งซื้อสินค้า B2B',PAD,PAD+38);
+  x.strokeStyle='#111';x.beginPath();x.moveTo(PAD,PAD+58);x.lineTo(R,PAD+58);x.stroke();
+  let y=PAD+92;
+  x.fillStyle='#111';x.font='700 15px "IBM Plex Sans Thai"';
+  x.fillText('เสนอ:',PAD,y);x.font='400 15px "IBM Plex Sans Thai"';x.fillText(name,PAD+56,y);
+  x.font='700 15px "IBM Plex Sans Thai"';x.textAlign='right';
+  x.fillText('วันที่: '+new Date().toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'}),R,y);
+  y+=26;
+  const until=new Date(Date.now()+days*86400000);
+  x.font='400 14px "IBM Plex Sans Thai"';
+  x.fillText('ยืนราคาถึง: '+until.toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'})+' ('+days+' วัน)',R,y);
+  x.textAlign='left';y+=28;
+  // ตาราง
+  x.fillStyle='#f3ede4';x.fillRect(PAD,y,R-PAD,32);
+  x.fillStyle='#111';x.font='700 14px "IBM Plex Sans Thai"';
+  x.fillText('#',PAD+10,y+21);x.fillText('รหัส',PAD+44,y+21);x.fillText('รายการ',PAD+150,y+21);
+  x.textAlign='right';x.fillText('จำนวน',R-250,y+21);x.fillText('ราคา/หน่วย',R-120,y+21);x.fillText('รวม',R-14,y+21);
+  x.textAlign='left';y+=32;
+  x.font='400 14.5px "IBM Plex Sans Thai"';
+  qtItems.forEach((it,i)=>{
+    x.fillStyle=i%2?'#faf7f2':'#fff';x.fillRect(PAD,y,R-PAD,rowH);
+    x.fillStyle='#111';
+    x.fillText(String(i+1),PAD+10,y+22);
+    x.fillText(it.sku,PAD+44,y+22);
+    x.fillText(it.name.length>34?it.name.slice(0,34)+'…':it.name,PAD+150,y+22);
+    x.textAlign='right';
+    x.fillText(it.qty+' '+it.unit,R-250,y+22);
+    x.fillText(fmt(it.price),R-120,y+22);
+    x.fillText(fmt(it.qty*it.price),R-14,y+22);
+    x.textAlign='left';y+=rowH;
+  });
+  x.strokeStyle='#111';x.strokeRect(PAD,y-qtItems.length*rowH-32,R-PAD,qtItems.length*rowH+32);
+  y+=30;
+  x.textAlign='right';x.font='700 16px "IBM Plex Sans Thai"';
+  x.fillText('รวมทั้งสิ้น  '+fmt(total)+' บาท',R,y);
+  y+=22;x.font='400 13px "IBM Plex Sans Thai"';x.fillStyle='#555';
+  x.fillText('('+bahtText(total)+')',R,y);
+  x.textAlign='left';
+  if(note){y+=36;x.fillStyle='#111';x.font='400 14px "IBM Plex Sans Thai"';x.fillText('หมายเหตุ: '+note,PAD,y);}
+  y+=70;
+  x.fillStyle='#111';x.font='400 14px "IBM Plex Sans Thai"';
+  x.textAlign='center';
+  x.fillText('ผู้เสนอราคา',W-180,y);
+  x.fillText('..............................................',W-180,y+56);
+  x.fillText('('+(currentUser?.display_name||currentUser?.username||'')+')',W-180,y+78);
+  x.textAlign='left';
+  return cv;
+}
+async function nextQtNo(){
+  const ymd=new Date(Date.now()+7*3600*1000).toISOString().slice(2,10).replace(/-/g,'');
+  const prefix='QT'+ymd;
+  try{
+    const {data}=await db.from('quotations').select('qt_no').like('qt_no',prefix+'%').order('qt_no',{ascending:false}).limit(1);
+    let n=1;if(data&&data.length){const last=parseInt(data[0].qt_no.slice(prefix.length),10);if(!isNaN(last))n=last+1;}
+    return prefix+String(n).padStart(4,'0');
+  }catch(e){return prefix+String(Date.now()%10000).padStart(4,'0');}
+}
+async function makeQuote(btn,modeOut){
+  if(!qtItems.length){toast('ยังไม่มีรายการสินค้า');return;}
+  const name=document.getElementById('qt-name').value.trim();
+  if(!name){toast('ใส่ชื่อลูกค้า/ร้านก่อน');return;}
+  btn.disabled=true;
+  try{
+    const qtNo=await nextQtNo();
+    const cv=await drawQuote(qtNo);
+    const days=Math.max(1,Number(document.getElementById('qt-days').value)||7);
+    const custId=Number(document.getElementById('qt-cust').value)||null;
+    const total=qtItems.reduce((s,it)=>s+it.qty*it.price,0);
+    // บันทึกลงระบบ
+    try{await db.from('quotations').insert({qt_no:qtNo,customer_id:custId,customer_name:name,
+      items:qtItems,total,note:document.getElementById('qt-note').value.trim()||null,
+      valid_until:new Date(Date.now()+days*86400000).toISOString().slice(0,10),
+      created_by:currentUser?.display_name||currentUser?.username||null});}catch(e){console.warn(e);}
+    if(modeOut==='pdf'){
+      const {jsPDF}=window.jspdf;
+      const pdf=new jsPDF({unit:'pt',format:'a4'});
+      const pw=pdf.internal.pageSize.getWidth(),ph=pdf.internal.pageSize.getHeight();
+      const ratio=cv.width/cv.height;let w2=pw,h2=pw/ratio;if(h2>ph){h2=ph;w2=ph*ratio;}
+      pdf.addImage(cv.toDataURL('image/jpeg',0.93),'JPEG',(pw-w2)/2,20,w2,h2-20);
+      pdf.save(qtNo+'.pdf');
+    }else if(modeOut==='line'){
+      const c=customers.find(x=>x.id===custId);
+      if(!c?.line_group_id)throw new Error('ลูกค้ายังไม่ผูกกลุ่ม LINE');
+      const blob=await new Promise(res=>cv.toBlob(res,'image/png'));
+      const path=qtNo+'.png';
+      const {error:ue}=await db.storage.from('bills').upload(path,blob,{contentType:'image/png',upsert:true});
+      if(ue)throw new Error(ue.message);
+      const url=db.storage.from('bills').getPublicUrl(path).data.publicUrl;
+      await db.functions.invoke('line-push',{body:{to:c.line_group_id,messages:[
+        {type:'image',originalContentUrl:url,previewImageUrl:url},
+        {type:'text',text:'📝 ใบเสนอราคา '+qtNo+'\nยอดรวม ฿'+fmt(total)+'\nยืนราคา '+days+' วัน\nสนใจสั่งได้เลยครับ 🙏'}]}});
+      toast('ส่งใบเสนอราคาเข้ากลุ่ม '+c.name+' แล้ว ✓');
+    }else{
+      const a=document.createElement('a');
+      a.href=cv.toDataURL('image/png');a.download=qtNo+'.png';a.click();
+    }
+    toast('สร้างใบเสนอราคา '+qtNo+' แล้ว ✓');
+    loadQuotes();
+  }catch(e){toast(String(e.message||e));}
+  btn.disabled=false;
+}
+async function loadQuotes(){
+  const el=document.getElementById('qt-history');if(!el)return;
+  try{
+    const {data}=await db.from('quotations').select('*').order('created_at',{ascending:false}).limit(50);
+    if(!data||!data.length){el.innerHTML='<div class="empty">ยังไม่มี</div>';return;}
+    el.innerHTML=data.map(q=>{
+      const d=new Date(q.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+      return `<div style="border-bottom:1px solid var(--line);padding:8px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <b>${esc(q.qt_no)}</b><span>${esc(q.customer_name||'')}</span>
+        <span class="num" style="font-weight:700">฿${fmt(q.total)}</span>
+        <span style="color:var(--muted);font-size:13px">${(q.items||[]).length} รายการ · ${d} · โดย ${esc(q.created_by||'-')}</span>
+        <button class="btn-g mini" style="margin-left:auto" onclick='qtReuse(${q.id})'>ใช้ซ้ำ</button></div>`;
+    }).join('');
+    window._qts=data;
+  }catch(e){el.innerHTML='<div class="empty">โหลดไม่ได้ (รัน phase6.sql หรือยัง?)</div>';}
+}
+function qtReuse(id){
+  const q=(window._qts||[]).find(x=>x.id===id);if(!q)return;
+  qtItems=(q.items||[]).map(it=>({...it}));
+  document.getElementById('qt-name').value=q.customer_name||'';
+  if(q.customer_id)document.getElementById('qt-cust').value=q.customer_id;
+  qtRender();toast('ดึงรายการจาก '+q.qt_no+' มาแก้ต่อได้เลย');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+/* ---- ออกบิลจากหน้าบัญชี (บิลเงินสด ไม่มีค่าส่ง/ส่วนลด — ถ้าต้องใส่ ใช้หน้าทำบิล) ---- */
+async function acIssueBill(orderId,btn){
+  const {data:o,error}=await db.from('orders')
+    .select(`*, customers(id,code,name,line_group_id,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address),
+             order_items(qty,price,amount,product_id,products(name,unit))`)
+    .eq('id',orderId).single();
+  if(error||!o){toast('โหลดออเดอร์ไม่ได้: '+(error?.message||''));return;}
+  if(o.status!=='new'){toast('ออเดอร์นี้ถูกออกบิล/ยกเลิกไปแล้ว');loadBills();return;}
+  const sendLine=o.customers?.line_group_id
+    ?confirm('ออกบิล '+o.order_no+' (บิลเงินสด)\nยอด ฿'+fmt(o.total)+'\n\nส่งบิลเข้ากลุ่ม LINE ลูกค้าด้วยเลยไหม?\n(OK = ออกบิล+ส่ง / Cancel = ถามอีกครั้งแบบไม่ส่ง)')
+    :false;
+  if(!sendLine&&!confirm('ออกบิล '+o.order_no+' (บิลเงินสด'+(o.customers?.line_group_id?' ไม่ส่ง LINE':'')+') ใช่ไหม?'))return;
+  if(!orders.some(x=>x.id===o.id))orders.push(o);
+  await makeBill(o.id,btn,sendLine);
+  loadBills();
+}
+
 /* ==================== เฟส 4: ปรับสต๊อก (audit) ==================== */
 let ajProductId=null;
 function openAdjust(pid){
@@ -2816,13 +3131,87 @@ async function loadConvLog(){
 /* ==================== เฟส 5: นับสต๊อก ==================== */
 let scItems=[];
 function soTab(t){
-  ['count','adj','cv','cnt'].forEach(k=>{
+  ['count','adj','cv','cnt','mv'].forEach(k=>{
     document.getElementById('so-'+k).style.display=k===t?'block':'none';
     document.getElementById('so-tab-'+(k==='count'?'count':k)).classList.toggle('active',k===t);
   });
   if(t==='adj')loadAdjustLog();
   if(t==='cv')loadConvLog();
   if(t==='cnt')loadCountLog();
+  if(t==='mv'){
+    document.getElementById('mv-prodlist').innerHTML=products
+      .map(p=>`<option value="${esc(p.sku)} · ${esc(p.name)}"></option>`).join('');
+  }
+}
+
+/* ---- เดินสินค้า: รวมทุกความเคลื่อนไหวของสินค้า 1 ตัว ---- */
+async function loadMovements(btn){
+  const val=document.getElementById('mv-prod').value.trim();
+  const sku=val.split('·')[0].trim();
+  const p=products.find(x=>x.sku===sku)||products.find(x=>x.name===val);
+  if(!p){toast('เลือกสินค้าจากรายการก่อน');return;}
+  btn.disabled=true;btn.textContent='กำลังดึง…';
+  const wn=id=>whList.find(w=>w.id===id)?.name||'';
+  try{
+    const [mv,rcv,sold,tf,adj,cvF,cvT]=await Promise.all([
+      db.from('stock_movements').select('*').eq('product_id',p.id).order('created_at',{ascending:false}).limit(300),
+      db.from('stock_receive_items').select('qty,cost,stock_receives(receive_no,created_at,created_by)').eq('product_id',p.id).limit(300),
+      db.from('order_items').select('qty,order_id').eq('product_id',p.id).limit(400),
+      db.from('transfer_items').select('qty,received_qty,transfers(tf_no,status,received_at,from_wh,to_wh,received_by)').eq('product_id',p.id).limit(200),
+      db.from('stock_adjustments').select('*,warehouses(name)').eq('product_id',p.id).limit(200),
+      db.from('conversions').select('*,pt:products!conversions_to_product_fkey(name)').eq('from_product',p.id).limit(200),
+      db.from('conversions').select('*,pf:products!conversions_from_product_fkey(name)').eq('to_product',p.id).limit(200),
+    ]);
+    // ขายออก: หาบิลที่ส่งแล้วของ order เหล่านั้น
+    let soldRows=[];
+    const oids=[...new Set((sold.data||[]).map(x=>x.order_id))];
+    if(oids.length){
+      const {data:sbills}=await db.from('bills').select('order_id,bill_no,ship_status,created_at')
+        .in('order_id',oids).eq('ship_status','shipped');
+      const shipMap={};(sbills||[]).forEach(b=>{shipMap[b.order_id]=b;});
+      soldRows=(sold.data||[]).filter(x=>shipMap[x.order_id])
+        .map(x=>({date:shipMap[x.order_id].created_at,type:'ขายออก',qty:-Number(x.qty),
+          ref:shipMap[x.order_id].bill_no,wh:'',by:'',note:''}));
+    }
+    const rows=[
+      ...soldRows,
+      ...(rcv.data||[]).filter(r=>r.stock_receives).map(r=>({date:r.stock_receives.created_at,type:'รับเข้า',
+        qty:+Number(r.qty),ref:r.stock_receives.receive_no||'',wh:'',by:r.stock_receives.created_by||'',note:''})),
+      ...(mv.data||[]).filter(r=>r.type==='waste').map(r=>({date:r.created_at,type:'ตีเสีย',
+        qty:-Math.abs(Number(r.qty)),ref:'',wh:wn(r.warehouse_id),by:r.created_by||'',note:r.note||''})),
+      ...(tf.data||[]).filter(r=>r.transfers?.status==='received').map(r=>({date:r.transfers.received_at,type:'โอนโกดัง',
+        qty:Number(r.received_qty??r.qty),ref:r.transfers.tf_no,
+        wh:wn(r.transfers.from_wh)+'→'+wn(r.transfers.to_wh),by:r.transfers.received_by||'',note:'ยอดรวมไม่เปลี่ยน'})),
+      ...(adj.data||[]).map(r=>({date:r.created_at,type:'ปรับสต๊อก',
+        qty:Number(r.new_qty)-Number(r.old_qty),ref:'',wh:r.warehouses?.name||'',by:r.adjusted_by||'',note:r.reason||''})),
+      ...(cvF.data||[]).map(r=>({date:r.created_at,type:'แปลงออก',
+        qty:-Number(r.from_qty),ref:r.cv_no||'',wh:wn(r.warehouse_id),by:r.created_by||'',note:'→ '+(r.pt?.name||'')})),
+      ...(cvT.data||[]).map(r=>({date:r.created_at,type:'แปลงเข้า',
+        qty:+Number(r.to_qty),ref:r.cv_no||'',wh:wn(r.warehouse_id),by:r.created_by||'',note:'← '+(r.pf?.name||'')})),
+    ].sort((a,b)=>new Date(b.date)-new Date(a.date));
+
+    const tin=rows.filter(r=>r.type==='รับเข้า'||r.type==='แปลงเข้า').reduce((s,r)=>s+r.qty,0);
+    const tout=rows.filter(r=>r.type==='ขายออก'||r.type==='แปลงออก').reduce((s,r)=>s+Math.abs(r.qty),0);
+    const twaste=rows.filter(r=>r.type==='ตีเสีย').reduce((s,r)=>s+Math.abs(r.qty),0);
+    const sum=document.getElementById('mv-sum');
+    sum.style.display='block';
+    sum.innerHTML=`<b>${esc(p.sku)} · ${esc(p.name)}</b> — คงเหลือปัจจุบัน <b>${Number(p.stock_qty||0)}</b>
+      <span class="tag tag-ok">เข้า +${tin}</span> <span class="tag tag-low">ออก −${tout}</span>
+      <span class="tag tag-out">เสีย −${twaste}</span> · ${rows.length} รายการ`;
+    const colorOf=t=>({'รับเข้า':'var(--ok,#159b78)','แปลงเข้า':'var(--ok,#159b78)','ขายออก':'#b06000','แปลงออก':'#b06000','ตีเสีย':'var(--danger,#b52020)','ปรับสต๊อก':'#555','โอนโกดัง':'#555'}[t]||'#555');
+    document.getElementById('mv-body').innerHTML=!rows.length
+      ?'<div class="empty">ยังไม่มีความเคลื่อนไหวของสินค้านี้</div>'
+      :'<table><thead><tr><th>วันที่</th><th>ประเภท</th><th class="num">จำนวน</th><th>อ้างอิง</th><th>โกดัง</th><th>โดย</th><th>หมายเหตุ</th></tr></thead><tbody>'
+      +rows.map(r=>{
+        const d=new Date(r.date).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+        return `<tr><td style="font-size:13px;color:var(--muted)">${d}</td>
+          <td style="color:${colorOf(r.type)};font-weight:600">${r.type}</td>
+          <td class="num" style="font-weight:700">${r.type==='โอนโกดัง'?r.qty:(r.qty>0?'+':'')+r.qty}</td>
+          <td>${esc(r.ref)}</td><td style="font-size:13px">${esc(r.wh)}</td>
+          <td style="font-size:13px">${esc(r.by)}</td><td style="font-size:13px;color:var(--muted)">${esc(r.note)}</td></tr>`;
+      }).join('')+'</tbody></table>';
+  }catch(e){toast(String(e.message||e));}
+  btn.disabled=false;btn.textContent='🔎 ดูเดินสินค้า';
 }
 function scFillWh(){
   const sel=document.getElementById('sc-wh');
@@ -3008,6 +3397,8 @@ async function exportMonthExcel(btn){
   try{
     const [y,m]=mv.split('-').map(Number);
     const from=new Date(y,m-1,1),to=new Date(y,m,1);
+    const thM=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'][m-1];
+    const title=thM+'/'+(y+543);
     const {data:bs,error}=await db.from('bills')
       .select('*, customers(code,name,sale_name,delivery_method), orders(id,order_no)')
       .gte('created_at',from.toISOString()).lt('created_at',to.toISOString())
@@ -3020,41 +3411,74 @@ async function exportMonthExcel(btn){
       .in('order_id',orderIds);
     if(e2)throw new Error(e2.message);
     const itemsByOrder={};(its||[]).forEach(it=>{(itemsByOrder[it.order_id]=itemsByOrder[it.order_id]||[]).push(it);});
-    const dstr=dt=>new Date(dt).toLocaleDateString('th-TH',{day:'2-digit',month:'2-digit',year:'numeric'});
+    const dstr=dt=>{const d=new Date(dt);return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear();};
 
-    // ชีต 1: ยอดขายรายบิล
-    const s1=bs.map((b,i)=>({'#':i+1,'เลขที่บิล':b.bill_no,'SO':b.orders?.order_no||'','วันที่':dstr(b.created_at),
-      'ลูกค้า':(b.customers?.code||'')+' '+(b.customers?.name||''),'ผู้ขาย (เซลล์)':b.customers?.sale_name||'',
-      'ขนส่ง':b.customers?.delivery_method||'','ยอดสินค้า':Number(b.total)-Number(b.shipping_fee||0)+Number(b.discount||0),
-      'ค่าขนส่ง':Number(b.shipping_fee||0),'ส่วนลด':Number(b.discount||0),'ยอดบิล':Number(b.total),
-      'สถานะส่ง':b.ship_status==='shipped'?'ส่งแล้ว':'รอส่ง','ชำระ':b.payment_status==='paid'?'จ่ายแล้ว':'ค้างจ่าย',
-      'ผู้รับยอด':b.paid_by||''}));
+    // ===== ชีต 1: ยอดขาย (ตามฟอร์ม reportSalesDetail) =====
+    // มูลค่ารายการ = ก่อนหักส่วนลด · ยอดขาย = ยอดบิลจริง
+    const rows1=bs.map(b=>({
+      so:b.orders?.order_no||b.bill_no, date:dstr(b.created_at),
+      cust:(b.customers?.name||''), sale:b.customers?.sale_name||'',
+      gross:Number(b.total)+Number(b.discount||0), net:Number(b.total)
+    })).sort((a,b)=>b.net-a.net);
+    const s1=[['ยอดขาย ('+title+')'],
+      ['#','รายการ','วันที่','ลูกค้า','ช่องทางการขาย','มูลค่ารายการ','ยอดขาย'],
+      ...rows1.map((r,i)=>[i+1,r.so,r.date,r.cust,r.sale,r.gross,r.net])];
 
-    // ชีต 2: รายการสินค้าขายออกทุกบิล + ต้นทุน + กำไร
-    const s2=[];let n=0;
+    // ===== ชีต 2: สรุปกำไรรวม (ตามฟอร์ม totalProfitlossReport) =====
+    const rows2=[];
     bs.forEach(b=>{(itemsByOrder[b.order_id]||[]).forEach(it=>{
       const cost=Number(it.products?.last_cost||0)*Number(it.qty);
       const amt=Number(it.amount);
-      s2.push({'#':++n,'เลขที่บิล':b.bill_no,'วันที่':dstr(b.created_at),
-        'ลูกค้า':b.customers?.name||'','SKU':it.products?.sku||'','สินค้า':it.products?.name||'',
-        'จำนวน':Number(it.qty),'หน่วย':it.products?.unit||'','ราคาขาย/หน่วย':Number(it.price),
-        'ยอดขาย':amt,'ต้นทุน/หน่วย':Number(it.products?.last_cost||0),'ต้นทุนรวม':cost,'กำไร (ก่อนหักค่าใช้จ่าย)':amt-cost});});});
+      rows2.push([b.orders?.order_no||b.bill_no,(b.customers?.name||''),
+        it.products?.sku||'',it.products?.name||'',dstr(b.created_at),
+        Number(it.qty),amt,cost,amt-cost]);});});
+    const s2=[['สรุปกำไรรวม'],
+      ['#','รายการ','ลูกค้า/ผู้ติดต่อ','รหัสสินค้า','สินค้า','วันที่','จำนวน','ขาย (บาท)','ต้นทุน (บาท)','กำไร (บาท)'],
+      ...rows2.map((r,i)=>[i+1,...r])];
 
-    // ชีต 3: สรุปต่อ SKU
+    // ===== ชีต 3: สรุปต่อสินค้า =====
     const agg={};
-    s2.forEach(r=>{const k=r['SKU'];
-      const a=agg[k]=agg[k]||{'SKU':k,'สินค้า':r['สินค้า'],'จำนวนขายรวม':0,'ยอดขายรวม':0,'ต้นทุนรวม':0,'กำไรรวม':0};
-      a['จำนวนขายรวม']+=r['จำนวน'];a['ยอดขายรวม']+=r['ยอดขาย'];a['ต้นทุนรวม']+=r['ต้นทุนรวม'];a['กำไรรวม']+=r['กำไร (ก่อนหักค่าใช้จ่าย)'];});
-    const s3=Object.values(agg).sort((a,b)=>b['ยอดขายรวม']-a['ยอดขายรวม']);
+    rows2.forEach(r=>{const k=r[2];
+      const a=agg[k]=agg[k]||{sku:k,name:r[3],qty:0,sale:0,cost:0,profit:0};
+      a.qty+=r[5];a.sale+=r[6];a.cost+=r[7];a.profit+=r[8];});
+    const rows3=Object.values(agg).sort((a,b)=>b.sale-a.sale);
+    const s3=[['สรุปต่อสินค้า ('+title+')'],
+      ['#','รหัสสินค้า','สินค้า','จำนวนขายรวม','ยอดขายรวม','ต้นทุนรวม','กำไรรวม'],
+      ...rows3.map((r,i)=>[i+1,r.sku,r.name,r.qty,r.sale,r.cost,r.profit])];
 
     const wb=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s1),'ยอดขายรายบิล');
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s2),'รายการสินค้าขายออก');
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(s3),'สรุปต่อสินค้า');
+    const mk=aoa=>{const ws=XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols']=aoa[1].map((c,ci)=>({wch:Math.max(10,...aoa.slice(1).map(r=>String(r[ci]??'').length+2).slice(0,60))}));
+      return ws;};
+    XLSX.utils.book_append_sheet(wb,mk(s1),'ยอดขาย');
+    XLSX.utils.book_append_sheet(wb,mk(s2),'สรุปกำไรรวม');
+    XLSX.utils.book_append_sheet(wb,mk(s3),'สรุปต่อสินค้า');
     XLSX.writeFile(wb,'บัญชี_'+mv+'.xlsx');
-    toast('Export Excel เดือน '+mv+' แล้ว ('+bs.length+' บิล / '+s2.length+' รายการสินค้า)');
+    toast('Export Excel '+title+' แล้ว ('+bs.length+' บิล / '+rows2.length+' รายการสินค้า)');
   }catch(e){toast(String(e.message||e));}
   btn.disabled=false;btn.textContent='📊 Excel รายเดือน';
+}
+
+/* ---- Export รายการหน้าบัญชีตามที่กรองอยู่ ---- */
+function exportAccountXlsx(){
+  const list=window.acLastList||[];
+  if(!list.length){toast('ไม่มีรายการในหน้าจอ (ตาม filter ปัจจุบัน)');return;}
+  const dstr=dt=>{const d=new Date(dt);return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear()+' '+d.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});};
+  const aoa=[['รายการบัญชี (ตามตัวกรอง) · ดึงเมื่อ '+new Date().toLocaleString('th-TH')],
+    ['#','เลขที่บิล','SO','v.','ลูกค้า','เซลล์','ขนส่ง','ประเภทบิล','ยอดสินค้า','ค่าขนส่ง','ส่วนลด','ยอดบิล','ออกเมื่อ','สถานะส่ง','ชำระ','รับยอดโดย','สลิป'],
+    ...list.map((b,i)=>[i+1,b.bill_no,b.orders?.order_no||'',b.revision||1,
+      (b.customers?.code||'')+' '+(b.customers?.name||''),b.customers?.sale_name||'',
+      b.customers?.delivery_method||'',b.doc_type||'บิลเงินสด',
+      Number(b.total)-Number(b.shipping_fee||0)+Number(b.discount||0),
+      Number(b.shipping_fee||0),Number(b.discount||0),Number(b.total),
+      dstr(b.created_at),(b.ship_status==='shipped'?'ส่งแล้ว':b.ship_status==='cancelled'?'ยกเลิก':'รอส่ง'),
+      b.payment_status==='paid'?'จ่ายแล้ว':'ค้างจ่าย',b.paid_by||'',b.slip_url?'มี':''])];
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=aoa[1].map((c,ci)=>({wch:Math.max(9,...aoa.slice(1,60).map(r=>String(r[ci]??'').length+2))}));
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'บัญชี');
+  XLSX.writeFile(wb,'บัญชี_ตามตัวกรอง_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('ดาวน์โหลด '+list.length+' รายการแล้ว');
 }
 
 /* ==================== เฟส 3: โอนของจากโกดัง ==================== */
@@ -3281,9 +3705,11 @@ async function tfConfirmReceive(id,btn){
 let ebState=null; // {bill, order, items:[{id?,product_id,name,unit,qty,price,orig_qty}], removed:[ids]}
 function showImgView(u){document.getElementById('imgview-img').src=u;document.getElementById('imgview').style.display='flex';}
 
+let ebFeesOnly=false;
 async function openEditBill(billId){
   const b=bills.find(x=>x.id===billId);if(!b)return;
-  if((b.ship_status||'pending')!=='pending'){toast('แก้ได้เฉพาะบิลที่ยังไม่จัดส่ง');return;}
+  if((b.ship_status||'pending')==='cancelled'){toast('บิลถูกยกเลิกแล้ว แก้ไม่ได้');return;}
+  ebFeesOnly=(b.ship_status==='shipped');  // ส่งแล้ว: แก้ได้เฉพาะค่าส่ง/ส่วนลด
   const {data:o,error}=await db.from('orders')
     .select('*, customers(id,code,name,line_group_id,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(id,product_id,qty,price,amount,products(name,unit))')
     .eq('id',b.order_id).single();
@@ -3300,11 +3726,25 @@ async function openEditBill(billId){
   document.getElementById('eb-prodlist').innerHTML=products.filter(p=>p.active!==false)
     .map(p=>`<option value="${esc(p.sku)} · ${esc(p.name)}"></option>`).join('');
   ebRender();
+  // โหมดส่งแล้ว: ซ่อนส่วนเพิ่มสินค้า + แจ้งเหตุผล
+  const addRow=document.getElementById('eb-add-search')?.closest('div')?.parentElement;
+  if(addRow)addRow.style.display=ebFeesOnly?'none':'flex';
+  const hintEl=document.querySelector('#editbill-modal .hint');
+  if(hintEl)hintEl.textContent=ebFeesOnly
+    ?'บิลนี้จัดส่งแล้ว — แก้ได้เฉพาะค่าขนส่ง/ส่วนลด เพื่อคำนวณยอดบิลใหม่ (จำนวนและรายการสินค้าแก้ไม่ได้เพราะสต๊อกถูกตัดไปแล้ว)'
+    :'แก้ได้ทุกรายการ · ระบบจะปรับยอดจองสต๊อกให้อัตโนมัติ และสร้างรูปบิลเวอร์ชันใหม่';
   document.getElementById('editbill-modal').style.display='flex';
 }
 function closeEditBill(){document.getElementById('editbill-modal').style.display='none';ebState=null;}
 function ebRender(){
-  document.getElementById('eb-items').innerHTML=ebState.items.map((it,i)=>`<tr>
+  document.getElementById('eb-items').innerHTML=ebState.items.map((it,i)=>ebFeesOnly
+    ?`<tr>
+    <td>${esc(it.name)}${it.price===0?' <span class="tag tag-low">แถม</span>':''}</td>
+    <td class="num">${it.qty} ${esc(it.unit)}</td>
+    <td class="num">${fmt(it.price)}</td>
+    <td class="num">${fmt(it.qty*it.price)}</td>
+    <td></td></tr>`
+    :`<tr>
     <td>${esc(it.name)}${it.price===0?' <span class="tag tag-low">แถม</span>':''}</td>
     <td class="num"><input type="number" min="1" value="${it.qty}" class="num" style="width:70px" onchange="ebQty(${i},this.value)"> ${esc(it.unit)}</td>
     <td class="num"><input type="number" min="0" step="0.01" value="${it.price}" class="num" style="width:95px" onchange="ebPrice(${i},this.value)"></td>
@@ -3360,6 +3800,7 @@ async function saveEditBill(btn){
     const grand=Math.max(0,sub+ship-disc);
     const newRev=(b.revision||1)+1;
 
+    if(!ebFeesOnly){
     // 1) ปรับยอดจองสต๊อกตามส่วนต่างจำนวน
     const delta={};
     ebState.items.forEach(it=>{delta[it.product_id]=(delta[it.product_id]||0)+(it.qty-it.orig_qty);});
@@ -3394,12 +3835,13 @@ async function saveEditBill(btn){
     }
     // 3) ยอดออเดอร์
     await db.from('orders').update({total:sub}).eq('id',o.id);
+    } // end !ebFeesOnly
 
     // 4) วาดบิลใหม่ (เวอร์ชันใหม่)
     const {data:o2}=await db.from('orders')
       .select('*, customers(id,code,name,line_group_id,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(qty,price,amount,product_id,products(name,unit))')
       .eq('id',o.id).single();
-    const result=await drawBill(o2,b.bill_no,{shipFee:ship,discount:disc,grand,revision:newRev});
+    const result=await drawBill(o2,b.bill_no,{shipFee:ship,discount:disc,grand,revision:newRev,docType:b.doc_type||'บิลเงินสด'});
     const blob=await new Promise(res=>result.cv.toBlob(res,'image/png'));
     const path=b.bill_no+'_v'+newRev+'.png';
     const {error:upErr}=await db.storage.from('bills').upload(path,blob,{contentType:'image/png',upsert:true});
@@ -3493,10 +3935,31 @@ function markPaid(id,btn){
   spBillId=id;
   document.getElementById('sp-no').textContent=b.bill_no;
   document.getElementById('sp-info').textContent=(b.customers?.name||'')+' · ยอด ฿'+fmt(b.total)+' · ผู้ตรวจ: '+staff;
+  // บิลค้างจ่ายอื่นของลูกค้าเดียวกัน — ติ๊กปิดพร้อมกันได้
+  const others=bills.filter(x=>x.id!==id&&x.customer_id===b.customer_id
+    &&x.payment_status!=='paid'&&(x.ship_status||'pending')!=='cancelled');
+  const wrap=document.getElementById('sp-others-wrap');
+  wrap.style.display=others.length?'block':'none';
+  document.getElementById('sp-others').innerHTML=others.map(x=>
+    `<label class="chk" style="display:flex;gap:6px;padding:3px 0">
+      <input type="checkbox" class="sp-other" value="${x.id}" onchange="spSum()">
+      <span>${esc(x.bill_no)} · ฿${fmt(x.total)} · ${new Date(x.created_at).toLocaleDateString('th-TH',{day:'numeric',month:'short'})}</span>
+    </label>`).join('');
+  spSum();
   const f=document.getElementById('sp-file');f.value='';
   const pv=document.getElementById('sp-preview');pv.style.display='none';pv.src='';
   f.onchange=()=>{if(f.files[0]){pv.src=URL.createObjectURL(f.files[0]);pv.style.display='block';}};
   document.getElementById('slip-modal').style.display='flex';
+}
+function spSum(){
+  const b=bills.find(x=>x.id===spBillId);if(!b)return;
+  let sum=Number(b.total)||0;
+  document.querySelectorAll('.sp-other:checked').forEach(cb=>{
+    const x=bills.find(y=>y.id===Number(cb.value));
+    if(x)sum+=Number(x.total)||0;
+  });
+  const el=document.getElementById('sp-sum');
+  if(el)el.textContent='฿'+fmt(sum);
 }
 function closeSlipModal(){document.getElementById('slip-modal').style.display='none';spBillId=null;}
 async function confirmPaid(btn){
@@ -3513,18 +3976,29 @@ async function confirmPaid(btn){
       if(se)throw new Error('อัพสลิปไม่สำเร็จ: '+se.message+' (เช็คว่าสร้าง bucket slips แล้ว)');
       slipUrl=db.storage.from('slips').getPublicUrl(path).data.publicUrl;
     }
+    // บิลทั้งหมดที่สลิปนี้ปิด (บิลหลัก + ที่ติ๊กเพิ่ม)
+    const targets=[b];
+    document.querySelectorAll('.sp-other:checked').forEach(cb=>{
+      const x=bills.find(y=>y.id===Number(cb.value));
+      if(x)targets.push(x);
+    });
     const upd={payment_status:'paid',paid_at:new Date().toISOString(),paid_by:staff};
     if(slipUrl)upd.slip_url=slipUrl;
-    const {error}=await db.from('bills').update(upd).eq('id',b.id);
-    if(error)throw new Error('บันทึกไม่สำเร็จ: '+error.message);
+    for(const tb of targets){
+      const {error}=await db.from('bills').update(upd).eq('id',tb.id);
+      if(error)throw new Error('บันทึก '+tb.bill_no+' ไม่สำเร็จ: '+error.message);
+    }
+    const sumAll=targets.reduce((s,x)=>s+Number(x.total),0);
     if(b.customers?.line_group_id){
       const polite=document.getElementById('polite').value;
+      const txt=targets.length>1
+        ?'✅ รับยอดโอนรวม '+targets.length+' บิล\n'+targets.map(x=>'• '+x.bill_no+' ฿'+fmt(x.total)).join('\n')+'\nรวม ฿'+fmt(sumAll)+' เรียบร้อย\nขอบคุณ'+polite+' 🙏'
+        :'✅ รับยอดบิลเลขที่ '+b.bill_no+'\nจำนวน ฿'+fmt(b.total)+' เรียบร้อย\nขอบคุณ'+polite+' 🙏';
       const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
-        to:b.customers.line_group_id,
-        messages:[{type:'text',text:'✅ รับยอดบิลเลขที่ '+b.bill_no+'\nจำนวน ฿'+fmt(b.total)+' เรียบร้อย\nขอบคุณ'+polite+' 🙏'}]}});
+        to:b.customers.line_group_id,messages:[{type:'text',text:txt}]}});
       if(fnErr||!res||res.status!==200)toast('รับยอดแล้ว แต่ส่งข้อความ LINE ไม่สำเร็จ');
-      else toast('รับยอด '+b.bill_no+(slipUrl?' + แนบสลิป':'')+' และส่งขอบคุณเข้ากลุ่มแล้ว ✓');
-    }else toast('รับยอด '+b.bill_no+(slipUrl?' + แนบสลิป':'')+' แล้ว');
+      else toast('รับยอด '+targets.length+' บิล'+(slipUrl?' + แนบสลิป':'')+' และส่งขอบคุณเข้ากลุ่มแล้ว ✓');
+    }else toast('รับยอด '+targets.map(x=>x.bill_no).join(', ')+(slipUrl?' + แนบสลิป':'')+' แล้ว');
     closeSlipModal(); loadBills();
   }catch(e){toast(String(e.message||e));}
   btn.disabled=false;btn.textContent='✓ ยืนยันรับยอด';
@@ -3907,6 +4381,7 @@ async function startApp(){
   loadSettings();
   await loadWhList();
   loadTransfers();
+  loadQuotes();
   loadSkuCats();
   setRange('month');
 }
