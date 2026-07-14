@@ -2667,16 +2667,20 @@ function setFilter(f){
   renderAccount();
 }
 async function downloadBillPDF(billId,btn){
-  const b=bills.find(x=>x.id===billId);if(!b)return;
   btn.disabled=true;btn.textContent='…';
   try{
-    // ดึงออเดอร์เต็มของบิลนี้
-    const {data:bill}=await db.from('bills').select('order_id,bill_no').eq('id',billId).single();
+    // ดึงข้อมูลบิลเต็ม (รวมค่าส่ง/ส่วนลด/ประเภท/เวอร์ชัน ให้ PDF ตรงกับบิลจริง)
+    const {data:bill}=await db.from('bills')
+      .select('order_id,bill_no,shipping_fee,discount,total,revision,doc_type')
+      .eq('id',billId).single();
+    if(!bill)throw new Error('ไม่พบบิล');
     const {data:o,error}=await db.from('orders')
       .select(`*, customers(*), order_items(qty,price,amount,product_id,products(name,unit))`)
       .eq('id',bill.order_id).single();
     if(error||!o)throw new Error('โหลดข้อมูลบิลไม่ได้');
-    const result=await drawBill(o,bill.bill_no);
+    const result=await drawBill(o,bill.bill_no,{
+      shipFee:Number(bill.shipping_fee)||0,discount:Number(bill.discount)||0,
+      grand:Number(bill.total),revision:bill.revision||1,docType:bill.doc_type||'บิลเงินสด'});
     const pdf=await billToPDF(result,bill.bill_no);
     pdf.save(bill.bill_no+'.pdf');
     toast('ดาวน์โหลด PDF '+bill.bill_no+' แล้ว');
@@ -3096,12 +3100,16 @@ async function acIssueBill(orderId,btn){
     .eq('id',orderId).single();
   if(error||!o){toast('โหลดออเดอร์ไม่ได้: '+(error?.message||''));return;}
   if(o.status!=='new'){toast('ออเดอร์นี้ถูกออกบิล/ยกเลิกไปแล้ว');loadBills();return;}
-  const sendLine=o.customers?.line_group_id
-    ?confirm('ออกบิล '+o.order_no+' (บิลเงินสด)\nยอด ฿'+fmt(o.total)+'\n\nส่งบิลเข้ากลุ่ม LINE ลูกค้าด้วยเลยไหม?\n(OK = ออกบิล+ส่ง / Cancel = ถามอีกครั้งแบบไม่ส่ง)')
-    :false;
-  if(!sendLine&&!confirm('ออกบิล '+o.order_no+' (บิลเงินสด'+(o.customers?.line_group_id?' ไม่ส่ง LINE':'')+') ใช่ไหม?'))return;
+  if(!confirm('ออกบิล '+o.order_no+' (บิลเงินสด)\nยอด ฿'+fmt(o.total)+'\n\n✓ ระบบจะดาวน์โหลด PDF ให้ทันที\n✗ ยังไม่ส่งเข้ากลุ่ม LINE — กดปุ่ม "ส่ง LINE" ที่แถวบิลทีหลังได้'))return;
   if(!orders.some(x=>x.id===o.id))orders.push(o);
-  await makeBill(o.id,btn,sendLine);
+  await makeBill(o.id,btn,false);   // ออกบิลอย่างเดียว ไม่ยิง LINE
+  // ดาวน์โหลด PDF ของบิลที่เพิ่งออก
+  try{
+    const {data:nb}=await db.from('bills').select('id')
+      .eq('order_id',orderId).neq('ship_status','cancelled')
+      .order('created_at',{ascending:false}).limit(1);
+    if(nb&&nb.length)await downloadBillPDF(nb[0].id,btn);
+  }catch(e){console.warn('auto pdf',e);}
   loadBills();
 }
 
