@@ -497,9 +497,9 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-g" onclick="costChangePin()">เปลี่ยนรหัส</button>
       <button class="btn-g" onclick="costLock()">🔒 ล็อก</button>
     </div>
-    <p class="hint">แก้ช่อง "ต้นทุน/หน่วย" แล้วกดบันทึก — ต้นทุนนี้ใช้คำนวณกำไรใน Excel บัญชีและรายงานทั้งหมด</p>
+    <p class="hint">ระบบคิดต้นทุนแบบ <b>FIFO</b> — รับของเข้าสร้างลอตอัตโนมัติ ขายตัดลอตเก่าก่อน กำไรในบัญชีใช้ทุนที่ตัดจริง · ช่อง "ราคาซื้อล่าสุด" ใช้เป็นทุนตั้งต้น/สำรองเมื่อสินค้ายังไม่มีลอต · กด 📦 ดูลอตคงเหลือรายตัว</p>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th>SKU</th><th>สินค้า</th><th>หน่วย</th><th class="num" style="width:130px">ต้นทุน/หน่วย</th><th class="num">ราคาขายกลาง</th><th class="num">กำไร/หน่วย</th><th class="num">มาร์จิ้น</th></tr></thead>
+      <thead><tr><th style="width:48px">รูป</th><th>SKU</th><th>สินค้า</th><th>หน่วย</th><th class="num" style="width:130px" title="ราคาซื้อล่าสุด — ใช้เป็นทุนตั้งต้นและสำรองเมื่อไม่มีลอต">ราคาซื้อล่าสุด</th><th class="num" title="ทุนเฉลี่ยของลอตที่เหลืออยู่ (FIFO)">ทุน FIFO เฉลี่ย</th><th class="num">คงเหลือ(ลอต)</th><th class="num">ราคาขายกลาง</th><th class="num">กำไร/หน่วย</th><th class="num">มาร์จิ้น</th><th style="width:36px"></th></tr></thead>
       <tbody id="cost-body"></tbody>
     </table></div>
   </div>
@@ -1553,6 +1553,7 @@ async function wasteProduct(id){
     p_warehouse:wid,p_note:note,
     p_by:currentUser?(currentUser.display_name||currentUser.username):null});
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  try{await db.rpc('fifo_take',{p_product:id,p_qty:qty});}catch(e){console.warn('fifo waste',e);}
   toast('ตัดของเสีย '+p.name+' จำนวน '+qty+' '+p.unit+' แล้ว');
   loadProducts();
 }
@@ -2649,7 +2650,22 @@ async function saveReceive(){
   });
   btn.disabled=false;
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
-  toast('รับสินค้าเข้า '+items.length+' รายการเรียบร้อย ✓');
+  // FIFO: สร้างลอตต่อรายการ (ทุน = ราคาซื้อที่กรอก, ไม่กรอกใช้ราคาซื้อล่าสุด)
+  try{
+    const supplier=document.getElementById('supplier').value.trim();
+    const lots=items.map(it=>{
+      const p=products.find(x=>x.id===it.product_id);
+      const uc=(it.cost!=null&&it.cost>0)?it.cost:Number(p?.last_cost||0);
+      return {product_id:it.product_id,qty:it.qty,remaining:it.qty,unit_cost:uc,
+        ref:'รับเข้า'+(supplier?' · '+supplier:'')};
+    });
+    await db.from('stock_lots').insert(lots);
+    // ราคาซื้อล่าสุด = ทุนลอตที่เพิ่งรับ (เฉพาะตัวที่กรอกราคามา)
+    for(const it of items){
+      if(it.cost!=null&&it.cost>0)await db.from('products').update({last_cost:it.cost}).eq('id',it.product_id);
+    }
+  }catch(e){console.warn('fifo lots',e);}
+  toast('รับสินค้าเข้า '+items.length+' รายการเรียบร้อย ✓ (บันทึกลอต FIFO แล้ว)');
   rcv=[];renderRcv();
   await loadProducts(); loadRcvHistory();
 }
@@ -2844,6 +2860,7 @@ async function shipBillUI(id){
     }else toast('ทำไม่สำเร็จ: '+error.message);
     return;
   }
+  try{await db.rpc('fifo_consume_order',{p_order:b.order_id});}catch(e){console.warn('fifo',e);}
   toast('บิล '+b.bill_no+' → ส่งแล้ว ตัดสต๊อกจาก'+whName+'เรียบร้อย');
   const r=await notifyCustomer(b.customers?.line_group_id,
     '🚚 บิลเลขที่ '+b.bill_no+'\nสถานะ: จัดส่งแล้ว กำลังนำส่งถึงมือลูกค้า\nยอด ฿'+fmt(b.total));
@@ -2855,6 +2872,7 @@ async function cancelBillUI(id){
   if(!confirm('ยกเลิกบิล '+b.bill_no+' ?\nระบบจะคืนของที่จองกลับเข้าสต๊อกพร้อมขาย และปิดออเดอร์นี้'))return;
   const {error}=await db.rpc('cancel_bill',{p_bill_id:id});
   if(error){toast('ยกเลิกไม่สำเร็จ: '+error.message);return;}
+  try{await db.rpc('fifo_return_order',{p_order:b.order_id});}catch(e){console.warn('fifo return',e);}
   toast('ยกเลิกบิล '+b.bill_no+' และคืนของจองแล้ว');
   if(b.customers?.line_group_id && confirm('แจ้งลูกค้าในกลุ่ม LINE ว่าบิลนี้ถูกยกเลิกไหม?')){
     await notifyCustomer(b.customers.line_group_id,'❌ บิลเลขที่ '+b.bill_no+' ถูกยกเลิกแล้ว\nหากมีข้อสงสัยติดต่อร้านได้เลยครับ');
@@ -2887,7 +2905,29 @@ async function resendBill(id,btn){
   loadBills();
 }
 /* ==================== หน้าต้นทุนสินค้า (ล็อกรหัส 6 หลัก) ==================== */
-let costUnlocked=false, costChanges={};
+let costUnlocked=false, costChanges={}, lotStats={}, lotsByProd={};
+async function loadLotStats(){
+  try{
+    const {data}=await db.from('stock_lots')
+      .select('product_id,remaining,unit_cost,ref,created_at')
+      .gt('remaining',0).order('created_at').limit(3000);
+    lotStats={};lotsByProd={};
+    (data||[]).forEach(l=>{
+      const s=lotStats[l.product_id]=lotStats[l.product_id]||{qty:0,cost:0};
+      s.qty+=Number(l.remaining);s.cost+=Number(l.remaining)*Number(l.unit_cost);
+      (lotsByProd[l.product_id]=lotsByProd[l.product_id]||[]).push(l);
+    });
+  }catch(e){console.warn('lots',e);}
+}
+function showLots(pid){
+  const p=products.find(x=>x.id===pid);
+  const ls=lotsByProd[pid]||[];
+  if(!ls.length){toast((p?.name||'')+': ยังไม่มีลอตคงเหลือ');return;}
+  const lines=ls.slice(0,8).map(l=>'• '+Number(l.remaining)+' ชิ้น @ ฿'+fmt(l.unit_cost)
+    +' ('+new Date(l.created_at).toLocaleDateString('th-TH',{day:'numeric',month:'short'})+(l.ref?' · '+l.ref:'')+')');
+  alert('📦 ลอตคงเหลือ (เก่า→ใหม่ ตัดตามลำดับนี้)\n'+(p?.name||'')+'\n\n'+lines.join('\n')
+    +(ls.length>8?'\n…และอีก '+(ls.length-8)+' ลอต':''));
+}
 function costShowLock(){
   const hasPin=!!appSettings.cost_pin;
   document.getElementById('cost-lock-enter').style.display=hasPin?'block':'none';
@@ -2907,7 +2947,7 @@ async function costSetPin(){
   toast('ตั้งรหัสแล้ว ✓ ปลดล็อกให้เลย');
   costShowLock();renderCost();
 }
-function costUnlock(){
+async function costUnlock(){
   const v=document.getElementById('cost-pin').value.trim();
   if(v!==String(appSettings.cost_pin||'')){
     toast('รหัสไม่ถูกต้อง');
@@ -2916,7 +2956,9 @@ function costUnlock(){
   }
   costUnlocked=true;costChanges={};
   document.getElementById('cost-pin').value='';
-  costShowLock();renderCost();
+  costShowLock();
+  await loadLotStats();
+  renderCost();
 }
 function costLock(){costUnlocked=false;costChanges={};costShowLock();}
 async function costChangePin(){
@@ -2953,23 +2995,32 @@ function renderCost(){
   document.getElementById('cost-count').textContent=list.length+' รายการ';
   document.getElementById('cost-body').innerHTML=list.map(p=>{
     const cost=costChanges[p.id]!==undefined?costChanges[p.id]:Number(p.last_cost||0);
+    const ls=lotStats[p.id];
+    const fifoAvg=ls&&ls.qty>0?ls.cost/ls.qty:null;
+    const effCost=fifoAvg!=null?fifoAvg:cost;   // กำไรอิงทุน FIFO ถ้ามีลอต
     const sell=Number(p.base_price||0);
-    const profit=sell-cost;
+    const profit=sell-effCost;
     const margin=sell>0?(profit/sell*100):0;
     const changed=costChanges[p.id]!==undefined;
-    const noCost=!cost;
+    const noCost=!cost&&fifoAvg==null;
     return `<tr${changed?' style="background:#fff7e0"':''}>
+      <td>${p.image_url
+        ?`<img src="${esc(p.image_url)}" loading="lazy" style="width:40px;height:40px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:pointer" onclick="showImgView('${esc(p.image_url)}')">`
+        :'<div style="width:40px;height:40px;border-radius:8px;background:var(--bg,#faf7f2);display:flex;align-items:center;justify-content:center;font-size:18px">🧺</div>'}</td>
       <td>${esc(p.sku)}</td>
       <td>${esc(p.name)}</td>
       <td>${esc(p.unit||'')}</td>
       <td class="num"><input type="number" min="0" step="0.01" value="${cost||''}" placeholder="0"
         class="num" style="width:110px${noCost&&!changed?';border-color:var(--danger,#b52020)':''}"
         onchange="costEdit(${p.id},this.value)"></td>
+      <td class="num">${fifoAvg!=null?fmt(fifoAvg):'—'}</td>
+      <td class="num" style="color:var(--muted)">${ls?ls.qty:'—'}</td>
       <td class="num">${fmt(sell)}</td>
-      <td class="num" style="color:${profit<0?'var(--danger,#b52020)':'inherit'}">${cost?fmt(profit):'—'}</td>
-      <td class="num" style="color:${margin<0?'var(--danger,#b52020)':'var(--muted)'}">${cost&&sell?margin.toFixed(1)+'%':'—'}</td>
+      <td class="num" style="color:${profit<0?'var(--danger,#b52020)':'inherit'}">${(cost||fifoAvg!=null)?fmt(profit):'—'}</td>
+      <td class="num" style="color:${margin<0?'var(--danger,#b52020)':'var(--muted)'}">${(cost||fifoAvg!=null)&&sell?margin.toFixed(1)+'%':'—'}</td>
+      <td><button class="btn-g mini" onclick="showLots(${p.id})" title="ดูลอตคงเหลือ">📦</button></td>
     </tr>`;
-  }).join('')||'<tr><td colspan="7" class="empty">ไม่พบสินค้า</td></tr>';
+  }).join('')||'<tr><td colspan="11" class="empty">ไม่พบสินค้า</td></tr>';
   const n=Object.keys(costChanges).length;
   const btn=document.getElementById('cost-save');
   btn.disabled=!n;btn.textContent='💾 บันทึกที่แก้ ('+n+')';
@@ -3702,11 +3753,13 @@ async function exportMonthExcel(btn){
     if(!bs.length){toast('เดือนนี้ไม่มีบิล');btn.disabled=false;btn.textContent='📊 Excel รายเดือน';return;}
     const orderIds=bs.map(b=>b.order_id).filter(Boolean);
     const {data:its,error:e2}=await db.from('order_items')
-      .select('order_id,qty,price,amount,products(sku,name,unit,last_cost)')
+      .select('order_id,qty,price,amount,cost,products(sku,name,unit,last_cost)')
       .in('order_id',orderIds);
     if(e2)throw new Error(e2.message);
     const itemsByOrder={};(its||[]).forEach(it=>{(itemsByOrder[it.order_id]=itemsByOrder[it.order_id]||[]).push(it);});
     const dstr=dt=>{const d=new Date(dt);return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear();};
+    // ต้นทุน: ใช้ FIFO ที่ตัดจริง (it.cost) ถ้ายังไม่ตัด (รอส่ง) ประมาณด้วยราคาซื้อล่าสุด
+    const costOfItem=it=>it.cost!=null?Number(it.cost):Number(it.products?.last_cost||0)*Number(it.qty);
 
     // ===== ชีต 1: ยอดขาย (ตามฟอร์ม reportSalesDetail) =====
     // มูลค่ารายการ = ก่อนหักส่วนลด · ยอดขาย = ยอดบิลจริง
@@ -3722,7 +3775,7 @@ async function exportMonthExcel(btn){
     // ===== ชีต 2: สรุปกำไรรวม (ตามฟอร์ม totalProfitlossReport) =====
     const rows2=[];
     bs.forEach(b=>{(itemsByOrder[b.order_id]||[]).forEach(it=>{
-      const cost=Number(it.products?.last_cost||0)*Number(it.qty);
+      const cost=costOfItem(it);
       const amt=Number(it.amount);
       rows2.push([b.orders?.order_no||b.bill_no,(b.customers?.name||''),
         it.products?.sku||'',it.products?.name||'',dstr(b.created_at),
@@ -3765,7 +3818,7 @@ async function exportAccountXlsx(btn){
     let itemsByOrder={};
     if(orderIds.length){
       const {data:its,error}=await db.from('order_items')
-        .select('order_id,qty,price,amount,products(sku,name,unit,last_cost)')
+        .select('order_id,qty,price,amount,cost,products(sku,name,unit,last_cost)')
         .in('order_id',orderIds);
       if(error)throw new Error(error.message);
       (its||[]).forEach(it=>{(itemsByOrder[it.order_id]=itemsByOrder[it.order_id]||[]).push(it);});
@@ -3773,7 +3826,8 @@ async function exportAccountXlsx(btn){
     const dstr=dt=>{const d=new Date(dt);return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear()+' '+d.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});};
 
     // ===== ชีต 1: สรุปรายบิล (+ ต้นทุน/กำไรต่อบิล) =====
-    const costOf=b=>(itemsByOrder[b.order_id]||[]).reduce((s,it)=>s+Number(it.products?.last_cost||0)*Number(it.qty),0);
+    const costItem=it=>it.cost!=null?Number(it.cost):Number(it.products?.last_cost||0)*Number(it.qty);
+    const costOf=b=>(itemsByOrder[b.order_id]||[]).reduce((s,it)=>s+costItem(it),0);
     const aoa=[['รายการบัญชี (ตามตัวกรอง) · ดึงเมื่อ '+new Date().toLocaleString('th-TH')],
       ['#','เลขที่บิล','SO','v.','ลูกค้า','เซลล์','ขนส่ง','ประเภทบิล','ยอดสินค้า','ค่าขนส่ง','ส่วนลด','ยอดบิล','ต้นทุนสินค้า','กำไรขั้นต้น','ออกเมื่อ','สถานะส่ง','ชำระ','รับยอดโดย','สลิป'],
       ...list.map((b,i)=>{
@@ -3792,12 +3846,13 @@ async function exportAccountXlsx(btn){
       ['#','เลขที่บิล','SO','วันที่','ลูกค้า','SKU','สินค้า','จำนวน','หน่วย','ราคาขาย/หน่วย','ยอดขาย','ต้นทุน/หน่วย','ต้นทุนรวม','กำไรขั้นต้น']];
     let n=0;
     list.forEach(b=>{(itemsByOrder[b.order_id]||[]).forEach(it=>{
-      const cost=Number(it.products?.last_cost||0)*Number(it.qty);
+      const cost=costItem(it);
       const amt=Number(it.amount);
+      const unitCost=Number(it.qty)>0?cost/Number(it.qty):0;
       aoa2.push([++n,b.bill_no,b.orders?.order_no||'',dstr(b.created_at),
         (b.customers?.name||''),it.products?.sku||'',it.products?.name||'',
         Number(it.qty),it.products?.unit||'',Number(it.price),amt,
-        Number(it.products?.last_cost||0),cost,amt-cost]);});});
+        unitCost,cost,amt-cost]);});});
 
     const mk=a=>{const ws=XLSX.utils.aoa_to_sheet(a);
       ws['!cols']=a[1].map((c,ci)=>({wch:Math.max(9,...a.slice(1,60).map(r=>String(r[ci]??'').length+2))}));
