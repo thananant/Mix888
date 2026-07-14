@@ -2650,23 +2650,21 @@ let acPendingOrders=[];
 async function loadBills(){
   const [{data,error},{data:po}]=await Promise.all([
     db.from('bills')
-      .select('*, customers(code,name,line_group_id,delivery_method,sale_name), orders(order_no)')
+      .select('*, customers(code,name,line_group_id,delivery_method,sale_name,sale_id), orders(order_no)')
       .order('created_at',{ascending:false}).limit(500),
     db.from('orders')
-      .select('id,order_no,total,created_at, customers(code,name,delivery_method,sale_name)')
+      .select('id,order_no,total,created_at, customers(code,name,delivery_method,sale_name,sale_id)')
       .eq('status','new').order('created_at',{ascending:false})
   ]);
   if(error){toast('โหลดบิลไม่ได้: '+error.message);return;}
   bills=data||[]; acPendingOrders=po||[];
-  // เติมตัวเลือกเซลล์ (จากข้อมูลจริงในบิล + ตาราง sales)
+  // เติมตัวเลือกเซลล์จากตารางเซลล์ (รหัส 3 ตัว) — กรองด้วย sale_id ตรงตัว
   const saleSel=document.getElementById('ac-sale');
-  if(saleSel){
+  if(saleSel&&typeof sales!=='undefined'){
     const cur=saleSel.value;
-    const names=[...new Set([
-      ...(typeof sales!=='undefined'?sales.map(s=>s.code||s.name):[]),
-      ...bills.map(b=>b.customers?.sale_name).filter(Boolean)
-    ])].sort();
-    saleSel.innerHTML='<option value="">เซลล์: ทั้งหมด</option>'+names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+    saleSel.innerHTML='<option value="">เซลล์: ทั้งหมด</option>'
+      +sales.slice().sort((a,b)=>String(a.code).localeCompare(String(b.code)))
+        .map(s=>`<option value="${s.id}">${esc(s.code)}${s.name?' · '+esc(s.name):''}</option>`).join('');
     if([...saleSel.options].some(o=>o.value===cur))saleSel.value=cur;
   }
   renderAccount(); acStats();
@@ -2723,7 +2721,7 @@ function renderAccount(){
     const dlvF=document.getElementById('ac-delivery').value;
     if(dlvF&&(b.customers?.delivery_method||'')!==dlvF)return false;
     const saleF=document.getElementById('ac-sale').value;
-    if(saleF&&(b.customers?.sale_name||'')!==saleF)return false;
+    if(saleF&&Number(b.customers?.sale_id)!==Number(saleF))return false;
     if(from&&new Date(b.created_at)<new Date(from+'T00:00:00'))return false;
     if(to&&new Date(b.created_at)>new Date(to+'T23:59:59'))return false;
     if(q&&!b.bill_no.toLowerCase().includes(q)&&!(b.orders?.order_no||'').toLowerCase().includes(q)&&!(b.customers?.name||'').toLowerCase().includes(q))return false;
@@ -2736,7 +2734,7 @@ function renderAccount(){
   const saleF2=document.getElementById('ac-sale').value;
   const pendRows=!showPending?[]:acPendingOrders.filter(o=>{
     if(dlvF2&&(o.customers?.delivery_method||'')!==dlvF2)return false;
-    if(saleF2&&(o.customers?.sale_name||'')!==saleF2)return false;
+    if(saleF2&&Number(o.customers?.sale_id)!==Number(saleF2))return false;
     if(from&&new Date(o.created_at)<new Date(from+'T00:00:00'))return false;
     if(to&&new Date(o.created_at)>new Date(to+'T23:59:59'))return false;
     if(q&&!(o.order_no||'').toLowerCase().includes(q)&&!(o.customers?.name||'').toLowerCase().includes(q))return false;
