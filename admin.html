@@ -2108,10 +2108,43 @@ async function loadOrders(){
              order_items(qty,price,amount,product_id,products(name,unit))`)
     .eq('status','new').order('created_at',{ascending:true});
   if(error){toast('โหลดออเดอร์ไม่ได้: '+error.message);return;}
-  orders=data||[]; renderOrders();
+  orders=data||[];
+  // FIFO preview: ดึงลอตคงเหลือของสินค้าที่อยู่ในออเดอร์ค้าง
+  ordLots={};
+  try{
+    const pids=[...new Set(orders.flatMap(o=>o.order_items.map(it=>it.product_id)))];
+    if(pids.length){
+      const {data:ls}=await db.from('stock_lots')
+        .select('product_id,remaining,unit_cost,created_at')
+        .in('product_id',pids).gt('remaining',0).order('created_at');
+      (ls||[]).forEach(l=>{(ordLots[l.product_id]=ordLots[l.product_id]||[]).push(l);});
+    }
+  }catch(e){console.warn('ordLots',e);}
+  renderOrders();
   const bd=document.getElementById('ord-badge');
   bd.textContent=orders.length;
   bd.style.display=orders.length?'inline-block':'none';
+}
+let ordLots={};
+// จำลองการตัดลอตแบบเดียวกับ fifo_take (ต่อออเดอร์ ไม่กระทบข้อมูลจริง)
+function estOrderCost(o){
+  let total=0, estimated=false;
+  for(const it of (o.order_items||[])){
+    let need=Number(it.qty)||0, got=0;
+    const lots=(ordLots[it.product_id]||[]).map(l=>({r:Number(l.remaining),c:Number(l.unit_cost)}));
+    for(const l of lots){
+      if(need<=0)break;
+      const take=Math.min(l.r,need);
+      got+=take*l.c; need-=take;
+    }
+    if(need>0){
+      const p=products.find(x=>x.id===it.product_id);
+      got+=need*Number(p?.last_cost||0);
+      estimated=true;
+    }
+    total+=got;
+  }
+  return {cost:total, estimated};
 }
 function renderOrders(){
   const el=document.getElementById('orders-list');
@@ -2125,6 +2158,8 @@ function renderOrders(){
         <span class="oc">${esc(o.customers?.code)} · ${esc(o.customers?.name)} · ${d}</span>
         <span class="osum">฿${fmt(o.total)}</span>
       </div>
+      ${(()=>{const e=estOrderCost(o);const profit=Number(o.total)-e.cost;const mg=Number(o.total)>0?(profit/Number(o.total)*100):0;
+        return `<div style="font-size:12.5px;color:var(--muted);margin-top:4px">💡 ต้นทุน (FIFO) ~฿${fmt(e.cost)} · กำไรขั้นต้น ~<b style="color:${profit<0?'var(--danger,#b52020)':'var(--ok,#159b78)'}">฿${fmt(profit)}</b> (${mg.toFixed(1)}%)${e.estimated?' · บางส่วนประมาณจากราคาซื้อล่าสุด':''} — เห็นเฉพาะหลังบ้าน ไม่แสดงในบิล</div>`;})()}
       <table style="margin-top:8px">
         <thead><tr><th>รายการ</th><th class="num">จำนวน</th><th class="num">ราคา</th><th class="num">รวม</th></tr></thead>
         <tbody>${o.order_items.map(it=>`<tr>
@@ -3779,9 +3814,10 @@ async function exportMonthExcel(btn){
       const amt=Number(it.amount);
       rows2.push([b.orders?.order_no||b.bill_no,(b.customers?.name||''),
         it.products?.sku||'',it.products?.name||'',dstr(b.created_at),
-        Number(it.qty),amt,cost,amt-cost]);});});
-    const s2=[['สรุปกำไรรวม'],
-      ['#','รายการ','ลูกค้า/ผู้ติดต่อ','รหัสสินค้า','สินค้า','วันที่','จำนวน','ขาย (บาท)','ต้นทุน (บาท)','กำไร (บาท)'],
+        Number(it.qty),amt,cost,amt-cost,
+        it.cost!=null?'FIFO จริง':'ประมาณ (ยังไม่ส่ง)']);});});
+    const s2=[['สรุปกำไรรวม — ต้นทุน FIFO จริงจะล็อกตอนกดส่งสินค้า · บิลรอส่งเป็นประมาณการจากราคาซื้อล่าสุด'],
+      ['#','รายการ','ลูกค้า/ผู้ติดต่อ','รหัสสินค้า','สินค้า','วันที่','จำนวน','ขาย (บาท)','ต้นทุน (บาท)','กำไร (บาท)','ที่มาต้นทุน'],
       ...rows2.map((r,i)=>[i+1,...r])];
 
     // ===== ชีต 3: สรุปต่อสินค้า =====
@@ -3842,8 +3878,8 @@ async function exportAccountXlsx(btn){
           b.payment_status==='paid'?'จ่ายแล้ว':'ค้างจ่าย',b.paid_by||'',b.slip_url?'มี':''];})];
 
     // ===== ชีต 2: รายการสินค้าแต่ละบิล + ต้นทุน + กำไร =====
-    const aoa2=[['รายการสินค้าในแต่ละบิล (ตามตัวกรอง)'],
-      ['#','เลขที่บิล','SO','วันที่','ลูกค้า','SKU','สินค้า','จำนวน','หน่วย','ราคาขาย/หน่วย','ยอดขาย','ต้นทุน/หน่วย','ต้นทุนรวม','กำไรขั้นต้น']];
+    const aoa2=[['รายการสินค้าในแต่ละบิล (ตามตัวกรอง) — ต้นทุน FIFO จริงล็อกตอนส่งสินค้า · บิลรอส่ง = ประมาณการ'],
+      ['#','เลขที่บิล','SO','วันที่','ลูกค้า','SKU','สินค้า','จำนวน','หน่วย','ราคาขาย/หน่วย','ยอดขาย','ต้นทุน/หน่วย','ต้นทุนรวม','กำไรขั้นต้น','ที่มาต้นทุน']];
     let n=0;
     list.forEach(b=>{(itemsByOrder[b.order_id]||[]).forEach(it=>{
       const cost=costItem(it);
@@ -3852,7 +3888,8 @@ async function exportAccountXlsx(btn){
       aoa2.push([++n,b.bill_no,b.orders?.order_no||'',dstr(b.created_at),
         (b.customers?.name||''),it.products?.sku||'',it.products?.name||'',
         Number(it.qty),it.products?.unit||'',Number(it.price),amt,
-        unitCost,cost,amt-cost]);});});
+        unitCost,cost,amt-cost,
+        it.cost!=null?'FIFO จริง':'ประมาณ (ยังไม่ส่ง)']);});});
 
     const mk=a=>{const ws=XLSX.utils.aoa_to_sheet(a);
       ws['!cols']=a[1].map((c,ci)=>({wch:Math.max(9,...a.slice(1,60).map(r=>String(r[ci]??'').length+2))}));
