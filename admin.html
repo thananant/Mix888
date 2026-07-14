@@ -148,6 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div class="mi" data-page="shipcalc" onclick="showPage('shipcalc')"><span class="ic">🚚</span>คำนวณค่าส่ง</div>
     <div class="mi" data-page="quote" onclick="showPage('quote')"><span class="ic">📝</span>ใบเสนอราคา</div>
     <div class="mi" data-page="stockops" onclick="showPage('stockops')"><span class="ic">📋</span>นับ/ปรับสต๊อก</div>
+    <div class="mi" data-page="cost" onclick="showPage('cost')"><span class="ic">💰</span>ต้นทุนสินค้า</div>
     <div class="mi" data-page="warehouse" onclick="showPage('warehouse')"><span class="ic">🏭</span>คลังสินค้า</div>
     <div class="mi" data-page="account" onclick="showPage('account')"><span class="ic">💰</span>บัญชี</div>
     <div class="mi" data-page="users" id="tab-users" style="display:none" onclick="showPage('users')"><span class="ic">🔐</span>ผู้ใช้</div>
@@ -466,6 +467,44 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 </div>
 
 <!-- ============ รับสินค้า ============ -->
+<div class="page" id="page-cost">
+  <div class="pagehead"><h2>💰 ต้นทุนสินค้า</h2></div>
+
+  <div class="card" id="cost-lock">
+    <div id="cost-lock-enter">
+      <h3 style="margin:0 0 6px">🔒 ใส่รหัส 6 หลักเพื่อเข้าดู/แก้ต้นทุน</h3>
+      <div class="row" style="align-items:flex-end">
+        <input id="cost-pin" type="password" inputmode="numeric" maxlength="6" placeholder="••••••" style="width:140px;font-size:22px;letter-spacing:6px;text-align:center" onkeydown="if(event.key==='Enter')costUnlock()">
+        <button class="btn-p" onclick="costUnlock()">ปลดล็อก</button>
+      </div>
+    </div>
+    <div id="cost-lock-setup" style="display:none">
+      <h3 style="margin:0 0 6px">🔐 ยังไม่ได้ตั้งรหัส — ตั้งรหัส 6 หลักครั้งแรก</h3>
+      <div class="row" style="align-items:flex-end">
+        <div><label>รหัสใหม่ (ตัวเลข 6 หลัก)</label><br><input id="cost-pin-new" type="password" inputmode="numeric" maxlength="6" style="width:140px;font-size:20px;letter-spacing:5px;text-align:center"></div>
+        <div><label>ยืนยันอีกครั้ง</label><br><input id="cost-pin-new2" type="password" inputmode="numeric" maxlength="6" style="width:140px;font-size:20px;letter-spacing:5px;text-align:center"></div>
+        <button class="btn-p" onclick="costSetPin()">บันทึกรหัส</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="cost-main" style="display:none">
+    <div class="row" style="margin-bottom:10px;align-items:center">
+      <input id="cost-search" placeholder="ค้นหาชื่อ / SKU…" style="flex:1;min-width:200px" oninput="renderCost()">
+      <select id="cost-prefix" onchange="renderCost()" style="min-width:130px"><option value="all">ทุกหมวด SKU</option></select>
+      <span class="count" id="cost-count"></span>
+      <button class="btn-p" id="cost-save" onclick="saveCosts(this)" disabled>💾 บันทึกที่แก้ (0)</button>
+      <button class="btn-g" onclick="costChangePin()">เปลี่ยนรหัส</button>
+      <button class="btn-g" onclick="costLock()">🔒 ล็อก</button>
+    </div>
+    <p class="hint">แก้ช่อง "ต้นทุน/หน่วย" แล้วกดบันทึก — ต้นทุนนี้ใช้คำนวณกำไรใน Excel บัญชีและรายงานทั้งหมด</p>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>SKU</th><th>สินค้า</th><th>หน่วย</th><th class="num" style="width:130px">ต้นทุน/หน่วย</th><th class="num">ราคาขายกลาง</th><th class="num">กำไร/หน่วย</th><th class="num">มาร์จิ้น</th></tr></thead>
+      <tbody id="cost-body"></tbody>
+    </table></div>
+  </div>
+</div>
+
 <div class="page" id="page-shipcalc">
   <div class="pagehead"><h2>🚚 คำนวณค่าส่ง BI</h2></div>
   <div class="card">
@@ -964,6 +1003,7 @@ let assigned={}, pending={}, rcv=[];
 let editProductId=null, editCustomerId=null, editSaleId=null, acFilter='unpaid';
 
 function showPage(p){
+  if(arguments[0]==='cost')setTimeout(costShowLock,0);
   document.querySelectorAll('.page').forEach(e=>e.classList.remove('active'));
   document.querySelectorAll('.mi').forEach(e=>e.classList.toggle('active',e.dataset.page===p));
   document.getElementById('page-'+p).classList.add('active');
@@ -2846,6 +2886,119 @@ async function resendBill(id,btn){
   toast('ส่งบิล '+b.bill_no+' เข้ากลุ่มแล้ว ✓');
   loadBills();
 }
+/* ==================== หน้าต้นทุนสินค้า (ล็อกรหัส 6 หลัก) ==================== */
+let costUnlocked=false, costChanges={};
+function costShowLock(){
+  const hasPin=!!appSettings.cost_pin;
+  document.getElementById('cost-lock-enter').style.display=hasPin?'block':'none';
+  document.getElementById('cost-lock-setup').style.display=hasPin?'none':'block';
+  document.getElementById('cost-lock').style.display=costUnlocked?'none':'block';
+  document.getElementById('cost-main').style.display=costUnlocked?'block':'none';
+}
+async function costSetPin(){
+  const a=document.getElementById('cost-pin-new').value.trim();
+  const b=document.getElementById('cost-pin-new2').value.trim();
+  if(!/^\d{6}$/.test(a)){toast('รหัสต้องเป็นตัวเลข 6 หลัก');return;}
+  if(a!==b){toast('รหัสสองช่องไม่ตรงกัน');return;}
+  const {error}=await db.from('settings').upsert({key:'cost_pin',value:a},{onConflict:'key'});
+  if(error){toast('บันทึกรหัสไม่สำเร็จ: '+error.message);return;}
+  appSettings.cost_pin=a;
+  costUnlocked=true;costChanges={};
+  toast('ตั้งรหัสแล้ว ✓ ปลดล็อกให้เลย');
+  costShowLock();renderCost();
+}
+function costUnlock(){
+  const v=document.getElementById('cost-pin').value.trim();
+  if(v!==String(appSettings.cost_pin||'')){
+    toast('รหัสไม่ถูกต้อง');
+    document.getElementById('cost-pin').value='';
+    return;
+  }
+  costUnlocked=true;costChanges={};
+  document.getElementById('cost-pin').value='';
+  costShowLock();renderCost();
+}
+function costLock(){costUnlocked=false;costChanges={};costShowLock();}
+async function costChangePin(){
+  const cur=prompt('ใส่รหัสเดิมก่อน:');
+  if(cur===null)return;
+  if(cur.trim()!==String(appSettings.cost_pin||'')){toast('รหัสเดิมไม่ถูกต้อง');return;}
+  const nv=prompt('รหัสใหม่ (ตัวเลข 6 หลัก):');
+  if(nv===null)return;
+  if(!/^\d{6}$/.test(nv.trim())){toast('รหัสต้องเป็นตัวเลข 6 หลัก');return;}
+  const {error}=await db.from('settings').upsert({key:'cost_pin',value:nv.trim()},{onConflict:'key'});
+  if(error){toast('เปลี่ยนไม่สำเร็จ: '+error.message);return;}
+  appSettings.cost_pin=nv.trim();
+  toast('เปลี่ยนรหัสแล้ว ✓');
+}
+function costFillPrefix(){
+  const sel=document.getElementById('cost-prefix');if(!sel)return;
+  const cur=sel.value;
+  const prefixes=[...new Set(products.map(p=>(String(p.sku||'').match(/^[A-Z]+/)||[''])[0]).filter(Boolean))].sort();
+  sel.innerHTML='<option value="all">ทุกหมวด SKU</option>'+prefixes.map(pf=>{
+    const cat=(typeof skuCats!=='undefined'&&skuCats.find&&skuCats.find(c=>c.prefix===pf));
+    return `<option value="${pf}">${pf}${cat?' · '+esc(cat.name):''}</option>`;}).join('');
+  if([...sel.options].some(o=>o.value===cur))sel.value=cur;
+}
+function renderCost(){
+  if(!costUnlocked)return;
+  costFillPrefix();
+  const q=(document.getElementById('cost-search').value||'').toLowerCase();
+  const pf=document.getElementById('cost-prefix').value;
+  const list=products.filter(p=>{
+    if(p.active===false)return false;
+    if(pf!=='all'&&!String(p.sku||'').startsWith(pf))return false;
+    return !q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q);
+  }).sort((a,b)=>String(a.sku).localeCompare(String(b.sku)));
+  document.getElementById('cost-count').textContent=list.length+' รายการ';
+  document.getElementById('cost-body').innerHTML=list.map(p=>{
+    const cost=costChanges[p.id]!==undefined?costChanges[p.id]:Number(p.last_cost||0);
+    const sell=Number(p.base_price||0);
+    const profit=sell-cost;
+    const margin=sell>0?(profit/sell*100):0;
+    const changed=costChanges[p.id]!==undefined;
+    const noCost=!cost;
+    return `<tr${changed?' style="background:#fff7e0"':''}>
+      <td>${esc(p.sku)}</td>
+      <td>${esc(p.name)}</td>
+      <td>${esc(p.unit||'')}</td>
+      <td class="num"><input type="number" min="0" step="0.01" value="${cost||''}" placeholder="0"
+        class="num" style="width:110px${noCost&&!changed?';border-color:var(--danger,#b52020)':''}"
+        onchange="costEdit(${p.id},this.value)"></td>
+      <td class="num">${fmt(sell)}</td>
+      <td class="num" style="color:${profit<0?'var(--danger,#b52020)':'inherit'}">${cost?fmt(profit):'—'}</td>
+      <td class="num" style="color:${margin<0?'var(--danger,#b52020)':'var(--muted)'}">${cost&&sell?margin.toFixed(1)+'%':'—'}</td>
+    </tr>`;
+  }).join('')||'<tr><td colspan="7" class="empty">ไม่พบสินค้า</td></tr>';
+  const n=Object.keys(costChanges).length;
+  const btn=document.getElementById('cost-save');
+  btn.disabled=!n;btn.textContent='💾 บันทึกที่แก้ ('+n+')';
+}
+function costEdit(pid,v){
+  const nv=Math.max(0,Number(v)||0);
+  const orig=Number(products.find(p=>p.id===pid)?.last_cost||0);
+  if(nv===orig)delete costChanges[pid];
+  else costChanges[pid]=nv;
+  renderCost();
+}
+async function saveCosts(btn){
+  const ids=Object.keys(costChanges);
+  if(!ids.length)return;
+  btn.disabled=true;btn.textContent='กำลังบันทึก…';
+  let ok=0,fail=0;
+  for(const pid of ids){
+    const {error}=await db.from('products').update({last_cost:costChanges[pid]}).eq('id',Number(pid));
+    if(error){fail++;console.warn(error);}else{
+      ok++;
+      const p=products.find(x=>x.id===Number(pid));
+      if(p)p.last_cost=costChanges[pid];
+    }
+  }
+  costChanges={};
+  toast('บันทึกต้นทุน '+ok+' รายการแล้ว'+(fail?' (พลาด '+fail+')':' ✓'));
+  renderCost();
+}
+
 /* ==================== หน้าคำนวณค่าส่ง BI ==================== */
 let shcItems=[];
 function calcBIShipRaw(big,normal,rateKey){
