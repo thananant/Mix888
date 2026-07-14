@@ -2754,7 +2754,7 @@ function renderAccount(){
         <button class="btn-g mini" onclick="makeLabel(${b.id},this)" title="ใบปะหน้า 100×150 มม.">🏷️ ปะหน้า</button>
         ${ss!=='cancelled'?`<button class="btn-s mini" onclick="openEditBill(${b.id})">✏️ แก้บิล</button>`:''}
         ${b.slip_url?`<button class="btn-g mini" onclick="showImgView('${esc(b.slip_url)}')">🧾 สลิป</button>`:''}
-        ${b.customers?.line_group_id&&!b.line_sent?`<button class="btn-s mini" onclick="resendBill(${b.id},this)">ส่ง LINE</button>`:''}
+        ${ss!=='cancelled'?`<button class="btn-s mini" onclick="resendBill(${b.id},this)">📲 ส่ง LINE${b.line_sent?'':' ❗'}</button>`:''}
         ${ss==='pending'?`<button class="btn-ok mini" onclick="shipBillUI(${b.id})">🚚 ส่งแล้ว</button><button class="btn-d mini" onclick="cancelBillUI(${b.id})">ยกเลิกบิล</button>`:''}
         ${ss!=='cancelled'?(paid
           ?`<button class="btn-g mini" onclick="unmarkPaid(${b.id})">ยกเลิกรับยอด</button>`
@@ -2803,12 +2803,22 @@ async function cancelBillUI(id){
 }
 async function resendBill(id,btn){
   const b=bills.find(x=>x.id===id);if(!b)return;
+  if(!b.customers?.line_group_id){
+    toast('ลูกค้า "'+(b.customers?.name||'')+'" ยังไม่ผูกกลุ่ม LINE — พิมพ์ "ผูกกลุ่ม '+(b.customers?.code||'')+'" ในกลุ่มที่มีบอท แล้วกดส่งใหม่');
+    return;
+  }
+  if(!confirm('ส่งบิล '+b.bill_no+' (฿'+fmt(b.total)+') เข้ากลุ่ม LINE ของ "'+b.customers.name+'"'
+    +(b.line_sent?'\n\n⚠️ บิลนี้เคยส่งแล้ว — จะส่งซ้ำอีกครั้ง':'')+' ?'))return;
   btn.disabled=true;
   const {data:res,error}=await db.functions.invoke('line-push',{body:{
     to:b.customers.line_group_id,
     messages:[
       {type:'image',originalContentUrl:b.image_url,previewImageUrl:b.image_url},
-      {type:'text',text:'🧾 บิลเลขที่ '+b.bill_no+'\nยอดรวม ฿'+fmt(b.total)}
+      {type:'text',text:'🧾 บิลเลขที่ '+b.bill_no
+        +((b.revision||1)>1?' (แก้ไขครั้งที่ '+b.revision+')':'')
+        +(Number(b.shipping_fee)?'\nค่าขนส่ง ฿'+fmt(b.shipping_fee):'')
+        +(Number(b.discount)?'\nส่วนลด -฿'+fmt(b.discount):'')
+        +'\nยอดรวม ฿'+fmt(b.total)}
     ]}});
   btn.disabled=false;
   if(error||!res||res.status!==200){toast('ส่งไม่สำเร็จ: '+(error?.message||JSON.stringify(res)));return;}
