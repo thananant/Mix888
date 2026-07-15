@@ -970,6 +970,9 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <input type="file" id="sp-file" accept="image/*" style="width:100%;margin:4px 0 6px">
     <img id="sp-preview" style="display:none;max-width:100%;max-height:220px;border-radius:10px;border:1px solid var(--line)">
     <div id="sp-qr" style="display:none;margin-top:8px;padding:8px 10px;border-radius:10px;font-size:13px"></div>
+    <label style="margin-top:10px">ยอดที่โอนมา (ตามสลิป ฿) — เว้นว่าง = รับเต็มยอด</label>
+    <input id="sp-amount" type="number" step="0.01" min="0" class="num" style="width:100%" oninput="spAmtCheck()" placeholder="เช่น 3500">
+    <div id="sp-amt-status" style="display:none;margin-top:6px;padding:8px 10px;border-radius:10px;font-size:13.5px"></div>
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="btn-ok" id="sp-confirm" onclick="confirmPaid(this)">✓ ยืนยันรับยอด</button>
       <button class="btn-g" onclick="closeSlipModal()">ยกเลิก</button>
@@ -2914,7 +2917,10 @@ function renderAccount(){
       <td style="font-size:13px;color:var(--muted)">${d}</td>
       <td>${b.line_sent?'<span class="tag tag-ok">ส่งแล้ว</span>':'<span class="tag tag-low">ยังไม่ส่ง</span>'}</td>
       <td>${shipTag(ss)}</td>
-      <td>${paid?'<span class="tag tag-ok">✓ จ่ายแล้ว</span>':'<span class="tag tag-out">ค้างจ่าย</span>'}</td>
+      <td>${paid?'<span class="tag tag-ok">✓ จ่ายแล้ว</span>'
+        :(Number(b.paid_amount||0)>0
+          ?'<span class="tag tag-low">บางส่วน ฿'+fmt(b.paid_amount)+'</span><div style="font-size:11.5px;color:var(--danger,#b52020)">ค้าง ฿'+fmt(Number(b.total)-Number(b.paid_amount))+'</div>'
+          :'<span class="tag tag-out">ค้างจ่าย</span>')}</td>
       <td style="font-size:13px;color:var(--muted)">${paid?esc(b.paid_by||'')+'<br>'+pd:'—'}</td>
       <td style="white-space:nowrap">
         <button class="btn-g mini" onclick="window.open('${b.image_url}','_blank')">ดูบิล</button>
@@ -4555,17 +4561,43 @@ function markPaid(id,btn){
   f.onchange=()=>{if(f.files[0]){pv.src=URL.createObjectURL(f.files[0]);pv.style.display='block';checkSlip(f.files[0]);}
     else{document.getElementById('sp-qr').style.display='none';spSlipRef=null;spDupBills=[];}};
   document.getElementById('sp-qr').style.display='none';spSlipRef=null;spDupBills=[];
+  document.getElementById('sp-amount').value='';
+  document.getElementById('sp-amt-status').style.display='none';
+  // ถ้าจ่ายบางส่วนมาแล้ว บอกยอดค้าง
+  if(Number(b.paid_amount||0)>0)
+    document.getElementById('sp-info').textContent+=' · รับแล้ว ฿'+fmt(b.paid_amount)+' เหลือค้าง ฿'+fmt(Number(b.total)-Number(b.paid_amount));
   document.getElementById('slip-modal').style.display='flex';
 }
-function spSum(){
-  const b=bills.find(x=>x.id===spBillId);if(!b)return;
-  let sum=Number(b.total)||0;
+function spExpected(){
+  const b=bills.find(x=>x.id===spBillId);if(!b)return 0;
+  let sum=Math.max(0,Number(b.total)-Number(b.paid_amount||0));
   document.querySelectorAll('.sp-other:checked').forEach(cb=>{
     const x=bills.find(y=>y.id===Number(cb.value));
-    if(x)sum+=Number(x.total)||0;
+    if(x)sum+=Math.max(0,Number(x.total)-Number(x.paid_amount||0));
   });
+  return sum;
+}
+function spSum(){
   const el=document.getElementById('sp-sum');
-  if(el)el.textContent='฿'+fmt(sum);
+  if(el)el.textContent='฿'+fmt(spExpected());
+  spAmtCheck();
+}
+function spAmtCheck(){
+  const box=document.getElementById('sp-amt-status');if(!box)return;
+  const v=document.getElementById('sp-amount').value;
+  if(v===''){box.style.display='none';return;}
+  const amt=Number(v)||0, exp=spExpected(), diff=amt-exp;
+  box.style.display='block';
+  if(Math.abs(diff)<0.01){
+    box.style.background='#e8f6f0';box.style.color='#0f7a5c';
+    box.innerHTML='✅ <b>ยอดตรงพอดี</b> ฿'+fmt(amt);
+  }else if(diff<0){
+    box.style.background='#fdeeee';box.style.color='#b52020';
+    box.innerHTML='🔻 <b>โอนขาด ฿'+fmt(-diff)+'</b> (ต้องรับ ฿'+fmt(exp)+' โอนมา ฿'+fmt(amt)+')<br>กดยืนยันได้ — ระบบจะบันทึกเป็น <b>จ่ายบางส่วน</b> บิลยังค้างยอดที่เหลือ';
+  }else{
+    box.style.background='#fff7e0';box.style.color='#8a6d00';
+    box.innerHTML='🔺 <b>โอนเกิน ฿'+fmt(diff)+'</b> (ต้องรับ ฿'+fmt(exp)+' โอนมา ฿'+fmt(amt)+')<br>อาจโอนรวมบิลอื่น — ลองติ๊กบิลค้างด้านบนเพิ่ม หรือยืนยันปิดพร้อมบันทึกยอดรับจริง';
+  }
 }
 function closeSlipModal(){document.getElementById('slip-modal').style.display='none';spBillId=null;}
 async function confirmPaid(btn){
@@ -4589,11 +4621,44 @@ async function confirmPaid(btn){
       const x=bills.find(y=>y.id===Number(cb.value));
       if(x)targets.push(x);
     });
+    const amtStr=document.getElementById('sp-amount').value;
+    const amt=amtStr===''?null:Number(amtStr)||0;
+    const exp=spExpected();
+    let partialMode=false;
+    if(amt!=null&&amt<exp-0.009){
+      if(targets.length>1)throw new Error('รับบางส่วนได้ทีละบิล — เอาติ๊กบิลอื่นออกก่อน แล้วรับแยกทีละใบ');
+      if(!confirm('🔻 โอนขาด ฿'+fmt(exp-amt)+'\n\nบันทึกเป็น "จ่ายบางส่วน" — บิลยังขึ้นค้างจ่าย เหลืออีก ฿'+fmt(exp-amt)+'\nรอบหน้าลูกค้าโอนเพิ่ม ระบบจะรวมยอดให้เอง\n\nยืนยัน?'))
+        {btn.disabled=false;btn.textContent='✓ ยืนยันรับยอด';return;}
+      partialMode=true;
+    }
+    if(amt!=null&&amt>exp+0.009){
+      if(!confirm('🔺 โอนเกิน ฿'+fmt(amt-exp)+'\nปิดบิลและบันทึกยอดรับจริง ฿'+fmt(amt)+' ใช่ไหม?\n(ถ้าเงินส่วนเกินเป็นของบิลอื่น กด Cancel แล้วติ๊กบิลนั้นเพิ่ม)'))
+        {btn.disabled=false;btn.textContent='✓ ยืนยันรับยอด';return;}
+    }
+    if(partialMode){
+      // จ่ายบางส่วน: สะสมยอด ไม่เปลี่ยนสถานะเป็น paid
+      const newPaid=Number(b.paid_amount||0)+amt;
+      const updP={paid_amount:newPaid,paid_by:staff};
+      if(slipUrl)updP.slip_url=slipUrl;
+      if(spSlipRef)updP.slip_ref=spSlipRef;
+      const {error}=await db.from('bills').update(updP).eq('id',b.id);
+      if(error)throw new Error('บันทึกไม่สำเร็จ: '+error.message);
+      if(b.customers?.line_group_id){
+        const polite=document.getElementById('polite').value;
+        await db.functions.invoke('line-push',{body:{to:b.customers.line_group_id,
+          messages:[{type:'text',text:'💰 รับยอดบางส่วน บิล '+b.bill_no+'\nรับแล้ว ฿'+fmt(newPaid)+' / ฿'+fmt(b.total)+'\nคงเหลือ ฿'+fmt(Number(b.total)-newPaid)+'\nขอบคุณ'+polite+' 🙏'}]}});
+      }
+      toast('บันทึกจ่ายบางส่วน '+b.bill_no+' — เหลือค้าง ฿'+fmt(Number(b.total)-newPaid));
+      closeSlipModal(); loadBills();
+      btn.disabled=false;btn.textContent='✓ ยืนยันรับยอด';
+      return;
+    }
     const upd={payment_status:'paid',paid_at:new Date().toISOString(),paid_by:staff};
     if(slipUrl)upd.slip_url=slipUrl;
     if(spSlipRef)upd.slip_ref=spSlipRef;
     for(const tb of targets){
-      const {error}=await db.from('bills').update(upd).eq('id',tb.id);
+      const u={...upd,paid_amount:targets.length===1&&amt!=null?Number(b.paid_amount||0)+amt:Number(tb.total)};
+      const {error}=await db.from('bills').update(u).eq('id',tb.id);
       if(error)throw new Error('บันทึก '+tb.bill_no+' ไม่สำเร็จ: '+error.message);
     }
     const sumAll=targets.reduce((s,x)=>s+Number(x.total),0);
