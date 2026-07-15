@@ -962,18 +962,28 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="card" style="max-width:420px;width:100%">
     <h3 style="margin:0 0 6px">✓ รับยอดบิล <span id="sp-no"></span></h3>
     <div id="sp-info" style="color:var(--muted);font-size:13.5px;margin-bottom:10px"></div>
+    <label>วิธีชำระ</label>
+    <div style="display:flex;gap:8px;margin:4px 0 10px">
+      <label class="chk" style="border:1.5px solid var(--line);border-radius:10px;padding:8px 14px;cursor:pointer;flex:1;justify-content:center" id="sp-m-transfer-w">
+        <input type="radio" name="sp-method" value="transfer" checked onchange="spMethodUI()"> <span>📱 โอนเงิน</span></label>
+      <label class="chk" style="border:1.5px solid var(--line);border-radius:10px;padding:8px 14px;cursor:pointer;flex:1;justify-content:center" id="sp-m-cash-w">
+        <input type="radio" name="sp-method" value="cash" onchange="spMethodUI()"> <span>💵 เงินสด</span></label>
+    </div>
     <div id="sp-others-wrap" style="display:none;margin-bottom:10px">
       <label>ลูกค้าโอนรวมหลายบิล? เลือกบิลอื่นที่สลิปนี้ปิดด้วย:</label>
       <div id="sp-others" style="max-height:150px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:4px"></div>
       <div style="font-size:13px;margin-top:4px">รวมรับยอดครั้งนี้: <b id="sp-sum">0</b></div>
     </div>
-    <label>รูปสลิปโอน (แนบหรือไม่ก็ได้)</label>
+    <div id="sp-slip-zone">
+    <label>รูปสลิปโอน <b style="color:var(--danger,#b52020)">(บังคับแนบ)</b></label>
     <input type="file" id="sp-file" accept="image/*" style="width:100%;margin:4px 0 6px">
     <img id="sp-preview" title="กดเพื่อดูรูปเต็มจอ" style="display:none;max-width:100%;max-height:220px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in" onclick="showImgView(this.src)">
     <div id="sp-qr" style="display:none;margin-top:8px;padding:8px 10px;border-radius:10px;font-size:13px"></div>
-    <label style="margin-top:10px">ยอดที่โอนมา (ตามสลิป ฿) — เว้นว่าง = รับเต็มยอด</label>
+    </div><!-- /sp-slip-zone -->
+    <label style="margin-top:10px" id="sp-amount-label">ยอดที่โอนมา (ตามสลิป ฿) — เว้นว่าง = รับเต็มยอด</label>
     <input id="sp-amount" type="number" step="0.01" min="0" class="num" style="width:100%" oninput="spAmtCheck()" placeholder="เช่น 3500">
     <div id="sp-amt-status" style="display:none;margin-top:6px;padding:8px 10px;border-radius:10px;font-size:13.5px"></div>
+
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="btn-ok" id="sp-confirm" onclick="confirmPaid(this)">✓ ยืนยันรับยอด</button>
       <button class="btn-g" onclick="closeSlipModal()">ยกเลิก</button>
@@ -2918,7 +2928,7 @@ function renderAccount(){
       <td style="font-size:13px;color:var(--muted)">${d}</td>
       <td>${b.line_sent?'<span class="tag tag-ok">ส่งแล้ว</span>':'<span class="tag tag-low">ยังไม่ส่ง</span>'}</td>
       <td>${shipTag(ss)}</td>
-      <td>${paid?'<span class="tag tag-ok">✓ จ่ายแล้ว</span>'
+      <td>${paid?'<span class="tag tag-ok">✓ จ่ายแล้ว'+(b.pay_method==='cash'?' 💵':'')+'</span>'
         :(Number(b.paid_amount||0)>0
           ?'<span class="tag tag-low">บางส่วน ฿'+fmt(b.paid_amount)+'</span><div style="font-size:11.5px;color:var(--danger,#b52020)">ค้าง ฿'+fmt(Number(b.total)-Number(b.paid_amount))+'</div>'
           :'<span class="tag tag-out">ค้างจ่าย</span>')}</td>
@@ -4625,6 +4635,9 @@ function markPaid(id,btn){
   document.getElementById('sp-qr').style.display='none';spSlipRef=null;spDupBills=[];
   document.getElementById('sp-amount').value='';
   document.getElementById('sp-amt-status').style.display='none';
+  const mt=document.querySelector('input[name="sp-method"][value="transfer"]');
+  if(mt)mt.checked=true;
+  spMethodUI();
   // ถ้าจ่ายบางส่วนมาแล้ว บอกยอดค้าง
   if(Number(b.paid_amount||0)>0)
     document.getElementById('sp-info').textContent+=' · รับแล้ว ฿'+fmt(b.paid_amount)+' เหลือค้าง ฿'+fmt(Number(b.total)-Number(b.paid_amount));
@@ -4638,6 +4651,21 @@ function spExpected(){
     if(x)sum+=Math.max(0,Number(x.total)-Number(x.paid_amount||0));
   });
   return sum;
+}
+function spMethod(){
+  const el=document.querySelector('input[name="sp-method"]:checked');
+  return el?el.value:'transfer';
+}
+function spMethodUI(){
+  const m=spMethod();
+  document.getElementById('sp-slip-zone').style.display=m==='cash'?'none':'block';
+  document.getElementById('sp-amount-label').textContent=m==='cash'
+    ?'ยอดเงินสดที่รับ (฿) — เว้นว่าง = รับเต็มยอด'
+    :'ยอดที่โอนมา (ตามสลิป ฿) — เว้นว่าง = รับเต็มยอด';
+  const tw=document.getElementById('sp-m-transfer-w'),cw=document.getElementById('sp-m-cash-w');
+  if(tw)tw.style.borderColor=m==='transfer'?'var(--accent,#c0201f)':'var(--line)';
+  if(cw)cw.style.borderColor=m==='cash'?'var(--accent,#c0201f)':'var(--line)';
+  if(m==='cash'){spSlipRef=null;spDupBills=[];}
 }
 function spSum(){
   const el=document.getElementById('sp-sum');
@@ -4664,6 +4692,11 @@ function spAmtCheck(){
 function closeSlipModal(){document.getElementById('slip-modal').style.display='none';spBillId=null;}
 async function confirmPaid(btn){
   const b=bills.find(x=>x.id===spBillId);if(!b)return;
+  const method=spMethod();
+  if(method==='transfer'&&!document.getElementById('sp-file').files[0]){
+    toast('รับยอดแบบโอนเงิน ต้องแนบรูปสลิปก่อน — ถ้าลูกค้าจ่ายสด เลือก 💵 เงินสด');
+    return;
+  }
   if(spDupBills.length&&!confirm('🚨 สลิปนี้เคยใช้กับบิล '+spDupBills.map(d=>d.bill_no).join(', ')+' แล้ว\n\nยืนยันว่าเช็คเงินเข้าบัญชีจริงแล้ว และจะรับยอดต่อ?'))return;
   const staff=document.getElementById('ac-staff').value.trim();
   btn.disabled=true;btn.textContent='กำลังบันทึก…';
@@ -4700,7 +4733,7 @@ async function confirmPaid(btn){
     if(partialMode){
       // จ่ายบางส่วน: สะสมยอด ไม่เปลี่ยนสถานะเป็น paid
       const newPaid=Number(b.paid_amount||0)+amt;
-      const updP={paid_amount:newPaid,paid_by:staff};
+      const updP={paid_amount:newPaid,paid_by:staff,pay_method:method};
       if(slipUrl)updP.slip_url=slipUrl;
       if(spSlipRef)updP.slip_ref=spSlipRef;
       const {error}=await db.from('bills').update(updP).eq('id',b.id);
@@ -4715,7 +4748,7 @@ async function confirmPaid(btn){
       btn.disabled=false;btn.textContent='✓ ยืนยันรับยอด';
       return;
     }
-    const upd={payment_status:'paid',paid_at:new Date().toISOString(),paid_by:staff};
+    const upd={payment_status:'paid',paid_at:new Date().toISOString(),paid_by:staff,pay_method:method};
     if(slipUrl)upd.slip_url=slipUrl;
     if(spSlipRef)upd.slip_ref=spSlipRef;
     for(const tb of targets){
