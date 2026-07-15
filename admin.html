@@ -462,7 +462,12 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 <!-- ============ ทำบิล ============ -->
 <div class="page" id="page-orders">
   <div class="pagehead"><h2>ออเดอร์รอทำบิล</h2>
-    <button class="btn-s" style="margin-left:auto" onclick="sendDailySummary(this)">📋 ส่งสรุปออเดอร์วันนี้เข้าไลน์กลาง</button></div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:13px;color:var(--muted)">เวลาตัดรอบบิล</label>
+      <input type="time" id="bill-cutoff" style="width:110px" title="สรุปออเดอร์และลำดับออเดอร์/วัน จะนับตามรอบนี้ เช่น 18:00 = รอบเมื่อวาน 18:00 → วันนี้ 18:00">
+      <button class="btn-g mini" onclick="saveCutoff()">บันทึกรอบ</button>
+      <button class="btn-s" onclick="sendDailySummary(this)">📋 ส่งสรุปออเดอร์รอบนี้เข้าไลน์กลาง</button>
+    </div></div>
   <div id="orders-list"></div>
 </div>
 
@@ -2109,6 +2114,7 @@ async function loadOrders(){
     .eq('status','new').order('created_at',{ascending:true});
   if(error){toast('โหลดออเดอร์ไม่ได้: '+error.message);return;}
   orders=data||[];
+  initCutoffInput();
   // FIFO preview: ดึงลอตคงเหลือของสินค้าที่อยู่ในออเดอร์ค้าง
   ordLots={};
   try{
@@ -2563,18 +2569,42 @@ async function makeBill(orderId,btn,sendLine){
 }
 
 /* ==================== สรุปออเดอร์วันนี้เข้าไลน์กลาง ==================== */
+/* ---- รอบตัดบิล: คืนช่วง [start,end) ของรอบที่ครอบเวลา ref ---- */
+function cutoffRange(ref){
+  const [hh,mm]=String(appSettings.bill_cutoff||'00:00').split(':').map(n=>parseInt(n,10)||0);
+  const r=ref instanceof Date?new Date(ref):new Date(ref||Date.now());
+  const boundary=new Date(r);boundary.setHours(hh,mm,0,0);
+  let start,end;
+  if(r>=boundary){start=boundary;end=new Date(boundary.getTime()+86400000);}
+  else{end=boundary;start=new Date(boundary.getTime()-86400000);}
+  return {start,end};
+}
+function initCutoffInput(){
+  const el=document.getElementById('bill-cutoff');
+  if(el&&!el.dataset.init){el.value=appSettings.bill_cutoff||'00:00';el.dataset.init='1';}
+}
+async function saveCutoff(){
+  const v=document.getElementById('bill-cutoff').value;
+  if(!/^\d{2}:\d{2}$/.test(v)){toast('เลือกเวลาก่อน');return;}
+  const {error}=await db.from('settings').upsert({key:'bill_cutoff',value:v},{onConflict:'key'});
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  appSettings.bill_cutoff=v;
+  const r=cutoffRange(new Date());
+  const f=d=>d.toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  toast('ตั้งเวลาตัดรอบ '+v+' แล้ว ✓ รอบปัจจุบัน: '+f(r.start)+' → '+f(r.end));
+}
 async function sendDailySummary(btn){
   if(!appSettings.line_central_group){
     toast('ยังไม่ได้ตั้ง LINE กลุ่มกลาง — ไปตั้งในหน้าผู้ใช้ก่อน');return;
   }
   btn.disabled=true;btn.textContent='กำลังดึงออเดอร์…';
-  const today=new Date();today.setHours(0,0,0,0);
+  const cyc=cutoffRange(new Date());
   const {data:raw,error}=await db.from('orders')
     .select(`order_no,created_at,total,status,
       customers(code,name,sale_name,contact_name,phone,billing_address,map_link,receive_time,note,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address),
       order_items(qty,products(name,unit)),
       bills(bill_no,ship_status)`)
-    .gte('created_at',today.toISOString()).neq('status','cancelled')
+    .gte('created_at',cyc.start.toISOString()).lt('created_at',cyc.end.toISOString()).neq('status','cancelled')
     .order('delivery_method',{foreignTable:'customers',ascending:true});
   // ตัดออเดอร์ที่ "ส่งแล้ว" หรือบิลถูก "ยกเลิก" — สรุปเฉพาะที่รอจัดส่งจริง
   const data=(raw||[]).filter(o=>{
@@ -2583,9 +2613,9 @@ async function sendDailySummary(btn){
     if(bs.some(b=>b.ship_status==='shipped')) return false;
     return true;
   });
-  btn.disabled=false;btn.textContent='📋 ส่งสรุปออเดอร์วันนี้เข้าไลน์กลาง';
+  btn.disabled=false;btn.textContent='📋 ส่งสรุปออเดอร์รอบนี้เข้าไลน์กลาง';
   if(error){toast('ดึงออเดอร์ไม่สำเร็จ: '+error.message);return;}
-  if(!data.length){toast('วันนี้ไม่มีออเดอร์ที่รอจัดส่ง (ส่งแล้ว/ยกเลิก ไม่นำมาสรุป)');return;}
+  if(!data.length){toast('รอบนี้ไม่มีออเดอร์ที่รอจัดส่ง (ส่งแล้ว/ยกเลิก ไม่นำมาสรุป)');return;}
 
   // จัดกลุ่มตามวิธีจัดส่ง
   const groups={};
@@ -4365,54 +4395,63 @@ async function makeLabel(billId,btn){
   btn.disabled=true;
   try{
     const {data:o}=await db.from('orders')
-      .select('order_no, customers(code,name,sale_name,contact_name,phone,billing_address,map_link,receive_time,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address), order_items(qty,products(name,unit))')
+      .select('order_no,created_at, customers(code,name,sale_name,contact_name,phone,billing_address,map_link,receive_time,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address)')
       .eq('id',b.order_id).single();
     if(!o)throw new Error('ไม่พบออเดอร์');
     const c=o.customers||{};
-    await document.fonts.load('700 34px "IBM Plex Sans Thai"');
+
+    // ลำดับออเดอร์ของวันนั้น (ตัดยกเลิกออก เรียงตามเวลาสั่ง)
+    const od=new Date(o.created_at);
+    const cyc=cutoffRange(od);
+    let seq=0,totalDay=0;
+    try{
+      const {data:dayOrders}=await db.from('orders').select('id')
+        .gte('created_at',cyc.start.toISOString()).lt('created_at',cyc.end.toISOString())
+        .neq('status','cancelled').order('created_at',{ascending:true});
+      totalDay=(dayOrders||[]).length;
+      seq=(dayOrders||[]).findIndex(x=>x.id===b.order_id)+1;
+    }catch(e){console.warn('seq',e);}
+
+    await document.fonts.load('700 60px "IBM Plex Sans Thai"');
     const W=600,H=900,cv=document.createElement('canvas');cv.width=W;cv.height=H;
     const x=cv.getContext('2d');
     x.fillStyle='#fff';x.fillRect(0,0,W,H);
     // หัว
     x.fillStyle='#111';x.font='700 30px "IBM Plex Sans Thai"';x.textAlign='left';
-    x.fillText('MIX FRESH 168',24,44);
-    x.font='400 20px "IBM Plex Sans Thai"';x.textAlign='right';
-    x.fillText(c.delivery_method||'',W-24,42);
+    x.fillText('MIX FRESH 168',24,46);
+    x.font='700 24px "IBM Plex Sans Thai"';x.textAlign='right';
+    x.fillText(c.delivery_method||'',W-24,46);
     x.textAlign='left';
-    const bc=makeBarcode(b.bill_no);
-    if(bc){const bi=await loadImg(bc);if(bi)x.drawImage(bi,24,58,300,50);}
-    x.font='400 18px "IBM Plex Sans Thai"';x.fillText(b.bill_no,24,130);
-    x.strokeStyle='#111';x.beginPath();x.moveTo(24,144);x.lineTo(W-24,144);x.stroke();
+    x.strokeStyle='#111';x.beginPath();x.moveTo(24,64);x.lineTo(W-24,64);x.stroke();
+    // ลำดับออเดอร์ของวัน — ตัวใหญ่สุดในใบ
+    x.textAlign='center';x.font='700 72px "IBM Plex Sans Thai"';
+    x.fillText('ออเดอร์ '+(seq||'?')+'/'+(totalDay||'?'),W/2,160);
+    x.font='400 20px "IBM Plex Sans Thai"';x.fillStyle='#555';
+    x.fillText('ประจำวันที่ '+od.toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'}),W/2,196);
+    x.textAlign='left';x.fillStyle='#111';
+    x.beginPath();x.moveTo(24,222);x.lineTo(W-24,222);x.stroke();
     // ผู้รับ
-    let y=190;
+    let y=278;
     function wrap(txt,maxW,font){x.font=font;const words=String(txt||'').split(' ');const lines=[];let cur='';
-      for(const w of words){const t=cur?cur+' '+w:w;if(x.measureText(t).width>maxW&&cur){lines.push(cur);cur=w;}else cur=t;}
+      for(const w of words){const t2=cur?cur+' '+w:w;if(x.measureText(t2).width>maxW&&cur){lines.push(cur);cur=w;}else cur=t2;}
       if(cur)lines.push(cur);return lines;}
-    x.font='700 34px "IBM Plex Sans Thai"';
-    x.fillText('ผู้รับ: '+(c.ship_receiver||c.contact_name||c.name||'-'),24,y);y+=44;
-    x.font='700 30px "IBM Plex Sans Thai"';
-    x.fillText('โทร: '+(c.ship_phone||c.phone||'-'),24,y);y+=44;
+    x.font='700 40px "IBM Plex Sans Thai"';
+    x.fillText('ผู้รับ: '+(c.ship_receiver||c.contact_name||c.name||'-'),24,y);y+=54;
+    x.font='700 36px "IBM Plex Sans Thai"';
+    x.fillText('โทร: '+(c.ship_phone||c.phone||'-'),24,y);y+=52;
     const shop=c.ship_shop_name||c.name;
-    if(shop){x.font='400 22px "IBM Plex Sans Thai"';x.fillText(shop,24,y);y+=32;}
-    for(const l of wrap(c.ship_address||c.billing_address||'-',W-48,'400 22px "IBM Plex Sans Thai"').slice(0,4)){x.fillText(l,24,y);y+=30;}
-    if(c.receive_time){x.font='700 24px "IBM Plex Sans Thai"';x.fillText('เวลารับของ: '+c.receive_time,24,y+8);y+=44;}
-    x.beginPath();x.moveTo(24,y);x.lineTo(W-24,y);x.stroke();y+=34;
-    // รายการ
-    x.font='700 22px "IBM Plex Sans Thai"';x.fillText('รายการ ('+o.order_items.length+')',24,y);y+=32;
-    x.font='400 21px "IBM Plex Sans Thai"';
-    const maxRows=Math.floor((H-60-y)/30);
-    o.order_items.slice(0,maxRows).forEach(it=>{
-      x.fillText('• '+(it.products?.name||'?')+'  ×'+Number(it.qty)+' '+(it.products?.unit||''),24,y);y+=30;});
-    if(o.order_items.length>maxRows){x.fillText('…และอีก '+(o.order_items.length-maxRows)+' รายการ',24,y);y+=30;}
+    if(shop){x.font='400 26px "IBM Plex Sans Thai"';x.fillText(shop,24,y);y+=38;}
+    for(const l of wrap(c.ship_address||c.billing_address||'-',W-48,'400 25px "IBM Plex Sans Thai"').slice(0,5)){x.fillText(l,24,y);y+=36;}
+    if(c.receive_time){y+=10;x.font='700 30px "IBM Plex Sans Thai"';x.fillText('เวลารับของ: '+c.receive_time,24,y);}
     // ท้าย
     x.font='400 18px "IBM Plex Sans Thai"';x.fillStyle='#555';
-    x.fillText('Sale: '+(c.sale_name||'-')+'   '+new Date().toLocaleDateString('th-TH'),24,H-24);
+    x.fillText('Sale: '+(c.sale_name||'-')+'   '+b.bill_no+'   '+new Date().toLocaleDateString('th-TH'),24,H-24);
     // PDF 100x150 มม.
     const {jsPDF}=window.jspdf;
     const pdf=new jsPDF({unit:'mm',format:[100,150],orientation:'portrait'});
     pdf.addImage(cv.toDataURL('image/jpeg',0.95),'JPEG',0,0,100,150);
     pdf.save(b.bill_no+'_label.pdf');
-    toast('สร้างใบปะหน้า '+b.bill_no+' แล้ว (100×150มม.)');
+    toast('สร้างใบปะหน้า ออเดอร์ '+(seq||'?')+'/'+(totalDay||'?')+' (100×150มม.) แล้ว');
   }catch(e){toast(String(e.message||e));}
   btn.disabled=false;
 }
