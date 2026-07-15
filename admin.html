@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
@@ -379,6 +380,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       </div>
       <div><label>วิธีจัดส่ง</label><select id="c-delivery"><option value="Lalamove">Lalamove</option><option value="BI">BI</option><option value="แพ็คของ">แพ็คของ</option><option value="มารับเอง">มารับเอง</option></select></div>
       <div><label>ประเภทบิล</label><select id="c-doctype" title="ใช้เป็นค่าเริ่มต้นทุกครั้งที่ออกบิลให้ลูกค้ารายนี้"><option value="บิลเงินสด">บิลเงินสด</option><option value="ใบแจ้งหนี้ / ใบวางบิล">ใบแจ้งหนี้ / ใบวางบิล</option></select></div>
+      <div><label>ลิงก์ร้าน (อังกฤษเล็ก/ตัวเลข/ขีด)</label><input id="c-slug" placeholder="เช่น tawanmala" style="width:150px" title="ได้ลิงก์สวย www.mixfresh-168.com/ชื่อนี้ — เว้นว่างได้ (ใช้ลิงก์แบบโทเคนแทน)"></div>
       <div style="flex:2;min-width:200px"><label>หมายเหตุ</label><input id="c-note" style="width:100%" placeholder="เช่น เงื่อนไขวางบิล"></div>
     </div>
     <div class="row" style="margin-top:14px">
@@ -432,6 +434,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="pagehead"><h2>จัดสินค้าให้ลูกค้า</h2></div>
   <div class="card">
     <div class="row" style="align-items:center">
+      <div style="min-width:200px"><label>ค้นหาลูกค้า (เซลล์/ชื่อร้าน/รหัส)</label><input id="pr-cust-search" placeholder="เช่น BFF หรือ ตะวัน…" style="width:100%" oninput="fillCustomerSelect()"></div>
       <div style="flex:1;min-width:220px"><label>เลือกลูกค้า</label><select id="pr-customer" style="width:100%" onchange="loadPricing()"></select></div>
       <input id="pr-search" placeholder="ค้นหาสินค้า…" style="flex:1;min-width:170px" oninput="renderPricing()">
       <div><label>ประเภท SKU</label><select id="pr-suffix" onchange="renderPricing()">
@@ -966,6 +969,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <label>รูปสลิปโอน (แนบหรือไม่ก็ได้)</label>
     <input type="file" id="sp-file" accept="image/*" style="width:100%;margin:4px 0 6px">
     <img id="sp-preview" style="display:none;max-width:100%;max-height:220px;border-radius:10px;border:1px solid var(--line)">
+    <div id="sp-qr" style="display:none;margin-top:8px;padding:8px 10px;border-radius:10px;font-size:13px"></div>
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="btn-ok" id="sp-confirm" onclick="confirmPaid(this)">✓ ยืนยันรับยอด</button>
       <button class="btn-g" onclick="closeSlipModal()">ยกเลิก</button>
@@ -1664,6 +1668,7 @@ function editCustomer(id){
   setRtime(c.receive_time||'');
   document.getElementById('c-delivery').value=c.delivery_method||'Lalamove';
   document.getElementById('c-doctype').value=c.doc_type||'บิลเงินสด';
+  document.getElementById('c-slug').value=c.slug||'';
   document.getElementById('c-note').value=c.note||'';
   // ที่อยู่แยกช่อง — บิล
   fillAddr('cb',{name:c.bill_addr_name,no:c.bill_no,soi:c.bill_soi,road:c.bill_road,
@@ -1735,6 +1740,7 @@ function resetCustomerForm(){
   document.getElementById('c-pgroup').value='base';
   document.getElementById('c-delivery').value='Lalamove';
   document.getElementById('c-doctype').value='บิลเงินสด';
+  document.getElementById('c-slug').value='';
 }
 function copyBillToShip(){
   document.getElementById('c-shipshop').value=document.getElementById('c-name').value;
@@ -1791,6 +1797,11 @@ async function saveCustomer(){
     delivery_method:document.getElementById('c-delivery').value,
     doc_type:document.getElementById('c-doctype').value,
     note:document.getElementById('c-note').value.trim()||null};
+  const slugRaw=document.getElementById('c-slug').value.trim().toLowerCase();
+  if(slugRaw){
+    if(!/^[a-z0-9-]{3,30}$/.test(slugRaw)){toast('ลิงก์ร้านต้องเป็น a-z 0-9 หรือ - ยาว 3-30 ตัว');return;}
+    rec.slug=slugRaw;
+  }else rec.slug=null;
   if(!rec.name){toast('กรอกชื่อร้านก่อน');return;}
   if(phone&&!/^[0-9]{10}$/.test(phone)){toast('เบอร์โทรออกบิลต้องเป็นตัวเลข 10 หลักเท่านั้น');return;}
   if(shipPhone&&!/^[0-9]{10}$/.test(shipPhone)){toast('เบอร์ผู้รับของต้องเป็นตัวเลข 10 หลักเท่านั้น');return;}
@@ -1879,6 +1890,10 @@ function gotoPricing(id){
   showPage('pricing');
   setTimeout(()=>{document.getElementById('pr-customer').value=id;loadPricing();},50);
 }
+function orderUrlFor(c){
+  const base=String(appSettings.site_url||ORDER_URL).replace(/\/+$/,'')+'/';
+  return c.slug?base+c.slug:base+'?t='+encodeURIComponent(c.order_token||'');
+}
 let lkCustomerId=null;
 async function copyLink(id){
   let c=customers.find(x=>x.id===id);if(!c)return;
@@ -1889,14 +1904,15 @@ async function copyLink(id){
     c.order_token=tk;
   }
   lkCustomerId=id;
-  const url=ORDER_URL+'?t='+encodeURIComponent(c.order_token);
+  const url=orderUrlFor(c);
   document.getElementById('lk-cust').textContent=c.code+' · '+c.name;
   document.getElementById('lk-url').value=url;
   const send=document.getElementById('lk-send');
   send.style.display=c.line_group_id?'inline-block':'none';
-  document.getElementById('lk-hint').textContent=c.line_group_id
+  document.getElementById('lk-hint').textContent=(c.slug?'':'💡 ตั้ง "ลิงก์ร้าน" ในหน้าแก้ไขลูกค้า จะได้ลิงก์สวยแบบ /ชื่อร้าน · ')
+    +(c.line_group_id
     ?'ลูกค้าผูกกลุ่ม LINE แล้ว — กดส่งเข้ากลุ่มได้เลย หรือคัดลอกไปใช้เอง'
-    :'ลูกค้ายังไม่ผูกกลุ่ม LINE — คัดลอกลิงก์ส่งเองได้เลย (พิมพ์ "ผูกกลุ่ม '+c.code+'" ในกลุ่มที่มีบอทเพื่อผูก)';
+    :'ลูกค้ายังไม่ผูกกลุ่ม LINE — คัดลอกลิงก์ส่งเองได้เลย (พิมพ์ "ผูกกลุ่ม '+c.code+'" ในกลุ่มที่มีบอทเพื่อผูก)');
   document.getElementById('link-modal').style.display='flex';
 }
 async function lkCopy(){
@@ -1997,9 +2013,20 @@ async function delSale(id){
 function fillCustomerSelect(){
   const sel=document.getElementById('pr-customer');
   const cur=sel.value;
-  sel.innerHTML='<option value="">— เลือกลูกค้า —</option>'+
-    customers.map(c=>`<option value="${c.id}">${esc(c.code)} · ${esc(c.name)}</option>`).join('');
-  if(cur)sel.value=cur;
+  const q=(document.getElementById('pr-cust-search')?.value||'').trim().toLowerCase();
+  const saleOf=c=>{const s=(typeof sales!=='undefined'?sales:[]).find(x=>x.id===c.sale_id);return s?String(s.code||'')+' '+String(s.name||''):String(c.sale_name||'');};
+  const list=customers.filter(c=>{
+    if(!q)return true;
+    return String(c.code||'').toLowerCase().includes(q)
+      ||String(c.name||'').toLowerCase().includes(q)
+      ||String(c.contact_name||'').toLowerCase().includes(q)
+      ||saleOf(c).toLowerCase().includes(q);
+  });
+  sel.innerHTML='<option value="">— เลือกลูกค้า —'+(q?' ('+list.length+' ราย)':'')+'</option>'+
+    list.map(c=>`<option value="${c.id}">${esc(c.code)} · ${esc(c.name)}</option>`).join('');
+  // คงตัวที่เลือกไว้ถ้ายังอยู่ในผลค้น / ถ้าค้นแล้วเหลือรายเดียว เลือกให้เลย
+  if(cur&&list.some(c=>String(c.id)===cur))sel.value=cur;
+  else if(q&&list.length===1){sel.value=list[0].id;loadPricing();}
 }
 function getState(pid){
   if(pid in pending) return pending[pid];
@@ -4457,7 +4484,54 @@ async function makeLabel(billId,btn){
 }
 
 /* ==================== เฟส 2: รับยอด + สลิป ==================== */
-let spBillId=null;
+let spBillId=null, spSlipRef=null, spDupBills=[];
+/* อ่าน QR จากรูปสลิป (มาตรฐานสลิปธนาคารไทยมีรหัสอ้างอิงไม่ซ้ำกัน) */
+async function decodeSlipQR(file){
+  if(typeof jsQR==='undefined')return null;
+  const img=await new Promise(res=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>res(null);i.src=URL.createObjectURL(file);});
+  if(!img)return null;
+  for(const maxW of [1400,900,2200]){       // ลองหลายสเกล เผื่อรูปเล็ก/ใหญ่เกิน
+    const sc=Math.min(1,maxW/img.width);
+    const cv=document.createElement('canvas');
+    cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);
+    const ctx=cv.getContext('2d');ctx.drawImage(img,0,0,cv.width,cv.height);
+    const d=ctx.getImageData(0,0,cv.width,cv.height);
+    try{
+      const code=jsQR(d.data,cv.width,cv.height);
+      if(code&&code.data)return code.data;
+    }catch(e){}
+  }
+  return null;
+}
+async function checkSlip(file){
+  const box=document.getElementById('sp-qr');
+  spSlipRef=null;spDupBills=[];
+  box.style.display='block';
+  box.style.background='#faf5ee';box.style.color='#666';
+  box.textContent='🔍 กำลังอ่าน QR จากสลิป…';
+  const raw=await decodeSlipQR(file);
+  if(!raw){
+    box.style.background='#fff7e0';box.style.color='#8a6d00';
+    box.innerHTML='⚠️ <b>อ่าน QR จากรูปไม่ได้</b> — อาจเป็นรูปแคปไม่เต็มใบ/เบลอ/ถูกแก้ไข ตรวจยอดกับบัญชีด้วยตาก่อนยืนยัน';
+    return;
+  }
+  spSlipRef=raw.length>190?raw.slice(0,190):raw;
+  // เช็คสลิปซ้ำ: เคยใช้ปิดบิลอื่นไปแล้วหรือยัง
+  try{
+    const {data:dup}=await db.from('bills').select('bill_no,customers(name)')
+      .eq('slip_ref',spSlipRef).limit(5);
+    spDupBills=dup||[];
+  }catch(e){console.warn('dup check',e);}
+  if(spDupBills.length){
+    box.style.background='#fdeeee';box.style.color='#b52020';
+    box.innerHTML='🚨 <b>สลิปนี้เคยถูกใช้แล้ว!</b> กับบิล: '
+      +spDupBills.map(d=>d.bill_no+' ('+(d.customers?.name||'')+')').join(', ')
+      +'<br>ระวังสลิปเวียน — เช็คเงินเข้าบัญชีจริงก่อนยืนยัน';
+  }else{
+    box.style.background='#e8f6f0';box.style.color='#0f7a5c';
+    box.innerHTML='✅ <b>อ่าน QR สลิปได้</b> และยังไม่เคยใช้ในระบบ · รหัสอ้างอิง: <span style="font-size:11px">'+esc(spSlipRef.slice(0,40))+'…</span>';
+  }
+}
 function markPaid(id,btn){
   const b=bills.find(x=>x.id===id);if(!b)return;
   const staff=document.getElementById('ac-staff').value.trim();
@@ -4478,7 +4552,9 @@ function markPaid(id,btn){
   spSum();
   const f=document.getElementById('sp-file');f.value='';
   const pv=document.getElementById('sp-preview');pv.style.display='none';pv.src='';
-  f.onchange=()=>{if(f.files[0]){pv.src=URL.createObjectURL(f.files[0]);pv.style.display='block';}};
+  f.onchange=()=>{if(f.files[0]){pv.src=URL.createObjectURL(f.files[0]);pv.style.display='block';checkSlip(f.files[0]);}
+    else{document.getElementById('sp-qr').style.display='none';spSlipRef=null;spDupBills=[];}};
+  document.getElementById('sp-qr').style.display='none';spSlipRef=null;spDupBills=[];
   document.getElementById('slip-modal').style.display='flex';
 }
 function spSum(){
@@ -4494,6 +4570,7 @@ function spSum(){
 function closeSlipModal(){document.getElementById('slip-modal').style.display='none';spBillId=null;}
 async function confirmPaid(btn){
   const b=bills.find(x=>x.id===spBillId);if(!b)return;
+  if(spDupBills.length&&!confirm('🚨 สลิปนี้เคยใช้กับบิล '+spDupBills.map(d=>d.bill_no).join(', ')+' แล้ว\n\nยืนยันว่าเช็คเงินเข้าบัญชีจริงแล้ว และจะรับยอดต่อ?'))return;
   const staff=document.getElementById('ac-staff').value.trim();
   btn.disabled=true;btn.textContent='กำลังบันทึก…';
   try{
@@ -4514,6 +4591,7 @@ async function confirmPaid(btn){
     });
     const upd={payment_status:'paid',paid_at:new Date().toISOString(),paid_by:staff};
     if(slipUrl)upd.slip_url=slipUrl;
+    if(spSlipRef)upd.slip_ref=spSlipRef;
     for(const tb of targets){
       const {error}=await db.from('bills').update(upd).eq('id',tb.id);
       if(error)throw new Error('บันทึก '+tb.bill_no+' ไม่สำเร็จ: '+error.message);
