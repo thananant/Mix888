@@ -31,6 +31,13 @@ body{font-family:'IBM Plex Sans Thai',sans-serif;background:var(--bg);color:var(
 #side .logo small{display:block;font-size:11.5px;font-weight:500;color:rgba(255,255,255,.65);margin-top:2px}
 .menu{flex:1;overflow-y:auto;padding:8px 10px}
 .mi{display:flex;align-items:center;gap:11px;padding:11px 15px;color:rgba(255,255,255,.9);cursor:pointer;font-weight:500;border-radius:12px;margin:2px 0;font-size:14.5px;user-select:none;transition:background .15s}
+.mhead{display:flex;align-items:center;gap:11px;padding:11px 15px;color:rgba(255,255,255,.95);cursor:pointer;font-weight:600;border-radius:12px;margin:6px 0 2px;font-size:14.5px;user-select:none;transition:background .15s}
+.mhead:hover{background:rgba(255,255,255,.1)}
+.mhead .chev{margin-left:auto;font-size:12px;transition:transform .18s;transform:rotate(-90deg);opacity:.85}
+.mgroup.open .mhead .chev{transform:rotate(0)}
+.mgroup .msub{display:none;margin:0 0 4px 12px;padding-left:8px;border-left:2px solid rgba(255,255,255,.18)}
+.mgroup.open .msub{display:block}
+.mgroup .msub .mi{padding:9px 13px;font-size:13.8px}
 .mi:hover{background:rgba(255,255,255,.12)}
 .mi.active{color:var(--accent-deep);background:#fff;font-weight:700;box-shadow:0 3px 10px rgba(0,0,0,.18)}
 .mi .ic{width:22px;text-align:center}
@@ -139,21 +146,57 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B</small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
-    <div class="mi" data-page="crm" onclick="showPage('crm')"><span class="ic">📇</span>ลูกค้า CRM</div>
-    <div class="mi" data-page="products" onclick="showPage('products')"><span class="ic">📦</span>สินค้า</div>
-    <div class="mi" data-page="customers" onclick="showPage('customers')"><span class="ic">👥</span>ลูกค้า</div>
-    <div class="mi" data-page="sales" onclick="showPage('sales')"><span class="ic">🧑‍💼</span>เซลล์</div>
-    <div class="mi" data-page="pricing" onclick="showPage('pricing')"><span class="ic">🏷️</span>จัดสินค้า</div>
-    <div class="mi" data-page="orders" onclick="showPage('orders')"><span class="ic">🧾</span>ทำบิล<span class="badge" id="ord-badge" style="display:none">0</span></div>
-    <div class="mi" data-page="transfer" onclick="showPage('transfer')"><span class="ic">🚛</span>โอนโกดัง<span class="badge" id="tf-badge" style="display:none">0</span></div>
-    <div class="mi" data-page="receive" onclick="showPage('receive')"><span class="ic">📥</span>รับสินค้า<span class="badge" id="rc-badge" style="display:none">0</span></div>
-    <div class="mi" data-page="shipcalc" onclick="showPage('shipcalc')"><span class="ic">🚚</span>คำนวณค่าส่ง</div>
-    <div class="mi" data-page="quote" onclick="showPage('quote')"><span class="ic">📝</span>ใบเสนอราคา</div>
-    <div class="mi" data-page="stockops" onclick="showPage('stockops')"><span class="ic">📋</span>นับ/ปรับสต๊อก</div>
-    <div class="mi" data-page="cost" onclick="showPage('cost')"><span class="ic">💰</span>ต้นทุนสินค้า</div>
-    <div class="mi" data-page="warehouse" onclick="showPage('warehouse')"><span class="ic">🏭</span>คลังสินค้า</div>
-    <div class="mi" data-page="account" onclick="showPage('account')"><span class="ic">💰</span>บัญชี</div>
-    <div class="mi" data-page="users" id="tab-users" style="display:none" onclick="showPage('users')"><span class="ic">🔐</span>ผู้ใช้</div>
+
+    <div class="mgroup" data-g="sell">
+      <div class="mhead" onclick="toggleGroup('sell')"><span class="ic">🧾</span>งานขาย<span class="badge" id="grp-sell-badge" style="display:none">0</span><span class="chev">▾</span></div>
+      <div class="msub">
+        <div class="mi" data-page="orders" onclick="showPage('orders')"><span class="ic">🧾</span>ทำบิล<span class="badge" id="ord-badge" style="display:none">0</span></div>
+        <div class="mi" data-page="quote" onclick="showPage('quote')"><span class="ic">📝</span>ใบเสนอราคา</div>
+      </div>
+    </div>
+
+    <div class="mgroup" data-g="acct">
+      <div class="mhead" onclick="toggleGroup('acct')"><span class="ic">💰</span>บัญชี<span class="chev">▾</span></div>
+      <div class="msub">
+        <div class="mi" data-page="account" onclick="showPage('account')"><span class="ic">💰</span>บัญชี</div>
+      </div>
+    </div>
+
+    <div class="mgroup" data-g="prod">
+      <div class="mhead" onclick="toggleGroup('prod')"><span class="ic">📦</span>สินค้า<span class="badge" id="grp-prod-badge" style="display:none">0</span><span class="chev">▾</span></div>
+      <div class="msub">
+        <div class="mi" data-page="products" onclick="showPage('products')"><span class="ic">📦</span>สินค้า</div>
+        <div class="mi" data-page="transfer" onclick="showPage('transfer')"><span class="ic">🚛</span>โอนโกดัง<span class="badge" id="tf-badge" style="display:none">0</span></div>
+        <div class="mi" data-page="receive" onclick="showPage('receive')"><span class="ic">📥</span>รับสินค้า<span class="badge" id="rc-badge" style="display:none">0</span></div>
+        <div class="mi" data-page="warehouse" onclick="showPage('warehouse')"><span class="ic">🏭</span>คลังสินค้า</div>
+        <div class="mi" data-page="stockops" onclick="showPage('stockops')"><span class="ic">📋</span>นับ/ปรับสต๊อก</div>
+      </div>
+    </div>
+
+    <div class="mgroup" data-g="cust">
+      <div class="mhead" onclick="toggleGroup('cust')"><span class="ic">👥</span>ลูกค้า<span class="chev">▾</span></div>
+      <div class="msub">
+        <div class="mi" data-page="customers" onclick="showPage('customers')"><span class="ic">👥</span>ลูกค้า</div>
+        <div class="mi" data-page="pricing" onclick="showPage('pricing')"><span class="ic">🏷️</span>จัดสินค้า</div>
+        <div class="mi" data-page="shipcalc" onclick="showPage('shipcalc')"><span class="ic">🚚</span>คำนวณค่าส่ง</div>
+        <div class="mi" data-page="crm" onclick="showPage('crm')"><span class="ic">📇</span>ลูกค้า CRM</div>
+      </div>
+    </div>
+
+    <div class="mgroup" data-g="sale">
+      <div class="mhead" onclick="toggleGroup('sale')"><span class="ic">🧑‍💼</span>เซลล์<span class="chev">▾</span></div>
+      <div class="msub">
+        <div class="mi" data-page="sales" onclick="showPage('sales')"><span class="ic">🧑‍💼</span>เซลล์</div>
+      </div>
+    </div>
+
+    <div class="mgroup" data-g="user">
+      <div class="mhead" onclick="toggleGroup('user')"><span class="ic">🔐</span>ผู้ใช้<span class="chev">▾</span></div>
+      <div class="msub">
+        <div class="mi" data-page="users" id="tab-users" style="display:none" onclick="showPage('users')"><span class="ic">🔐</span>ผู้ใช้</div>
+        <div class="mi" data-page="cost" onclick="showPage('cost')"><span class="ic">💰</span>ต้นทุนสินค้า</div>
+      </div>
+    </div>
   </div>
   <div class="foot">
     <div class="nm" id="who"></div>
@@ -1027,10 +1070,31 @@ let products=[], customers=[], sales=[], orders=[], bills=[];
 let assigned={}, pending={}, rcv=[];
 let editProductId=null, editCustomerId=null, editSaleId=null, acFilter='unpaid';
 
+function toggleGroup(g){
+  const el=document.querySelector('.mgroup[data-g="'+g+'"]');if(!el)return;
+  el.classList.toggle('open');
+  try{localStorage.setItem('mf_mgrp_'+g,el.classList.contains('open')?'1':'0');}catch(e){}
+}
+function openActiveGroup(){
+  const act=document.querySelector('.mi.active');
+  const grp=act&&act.closest('.mgroup');
+  if(grp)grp.classList.add('open');
+}
+function initMenuGroups(){
+  document.querySelectorAll('.mgroup').forEach(el=>{
+    let v=null;try{v=localStorage.getItem('mf_mgrp_'+el.dataset.g);}catch(e){}
+    if(v==='1')el.classList.add('open');
+    else if(v==='0')el.classList.remove('open');
+  });
+  openActiveGroup();
+}
+document.addEventListener('DOMContentLoaded',initMenuGroups);
+if(document.readyState!=='loading')setTimeout(initMenuGroups,0);
 function showPage(p){
   if(arguments[0]==='cost')setTimeout(costShowLock,0);
   document.querySelectorAll('.page').forEach(e=>e.classList.remove('active'));
   document.querySelectorAll('.mi').forEach(e=>e.classList.toggle('active',e.dataset.page===p));
+  openActiveGroup();
   document.getElementById('page-'+p).classList.add('active');
   if(p==='dashboard') loadDashboard();
   if(p==='crm') loadCRM();
