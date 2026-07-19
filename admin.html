@@ -382,6 +382,8 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div><label>วิธีจัดส่ง</label><select id="c-delivery"><option value="Lalamove">Lalamove</option><option value="BI">BI</option><option value="แพ็คของ">แพ็คของ</option><option value="มารับเอง">มารับเอง</option></select></div>
       <div><label>ประเภทบิล</label><select id="c-doctype" title="ใช้เป็นค่าเริ่มต้นทุกครั้งที่ออกบิลให้ลูกค้ารายนี้"><option value="บิลเงินสด">บิลเงินสด</option><option value="ใบแจ้งหนี้ / ใบวางบิล">ใบแจ้งหนี้ / ใบวางบิล</option></select></div>
       <div><label>ลิงก์ร้าน (อังกฤษเล็ก/ตัวเลข/ขีด)</label><input id="c-slug" placeholder="เช่น tawanmala" style="width:150px" title="ได้ลิงก์สวย www.mixfresh-168.com/ชื่อนี้ — เว้นว่างได้ (ใช้ลิงก์แบบโทเคนแทน)"></div>
+      <div><label>เป็นสาขาของร้าน</label><select id="c-parent" style="min-width:180px" onchange="cParentUI()" title="ลูกค้าหลายสาขา: เลือกร้านแม่ ลูกค้าจะใช้ลิงก์+กลุ่มไลน์ของแม่ แต่ราคา/บิล/หนี้ แยกรายสาขา"><option value="">— ไม่ใช่สาขา (ร้านหลัก) —</option></select></div>
+      <div id="c-branch-wrap" style="display:none"><label>ชื่อสาขา</label><input id="c-branch" placeholder="เช่น ลาดพร้าว" style="width:130px"></div>
       <div style="flex:2;min-width:200px"><label>หมายเหตุ</label><input id="c-note" style="width:100%" placeholder="เช่น เงื่อนไขวางบิล"></div>
     </div>
     <div class="row" style="margin-top:14px">
@@ -1633,7 +1635,7 @@ async function loadCustomers(){
   const {data,error}=await db.from('customers').select('*').order('code');
   if(error){toast('โหลดลูกค้าไม่ได้: '+error.message);return;}
   customers=data||[];
-  qtInit(); shcInit();
+  qtInit(); shcInit(); fillParentSelect(editCustomerId||null);
   const {data:cp}=await db.from('customer_prices').select('customer_id');
   window._priceCounts={};(cp||[]).forEach(r=>window._priceCounts[r.customer_id]=(window._priceCounts[r.customer_id]||0)+1);
   renderCustomers();
@@ -1647,7 +1649,12 @@ function renderCustomers(){
     const sname=saleName(c.sale_id)||c.sale_name;
     const inactive=c.active===false;
     return `<tr${inactive?' style="opacity:.5"':''}>
-    <td><b>${esc(c.code)}</b>${inactive?' <span class="tag tag-out">ปิดใช้งาน</span>':''}</td><td>${esc(c.name)}</td>
+    <td><b>${esc(c.code)}</b>${inactive?' <span class="tag tag-out">ปิดใช้งาน</span>':''}</td>
+    <td>${c.parent_id?'<span style="color:var(--muted)">↳ </span>':''}${esc(c.name)}${
+      c.parent_id
+        ?' <span class="tag tag-low">🏬 '+esc(c.branch_name||'สาขา')+'</span><div style="font-size:11.5px;color:var(--muted)">สาขาของ '+esc(customers.find(p=>p.id===c.parent_id)?.name||'?')+'</div>'
+        :(customers.some(x=>x.parent_id===c.id)?' <span class="tag tag-ov">ร้านแม่ '+customers.filter(x=>x.parent_id===c.id).length+' สาขา</span>':'')
+    }</td>
     <td>${sname?esc(sname):'<span style="color:var(--muted)">—</span>'}</td>
     <td style="font-variant-numeric:tabular-nums">${c.phone?esc(c.phone):'<span style="color:var(--muted)">—</span>'}</td>
     <td style="font-size:12.5px;color:var(--muted)">${c.line_group_id?esc(c.line_group_id.slice(0,14))+'…':'<span class="tag tag-low">ยังไม่ผูก</span>'}</td>
@@ -1656,6 +1663,7 @@ function renderCustomers(){
       <button class="btn-s mini" onclick="editCustomer(${c.id})">แก้ไข</button>
       <button class="btn-g mini" onclick="gotoPricing(${c.id})">จัดสินค้า</button>
       <button class="btn-g mini" onclick="copyLink(${c.id})">🔗 ลิงก์</button>
+      ${customers.some(x=>x.parent_id===c.id)&&c.line_group_id?`<button class="btn-g mini" onclick="syncBranchLine(${c.id},this)" title="ให้ทุกสาขาใช้กลุ่ม LINE เดียวกับร้านแม่">🔄 ซิงก์กลุ่ม</button>`:''}
       ${inactive
         ?`<button class="btn-ok mini" onclick="toggleCustomerActive(${c.id},true)">เปิดใช้</button>`
         :`<button class="btn-d mini" onclick="deleteCustomer(${c.id})">ลบ</button>`}
@@ -1683,6 +1691,10 @@ function editCustomer(id){
   document.getElementById('c-delivery').value=c.delivery_method||'Lalamove';
   document.getElementById('c-doctype').value=c.doc_type||'บิลเงินสด';
   document.getElementById('c-slug').value=c.slug||'';
+  fillParentSelect(c.id);
+  document.getElementById('c-parent').value=c.parent_id||'';
+  document.getElementById('c-branch').value=c.branch_name||'';
+  cParentUI();
   document.getElementById('c-note').value=c.note||'';
   // ที่อยู่แยกช่อง — บิล
   fillAddr('cb',{name:c.bill_addr_name,no:c.bill_no,soi:c.bill_soi,road:c.bill_road,
@@ -1755,6 +1767,10 @@ function resetCustomerForm(){
   document.getElementById('c-delivery').value='Lalamove';
   document.getElementById('c-doctype').value='บิลเงินสด';
   document.getElementById('c-slug').value='';
+  fillParentSelect(null);
+  document.getElementById('c-parent').value='';
+  document.getElementById('c-branch').value='';
+  cParentUI();
 }
 function copyBillToShip(){
   document.getElementById('c-shipshop').value=document.getElementById('c-name').value;
@@ -1811,6 +1827,14 @@ async function saveCustomer(){
     delivery_method:document.getElementById('c-delivery').value,
     doc_type:document.getElementById('c-doctype').value,
     note:document.getElementById('c-note').value.trim()||null};
+  const parentId=Number(document.getElementById('c-parent').value)||null;
+  if(parentId&&parentId===editCustomerId){toast('เลือกร้านแม่เป็นตัวเองไม่ได้');return;}
+  rec.parent_id=parentId;
+  rec.branch_name=parentId?(document.getElementById('c-branch').value.trim()||null):null;
+  if(parentId&&!rec.line_group_id){
+    const p=customers.find(x=>x.id===parentId);
+    if(p?.line_group_id)rec.line_group_id=p.line_group_id;   // สาขาใช้กลุ่มไลน์เดียวกับร้านแม่
+  }
   const slugRaw=document.getElementById('c-slug').value.trim().toLowerCase();
   if(slugRaw){
     if(!/^[a-z0-9-]{3,30}$/.test(slugRaw)){toast('ลิงก์ร้านต้องเป็น a-z 0-9 หรือ - ยาว 3-30 ตัว');return;}
@@ -1904,6 +1928,18 @@ function gotoPricing(id){
   showPage('pricing');
   setTimeout(()=>{document.getElementById('pr-customer').value=id;loadPricing();},50);
 }
+async function syncBranchLine(parentId,btn){
+  const p=customers.find(x=>x.id===parentId);if(!p?.line_group_id)return;
+  const kids=customers.filter(x=>x.parent_id===parentId);
+  if(!kids.length)return;
+  if(!confirm('ให้ทุกสาขาของ "'+p.name+'" ('+kids.length+' สาขา) ใช้กลุ่ม LINE เดียวกับร้านแม่?'))return;
+  btn.disabled=true;
+  const {error}=await db.from('customers').update({line_group_id:p.line_group_id}).eq('parent_id',parentId);
+  btn.disabled=false;
+  if(error){toast('ซิงก์ไม่สำเร็จ: '+error.message);return;}
+  toast('ซิงก์กลุ่ม LINE ให้ '+kids.length+' สาขาแล้ว ✓');
+  loadCustomers();
+}
 function orderUrlFor(c){
   const base=String(appSettings.site_url||ORDER_URL).replace(/\/+$/,'')+'/';
   return c.slug?base+c.slug:base+'?t='+encodeURIComponent(c.order_token||'');
@@ -1923,7 +1959,9 @@ async function copyLink(id){
   document.getElementById('lk-url').value=url;
   const send=document.getElementById('lk-send');
   send.style.display=c.line_group_id?'inline-block':'none';
-  document.getElementById('lk-hint').textContent=(c.slug?'':'💡 ตั้ง "ลิงก์ร้าน" ในหน้าแก้ไขลูกค้า จะได้ลิงก์สวยแบบ /ชื่อร้าน · ')
+  const kidCount=customers.filter(x=>x.parent_id===c.id).length;
+  document.getElementById('lk-hint').textContent=(kidCount?'🏬 ร้านนี้มี '+kidCount+' สาขา — ลูกค้าเปิดลิงก์นี้แล้วเลือกสาขาเองได้ · ':'')
+    +(c.slug?'':'💡 ตั้ง "ลิงก์ร้าน" ในหน้าแก้ไขลูกค้า จะได้ลิงก์สวยแบบ /ชื่อร้าน · ')
     +(c.line_group_id
     ?'ลูกค้าผูกกลุ่ม LINE แล้ว — กดส่งเข้ากลุ่มได้เลย หรือคัดลอกไปใช้เอง'
     :'ลูกค้ายังไม่ผูกกลุ่ม LINE — คัดลอกลิงก์ส่งเองได้เลย (พิมพ์ "ผูกกลุ่ม '+c.code+'" ในกลุ่มที่มีบอทเพื่อผูก)');
@@ -2024,6 +2062,19 @@ async function delSale(id){
 }
 
 /* ==================== จัดสินค้าให้ลูกค้า ==================== */
+function fillParentSelect(excludeId){
+  const sel=document.getElementById('c-parent');if(!sel)return;
+  const cur=sel.value;
+  const parents=customers.filter(c=>!c.parent_id&&c.id!==excludeId&&c.active!==false);
+  sel.innerHTML='<option value="">— ไม่ใช่สาขา (ร้านหลัก) —</option>'
+    +parents.map(c=>`<option value="${c.id}">${esc(c.code)} · ${esc(c.name)}</option>`).join('');
+  if(cur&&parents.some(c=>String(c.id)===cur))sel.value=cur;
+  cParentUI();
+}
+function cParentUI(){
+  const has=!!document.getElementById('c-parent').value;
+  document.getElementById('c-branch-wrap').style.display=has?'block':'none';
+}
 function fillCustomerSelect(){
   const sel=document.getElementById('pr-customer');
   const cur=sel.value;
@@ -4935,10 +4986,11 @@ function onSubdistrict(prefix){
 async function loadWarehouse(){
   const [whRes,stRes,sumRes]=await Promise.all([
     db.from('warehouses').select('*').order('sort_order').order('id'),
-    db.from('stock').select('product_id,warehouse_id,qty'),
+    db.from('stock').select('product_id,warehouse_id,qty').range(0,4999),
     db.from('v_warehouse_summary').select('*')
   ]);
   if(whRes.error){toast('โหลดคลังไม่ได้: '+whRes.error.message);return;}
+  if(stRes.error)toast('⚠️ อ่านสต๊อกแยกคลังไม่ได้: '+stRes.error.message+' — รัน fix_stock_rls.sql');
   // เก็บเฉพาะคลังที่ active (ถ้า active เป็น null ให้ถือว่าใช้งาน)
   warehouses=(whRes.data||[]).filter(w=>w.active!==false);
   stockRows=stRes.data||[];
