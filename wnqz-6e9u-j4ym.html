@@ -369,7 +369,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div id="c-code-wrap" style="display:none"><label>รหัสลูกค้า</label><input id="c-code" style="width:130px;background:#f5f0ea" readonly></div>
       <div style="flex:1;min-width:170px"><label>ชื่อร้าน</label><input id="c-name" style="width:100%"></div>
       <div style="min-width:170px"><label>เซลล์ที่ดูแล</label><select id="c-sale" style="width:100%" onchange="updateCodePreview()"><option value="">— เลือกเซลล์ —</option></select></div>
-      <div style="flex:1;min-width:200px"><label>LINE Group ID (ไว้ส่งบิล)</label><input id="c-line" style="width:100%" placeholder="ใส่ทีหลังได้"><select id="c-line-copy" onchange="copyLineFrom(this)" style="width:100%;margin-top:4px;font-size:12.5px;color:var(--muted)"><option value="">📎 ใช้กลุ่มเดียวกับร้านอื่น…</option></select></div>
+      <div style="flex:1;min-width:200px"><label>LINE Group ID (ไว้ส่งบิล)</label><input id="c-line" style="width:100%" placeholder="ใส่ทีหลังได้"><input id="c-line-copy-q" placeholder="🔎 หากลุ่มร่วม: พิมพ์ชื่อร้าน/รหัส/สาขา…" style="width:100%;margin-top:4px;font-size:12.5px" oninput="fillLineCopySelect()"><select id="c-line-copy" onchange="copyLineFrom(this)" style="width:100%;margin-top:4px;font-size:12.5px;color:var(--muted)"><option value="">📎 ใช้กลุ่มเดียวกับร้านอื่น…</option></select></div>
       <div><label>กลุ่มราคา</label><select id="c-pgroup"><option value="base">ราคากลาง</option><option value="r20">เรท 20 ลัง</option><option value="r50">เรท 50 ลัง</option><option value="upc">รวมส่งตจว</option></select></div>
     </div>
     <p class="hint">เลือกเซลล์ก่อน → รหัสลูกค้าจะรันต่อจากรหัสเซลล์อัตโนมัติ เช่น เซลล์รหัส AAA → ลูกค้าได้ AAA00001, AAA00002 …</p>
@@ -1734,18 +1734,34 @@ function renderCustomers(){
         :`<button class="btn-d mini" onclick="deleteCustomer(${c.id})">ลบ</button>`}
     </td></tr>`;}).join('');
 }
-function fillLineCopySelect(excludeId){
+function lcLabel(c){return c.code+' \u00b7 '+c.name+(c.branch_name?' \u2022 '+c.branch_name:'');}
+function fillLineCopySelect(reset){
   const el=document.getElementById('c-line-copy');if(!el)return;
-  const src=customers.filter(c=>c.line_group_id&&c.id!==excludeId)
-    .sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'th'));
-  el.innerHTML='<option value="">📎 ใช้กลุ่มเดียวกับร้านอื่น… ('+src.length+' ร้านที่ผูกแล้ว)</option>'
-    +src.map(c=>'<option value="'+esc(c.line_group_id)+'">'+esc(c.code+' · '+c.name+(c.branch_name?' \u2022 '+c.branch_name:''))+'</option>').join('');
+  const qEl=document.getElementById('c-line-copy-q');
+  if(reset&&qEl)qEl.value='';
+  const q=(qEl?.value||'').trim().toLowerCase();
+  const cur=reset?'':el.value;
+  const all=customers.filter(c=>c.line_group_id&&c.id!==editCustomerId);
+  const list=all.filter(c=>{
+    if(!q)return true;
+    return String(c.code||'').toLowerCase().includes(q)
+      ||String(c.name||'').toLowerCase().includes(q)
+      ||String(c.branch_name||'').toLowerCase().includes(q)
+      ||String(c.contact_name||'').toLowerCase().includes(q);
+  }).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'th'));
+  el.innerHTML='<option value="">📎 ใช้กลุ่มเดียวกับร้านอื่น… ('+(q?list.length+' จาก '+all.length:all.length+' ร้านที่ผูกแล้ว')+')</option>'
+    +list.map(c=>'<option value="'+esc(c.line_group_id)+'">'+esc(lcLabel(c))+'</option>').join('');
+  if(cur&&list.some(c=>c.line_group_id===cur))el.value=cur;
+  else if(q&&list.length===1){ // ค้นแล้วเหลือรายเดียว → เลือก+เติมให้เลย (แบบเดียวกับหน้าจัดสินค้า)
+    el.value=list[0].line_group_id;
+    document.getElementById('c-line').value=list[0].line_group_id;
+    toast('ใช้กลุ่มเดียวกับ '+lcLabel(list[0])+' — อย่าลืมกด 💾 บันทึก');
+  }
 }
 function copyLineFrom(sel){
   if(!sel.value)return;
   document.getElementById('c-line').value=sel.value;
-  const label=sel.options[sel.selectedIndex].text;
-  sel.value='';
+  const label=(sel.options&&sel.options[sel.selectedIndex])?sel.options[sel.selectedIndex].text:'';
   toast('ใช้กลุ่มเดียวกับ '+label+' — อย่าลืมกด 💾 บันทึก');
 }
 function editCustomer(id){
@@ -1770,7 +1786,7 @@ function editCustomer(id){
   document.getElementById('c-delivery').value=c.delivery_method||'Lalamove';
   document.getElementById('c-doctype').value=c.doc_type||'บิลเงินสด';
   document.getElementById('c-slug').value=c.slug||'';
-  fillParentSelect(c.id);fillLineCopySelect(c.id);
+  fillParentSelect(c.id);fillLineCopySelect(true);
   document.getElementById('c-parent').value=c.parent_id||'';
   document.getElementById('c-branch').value=c.branch_name||'';
   cParentUI();
@@ -1846,7 +1862,7 @@ function resetCustomerForm(){
   document.getElementById('c-delivery').value='Lalamove';
   document.getElementById('c-doctype').value='บิลเงินสด';
   document.getElementById('c-slug').value='';
-  fillParentSelect(null);fillLineCopySelect(null);
+  fillParentSelect(null);fillLineCopySelect(true);
   document.getElementById('c-parent').value='';
   document.getElementById('c-branch').value='';
   cParentUI();
