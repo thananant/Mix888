@@ -369,7 +369,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div id="c-code-wrap" style="display:none"><label>รหัสลูกค้า</label><input id="c-code" style="width:130px;background:#f5f0ea" readonly></div>
       <div style="flex:1;min-width:170px"><label>ชื่อร้าน</label><input id="c-name" style="width:100%"></div>
       <div style="min-width:170px"><label>เซลล์ที่ดูแล</label><select id="c-sale" style="width:100%" onchange="updateCodePreview()"><option value="">— เลือกเซลล์ —</option></select></div>
-      <div style="flex:1;min-width:200px"><label>LINE Group ID (ไว้ส่งบิล)</label><input id="c-line" style="width:100%" placeholder="ใส่ทีหลังได้"></div>
+      <div style="flex:1;min-width:200px"><label>LINE Group ID (ไว้ส่งบิล)</label><input id="c-line" style="width:100%" placeholder="ใส่ทีหลังได้"><select id="c-line-copy" onchange="copyLineFrom(this)" style="width:100%;margin-top:4px;font-size:12.5px;color:var(--muted)"><option value="">📎 ใช้กลุ่มเดียวกับร้านอื่น…</option></select></div>
       <div><label>กลุ่มราคา</label><select id="c-pgroup"><option value="base">ราคากลาง</option><option value="r20">เรท 20 ลัง</option><option value="r50">เรท 50 ลัง</option><option value="upc">รวมส่งตจว</option></select></div>
     </div>
     <p class="hint">เลือกเซลล์ก่อน → รหัสลูกค้าจะรันต่อจากรหัสเซลล์อัตโนมัติ เช่น เซลล์รหัส AAA → ลูกค้าได้ AAA00001, AAA00002 …</p>
@@ -1734,6 +1734,20 @@ function renderCustomers(){
         :`<button class="btn-d mini" onclick="deleteCustomer(${c.id})">ลบ</button>`}
     </td></tr>`;}).join('');
 }
+function fillLineCopySelect(excludeId){
+  const el=document.getElementById('c-line-copy');if(!el)return;
+  const src=customers.filter(c=>c.line_group_id&&c.id!==excludeId)
+    .sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'th'));
+  el.innerHTML='<option value="">📎 ใช้กลุ่มเดียวกับร้านอื่น… ('+src.length+' ร้านที่ผูกแล้ว)</option>'
+    +src.map(c=>'<option value="'+esc(c.line_group_id)+'">'+esc(c.code+' · '+c.name+(c.branch_name?' \u2022 '+c.branch_name:''))+'</option>').join('');
+}
+function copyLineFrom(sel){
+  if(!sel.value)return;
+  document.getElementById('c-line').value=sel.value;
+  const label=sel.options[sel.selectedIndex].text;
+  sel.value='';
+  toast('ใช้กลุ่มเดียวกับ '+label+' — อย่าลืมกด 💾 บันทึก');
+}
 function editCustomer(id){
   const c=customers.find(x=>x.id===id);if(!c)return;
   editCustomerId=id;
@@ -1756,7 +1770,7 @@ function editCustomer(id){
   document.getElementById('c-delivery').value=c.delivery_method||'Lalamove';
   document.getElementById('c-doctype').value=c.doc_type||'บิลเงินสด';
   document.getElementById('c-slug').value=c.slug||'';
-  fillParentSelect(c.id);
+  fillParentSelect(c.id);fillLineCopySelect(c.id);
   document.getElementById('c-parent').value=c.parent_id||'';
   document.getElementById('c-branch').value=c.branch_name||'';
   cParentUI();
@@ -1832,7 +1846,7 @@ function resetCustomerForm(){
   document.getElementById('c-delivery').value='Lalamove';
   document.getElementById('c-doctype').value='บิลเงินสด';
   document.getElementById('c-slug').value='';
-  fillParentSelect(null);
+  fillParentSelect(null);fillLineCopySelect(null);
   document.getElementById('c-parent').value='';
   document.getElementById('c-branch').value='';
   cParentUI();
@@ -2045,7 +2059,7 @@ async function lkSend(btn){
   const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
     to:c.line_group_id,
     messages:[{type:'text',
-      text:'🛒 ลิงก์สั่งสินค้า Mix Fresh 168\nร้าน: '+c.name+' ('+c.code+')\n\nกดสั่งได้เลยครับ 👇\n'+url}]
+      text:'🛒 ลิงก์สั่งสินค้า Mix Fresh 168\nร้าน: '+c.name+(c.branch_name?' \u2022 '+c.branch_name:'')+' ('+c.code+')\n\nกดสั่งได้เลยครับ 👇\n'+url}]
   }});
   btn.disabled=false;
   if(fnErr||!res||res.status!==200){toast('ส่ง LINE ไม่สำเร็จ — คัดลอกลิงก์ส่งเองได้');return;}
@@ -2266,7 +2280,7 @@ async function savePricing(){
 /* ==================== ทำบิล ==================== */
 async function loadOrders(){
   const {data,error}=await db.from('orders')
-    .select(`*, customers(id,code,name,line_group_id,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,ship_shop_name,ship_receiver,ship_phone,ship_address),
+    .select(`*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,ship_shop_name,ship_receiver,ship_phone,ship_address),
              order_items(qty,price,amount,product_id,products(name,unit))`)
     .eq('status','new').order('created_at',{ascending:true});
   if(error){toast('โหลดออเดอร์ไม่ได้: '+error.message);return;}
@@ -2703,7 +2717,7 @@ async function makeBill(orderId,btn,sendLine){
         to:o.customers.line_group_id,
         messages:[
           {type:'image',originalContentUrl:imageUrl,previewImageUrl:imageUrl},
-          {type:'text',text:'🧾 บิลเลขที่ '+billNo
+          {type:'text',text:shopTag(o.customers)+'🧾 บิลเลขที่ '+billNo
             +(shipFee?'\nค่าขนส่ง ฿'+fmt(shipFee):'')
             +(discount?'\nส่วนลด -฿'+fmt(discount):'')
             +'\nยอดรวม ฿'+fmt(grand)+'\nขอบคุณที่สั่งสินค้าครับ'}
@@ -2928,7 +2942,7 @@ let acPendingOrders=[];
 async function loadBills(){
   const [{data,error},{data:po}]=await Promise.all([
     db.from('bills')
-      .select('*, customers(code,name,line_group_id,delivery_method,sale_name,sale_id), orders(order_no)')
+      .select('*, customers(code,name,branch_name,line_group_id,delivery_method,sale_name,sale_id), orders(order_no)')
       .order('created_at',{ascending:false}).limit(500),
     db.from('orders')
       .select('id,order_no,total,created_at, customers(code,name,delivery_method,sale_name,sale_id)')
@@ -3064,6 +3078,13 @@ function renderAccount(){
   }).join('');
 }
 // ส่งข้อความแจ้งสถานะเข้ากลุ่ม LINE ของลูกค้า (ใช้ร่วมทุกจังหวะ)
+function shopTag(cc){ // ป้ายชื่อร้านนำหน้าข้อความ LINE — จำเป็นเมื่อหลายร้านใช้กลุ่มเดียวกัน
+  if(!cc)return'';
+  let f=cc;
+  if(cc.branch_name===undefined&&typeof customers!=='undefined'&&Array.isArray(customers))f=customers.find(x=>x.id===cc.id)||cc;
+  const nm=(f.name||cc.name||'')+(f.branch_name?' \u2022 '+f.branch_name:'');
+  return nm?'\u3010'+nm+'\u3011\n':'';
+}
 async function notifyCustomer(gid,text){
   if(!gid)return {ok:false,noline:true};
   try{
@@ -3088,7 +3109,7 @@ async function shipBillUI(id){
   try{await db.rpc('fifo_consume_order',{p_order:b.order_id});}catch(e){console.warn('fifo',e);}
   toast('บิล '+b.bill_no+' → ส่งแล้ว ตัดสต๊อกจาก'+whName+'เรียบร้อย');
   const r=await notifyCustomer(b.customers?.line_group_id,
-    '🚚 บิลเลขที่ '+b.bill_no+'\nสถานะ: จัดส่งแล้ว กำลังนำส่งถึงมือลูกค้า\nยอด ฿'+fmt(b.total));
+    shopTag(b.customers)+'🚚 บิลเลขที่ '+b.bill_no+'\nสถานะ: จัดส่งแล้ว กำลังนำส่งถึงมือลูกค้า\nยอด ฿'+fmt(b.total));
   if(b.customers?.line_group_id&&!r.ok) toast('ส่งแล้ว แต่แจ้ง LINE ไม่สำเร็จ');
   loadBills(); loadProducts();
 }
@@ -3100,7 +3121,7 @@ async function cancelBillUI(id){
   try{await db.rpc('fifo_return_order',{p_order:b.order_id});}catch(e){console.warn('fifo return',e);}
   toast('ยกเลิกบิล '+b.bill_no+' และคืนของจองแล้ว');
   if(b.customers?.line_group_id && confirm('แจ้งลูกค้าในกลุ่ม LINE ว่าบิลนี้ถูกยกเลิกไหม?')){
-    await notifyCustomer(b.customers.line_group_id,'❌ บิลเลขที่ '+b.bill_no+' ถูกยกเลิกแล้ว\nหากมีข้อสงสัยติดต่อร้านได้เลยครับ');
+    await notifyCustomer(b.customers.line_group_id,shopTag(b.customers)+'❌ บิลเลขที่ '+b.bill_no+' ถูกยกเลิกแล้ว\nหากมีข้อสงสัยติดต่อร้านได้เลยครับ');
   }
   loadBills(); loadProducts();
 }
@@ -3117,7 +3138,7 @@ async function resendBill(id,btn){
     to:b.customers.line_group_id,
     messages:[
       {type:'image',originalContentUrl:b.image_url,previewImageUrl:b.image_url},
-      {type:'text',text:'🧾 บิลเลขที่ '+b.bill_no
+      {type:'text',text:shopTag(b.customers)+'🧾 บิลเลขที่ '+b.bill_no
         +((b.revision||1)>1?' (แก้ไขครั้งที่ '+b.revision+')':'')
         +(Number(b.shipping_fee)?'\nค่าขนส่ง ฿'+fmt(b.shipping_fee):'')
         +(Number(b.discount)?'\nส่วนลด -฿'+fmt(b.discount):'')
@@ -3515,7 +3536,7 @@ async function makeQuote(btn,modeOut){
       const url=db.storage.from('bills').getPublicUrl(path).data.publicUrl;
       await db.functions.invoke('line-push',{body:{to:c.line_group_id,messages:[
         {type:'image',originalContentUrl:url,previewImageUrl:url},
-        {type:'text',text:'📝 ใบเสนอราคา '+qtNo+'\nยอดรวม ฿'+fmt(total)+'\nยืนราคา '+days+' วัน\nสนใจสั่งได้เลยครับ 🙏'}]}});
+        {type:'text',text:shopTag(c)+'📝 ใบเสนอราคา '+qtNo+'\nยอดรวม ฿'+fmt(total)+'\nยืนราคา '+days+' วัน\nสนใจสั่งได้เลยครับ 🙏'}]}});
       toast('ส่งใบเสนอราคาเข้ากลุ่ม '+c.name+' แล้ว ✓');
     }else{
       const a=document.createElement('a');
@@ -3554,7 +3575,7 @@ function qtReuse(id){
 /* ---- ออกบิลจากหน้าบัญชี (บิลเงินสด ไม่มีค่าส่ง/ส่วนลด — ถ้าต้องใส่ ใช้หน้าทำบิล) ---- */
 async function acIssueBill(orderId,btn){
   const {data:o,error}=await db.from('orders')
-    .select(`*, customers(id,code,name,line_group_id,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,ship_shop_name,ship_receiver,ship_phone,ship_address),
+    .select(`*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,ship_shop_name,ship_receiver,ship_phone,ship_address),
              order_items(qty,price,amount,product_id,products(name,unit))`)
     .eq('id',orderId).single();
   if(error||!o){toast('โหลดออเดอร์ไม่ได้: '+(error?.message||''));return;}
@@ -4392,7 +4413,7 @@ async function openEditBill(billId){
   if((b.ship_status||'pending')==='cancelled'){toast('บิลถูกยกเลิกแล้ว แก้ไม่ได้');return;}
   ebFeesOnly=(b.ship_status==='shipped');  // ส่งแล้ว: แก้ได้เฉพาะค่าส่ง/ส่วนลด
   const {data:o,error}=await db.from('orders')
-    .select('*, customers(id,code,name,line_group_id,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(id,product_id,qty,price,amount,products(name,unit))')
+    .select('*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(id,product_id,qty,price,amount,products(name,unit))')
     .eq('id',b.order_id).single();
   if(error||!o){toast('โหลดออเดอร์ไม่ได้: '+(error?.message||''));return;}
   ebState={bill:b,order:o,removed:[],
@@ -4520,7 +4541,7 @@ async function saveEditBill(btn){
 
     // 4) วาดบิลใหม่ (เวอร์ชันใหม่)
     const {data:o2}=await db.from('orders')
-      .select('*, customers(id,code,name,line_group_id,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(qty,price,amount,product_id,products(name,unit))')
+      .select('*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(qty,price,amount,product_id,products(name,unit))')
       .eq('id',o.id).single();
     const result=await drawBill(o2,b.bill_no,{shipFee:ship,discount:disc,grand,revision:newRev,docType:b.doc_type||'บิลเงินสด'});
     const blob=await new Promise(res=>result.cv.toBlob(res,'image/png'));
@@ -4539,7 +4560,7 @@ async function saveEditBill(btn){
     if(o2.customers?.line_group_id&&confirm('ส่งบิลฉบับแก้ไข (v.'+newRev+') เข้ากลุ่ม LINE ลูกค้าเลยไหม?')){
       await db.functions.invoke('line-push',{body:{to:o2.customers.line_group_id,messages:[
         {type:'image',originalContentUrl:imageUrl,previewImageUrl:imageUrl},
-        {type:'text',text:'🧾 บิลเลขที่ '+b.bill_no+' (แก้ไขครั้งที่ '+newRev+')'
+        {type:'text',text:shopTag(o2.customers)+'🧾 บิลเลขที่ '+b.bill_no+' (แก้ไขครั้งที่ '+newRev+')'
           +(ship?'\nค่าขนส่ง ฿'+fmt(ship):'')+(disc?'\nส่วนลด -฿'+fmt(disc):'')
           +'\nยอดรวม ฿'+fmt(grand)+'\nขออภัยในความไม่สะดวกครับ 🙏'}]}});
     }
@@ -4857,7 +4878,7 @@ async function confirmPaid(btn){
       if(b.customers?.line_group_id){
         const polite=document.getElementById('polite').value;
         await db.functions.invoke('line-push',{body:{to:b.customers.line_group_id,
-          messages:[{type:'text',text:'💰 รับยอดบางส่วน บิล '+b.bill_no+'\nรับแล้ว ฿'+fmt(newPaid)+' / ฿'+fmt(b.total)+'\nคงเหลือ ฿'+fmt(Number(b.total)-newPaid)+'\nขอบคุณ'+polite+' 🙏'}]}});
+          messages:[{type:'text',text:shopTag(b.customers)+'💰 รับยอดบางส่วน บิล '+b.bill_no+'\nรับแล้ว ฿'+fmt(newPaid)+' / ฿'+fmt(b.total)+'\nคงเหลือ ฿'+fmt(Number(b.total)-newPaid)+'\nขอบคุณ'+polite+' 🙏'}]}});
       }
       toast('บันทึกจ่ายบางส่วน '+b.bill_no+' — เหลือค้าง ฿'+fmt(Number(b.total)-newPaid));
       closeSlipModal(); loadBills();
@@ -4879,7 +4900,7 @@ async function confirmPaid(btn){
         ?'✅ รับยอดโอนรวม '+targets.length+' บิล\n'+targets.map(x=>'• '+x.bill_no+' ฿'+fmt(x.total)).join('\n')+'\nรวม ฿'+fmt(sumAll)+' เรียบร้อย\nขอบคุณ'+polite+' 🙏'
         :'✅ รับยอดบิลเลขที่ '+b.bill_no+'\nจำนวน ฿'+fmt(b.total)+' เรียบร้อย\nขอบคุณ'+polite+' 🙏';
       const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
-        to:b.customers.line_group_id,messages:[{type:'text',text:txt}]}});
+        to:b.customers.line_group_id,messages:[{type:'text',text:shopTag(b.customers)+txt}]}});
       if(fnErr||!res||res.status!==200)toast('รับยอดแล้ว แต่ส่งข้อความ LINE ไม่สำเร็จ');
       else toast('รับยอด '+targets.length+' บิล'+(slipUrl?' + แนบสลิป':'')+' และส่งขอบคุณเข้ากลุ่มแล้ว ✓');
     }else toast('รับยอด '+targets.map(x=>x.bill_no).join(', ')+(slipUrl?' + แนบสลิป':'')+' แล้ว');
