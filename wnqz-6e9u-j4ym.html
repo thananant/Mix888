@@ -2659,13 +2659,10 @@ async function billToPDF(cvResult,billNo){
   return pdf;
 }
 async function nextBillNo(){
-  const ymd=new Date(Date.now()+7*3600*1000).toISOString().slice(2,10).replace(/-/g,'');
-  const prefix='IV'+ymd;
-  const {data}=await db.from('bills').select('bill_no').like('bill_no',prefix+'%')
-    .order('bill_no',{ascending:false}).limit(1);
-  let n=1;
-  if(data&&data.length){const last=parseInt(data[0].bill_no.slice(prefix.length),10);if(!isNaN(last))n=last+1;}
-  return prefix+String(n).padStart(4,'0');
+  // ออกเลขจากฐานข้อมูลแบบ atomic (next_doc_no) — กันเลขซ้ำตอนออกบิลพร้อมกันหลายเครื่อง/หลายแท็บ
+  const {data,error}=await db.rpc('next_doc_no',{p_prefix:'IV'});
+  if(error||!data)throw new Error('ออกเลขบิลไม่สำเร็จ: '+(error?.message||'ไม่ได้เลข')+' (ต้องรัน fix_bill_no_duplicate.sql ก่อน)');
+  return data;
 }
 // คำนวณค่าส่ง BI: นับเฉพาะหน่วยลัง (SKU ไม่ลงท้าย S)
 function calcBIShip(items,priceGroup){
