@@ -362,7 +362,7 @@ async function notifyCustomerOrder(data,ci){
     const gid=customer.line_group_id;if(!gid)return;
     let t='✅ รับออเดอร์ '+data.order_no+' เรียบร้อยแล้ว\nสถานะ: กำลังดำเนินการ กำลังจัดเตรียมสินค้า\n──────────\nรายการ :';
     ci.forEach(x=>{t+='\n'+x.name+' '+x.qty+' '+(x.unit||'');});
-    t+='\nรวม '+fmt(data.total)+'\n\nขอบคุณที่สั่งสินค้าครับ 🙏';
+    t+='\n\nขอบคุณที่สั่งสินค้าครับ 🙏';
     await db.functions.invoke('line-push',{body:{to:gid,messages:[{type:'text',text:t}]}});
   }catch(e){/* เงียบไว้ */}
 }
