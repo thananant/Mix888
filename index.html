@@ -240,12 +240,16 @@ async function loadCatalog(){
     .select('*').eq('customer_id',customer.id).order('sku');
   if(error){toast('โหลดสินค้าไม่ได้: '+error.message);return;}
   items=data||[];
-  // เติมรูปสินค้า (เผื่อ view ไม่มี image_url)
-  if(items.length&&items[0].image_url===undefined){
+  // เติมรูปสินค้า + safety_stock (เผื่อ view ไม่มี)
+  if(items.length&&(items[0].image_url===undefined||items[0].safety_stock===undefined)){
     const ids=items.map(it=>it.product_id);
-    const {data:imgs}=await db.from('products').select('id,image_url').in('id',ids);
-    const im={};(imgs||[]).forEach(r=>im[r.id]=r.image_url);
-    items.forEach(it=>it.image_url=im[it.product_id]||null);
+    const {data:extra}=await db.from('products').select('id,image_url,safety_stock').in('id',ids);
+    const ex={};(extra||[]).forEach(r=>ex[r.id]=r);
+    items.forEach(it=>{
+      const e=ex[it.product_id]||{};
+      if(it.image_url===undefined)it.image_url=e.image_url||null;
+      if(it.safety_stock===undefined)it.safety_stock=e.safety_stock;
+    });
   }
   for(const it of items){
     if(cart[it.product_id]>it.stock_qty) cart[it.product_id]=Math.max(0,Math.floor(it.stock_qty));
@@ -263,9 +267,10 @@ function render(){
     const stock=Number(it.stock_qty);
     const qty=cart[it.product_id]||0;
     const out=stock<=0;
+    const safety=Number(it.safety_stock)||0; // ป้ายสถานะสต๊อก ไม่เปิดเผยจำนวนคงเหลือจริง
     let stockHtml = out ? '<span class="stock zero">สินค้าหมด</span>'
-      : stock<=10 ? `<span class="stock low">เหลือ ${stock} ${esc(it.unit)}</span>`
-      : `<span class="stock ok">เหลือ ${stock} ${esc(it.unit)}</span>`;
+      : (safety>0&&stock<=safety) ? '<span class="stock low">สินค้าใกล้หมด</span>'
+      : '<span class="stock ok">พร้อมจำหน่าย</span>';
     const img=it.image_url
       ?`<img class="pimg" src="${esc(it.image_url)}" loading="lazy" alt="" onclick="showImg('${esc(it.image_url)}')">`
       :`<div class="pimg-ph">🧺</div>`;
