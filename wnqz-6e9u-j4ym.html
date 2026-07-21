@@ -494,6 +494,11 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-g mini" onclick="toggleShown(false)">✗ เอาออกที่แสดง</button>
       <button class="btn-p" id="pr-save" onclick="savePricing()" disabled>บันทึก (<span id="pr-changes">0</span>)</button>
     </div>
+    <div class="row" style="align-items:center;margin-top:8px">
+      <div style="min-width:200px"><label>📋 คัดลอกการจัดสินค้าจากร้านอื่น</label><input id="pr-copy-q" placeholder="🔎 พิมพ์ชื่อร้าน/รหัสต้นทาง…" style="width:100%" oninput="fillCopySrcSelect()"></div>
+      <div style="flex:1;min-width:220px"><label>ร้านต้นทาง</label><select id="pr-copy-src" style="width:100%"><option value="">— เลือกร้านต้นทาง —</option></select></div>
+      <button class="btn-g" onclick="copyPricingFrom()">📋 คัดลอกมาใส่ร้านนี้</button>
+    </div>
     <p class="hint"><b>ติ๊ก ✓ = ลูกค้ารายนี้เห็นและสั่งสินค้าตัวนี้ได้</b> ตัวที่ไม่ติ๊กจะไม่โผล่ในหน้าสั่งของเขาเลย · ราคาพิเศษเว้นว่าง = ใช้ราคากลางอัตโนมัติ</p>
   </div>
   <div class="card">
@@ -2192,9 +2197,59 @@ function getState(pid){
   if(pid in pending) return pending[pid];
   return {on:(pid in assigned), price:(assigned[pid]??'')};
 }
+function fillCopySrcSelect(){
+  const el=document.getElementById('pr-copy-src');if(!el)return;
+  const cid=document.getElementById('pr-customer').value;
+  const q=(document.getElementById('pr-copy-q')?.value||'').trim().toLowerCase();
+  const cur=el.value;
+  const list=customers.filter(c=>String(c.id)!==String(cid)).filter(c=>{
+    if(!q)return true;
+    return String(c.code||'').toLowerCase().includes(q)
+      ||String(c.name||'').toLowerCase().includes(q)
+      ||String(c.branch_name||'').toLowerCase().includes(q)
+      ||String(c.contact_name||'').toLowerCase().includes(q);
+  }).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'th'));
+  el.innerHTML='<option value="">\u2014 เลือกร้านต้นทาง'+(q?' ('+list.length+' ผล)':'')+' \u2014</option>'
+    +list.map(c=>'<option value="'+c.id+'">'+esc(c.code+' \u00b7 '+c.name+(c.branch_name?' \u2022 '+c.branch_name:''))+'</option>').join('');
+  if(cur&&list.some(c=>String(c.id)===cur))el.value=cur;
+  else if(q&&list.length===1)el.value=String(list[0].id); // เหลือรายเดียวเลือกให้ แต่ไม่คัดลอกเอง ต้องกดปุ่มยืนยัน
+}
+async function copyPricingFrom(){
+  const cid=document.getElementById('pr-customer').value;
+  const srcId=document.getElementById('pr-copy-src').value;
+  if(!cid){toast('เลือกลูกค้าปลายทางก่อน (ช่องเลือกลูกค้าด้านบน)');return;}
+  if(!srcId){toast('เลือกร้านต้นทางที่จะคัดลอกก่อน');return;}
+  if(String(srcId)===String(cid)){toast('ต้นทางกับปลายทางเป็นร้านเดียวกัน');return;}
+  const src=customers.find(c=>String(c.id)===String(srcId));
+  const dst=customers.find(c=>String(c.id)===String(cid));
+  const {data:rows,error}=await db.from('customer_prices').select('product_id,price').eq('customer_id',srcId);
+  if(error){toast('อ่านข้อมูลต้นทางไม่ได้: '+error.message);return;}
+  if(!rows||!rows.length){toast('ร้านต้นทาง '+src.code+' ยังไม่มีการจัดสินค้า');return;}
+  const gl={base:'ราคากลาง',r20:'เรท 20 ลัง',r50:'เรท 50 ลัง',upc:'รวมส่งตจว'};
+  let msg='คัดลอกการจัดสินค้า+ราคา\n'
+    +'จาก: '+src.code+' '+src.name+' ('+rows.length+' รายการ)\n'
+    +'ไปที่: '+dst.code+' '+dst.name+'\n\n'
+    +'ของเดิมของร้านปลายทาง '+Object.keys(assigned).length+' รายการ จะถูกแทนที่ทั้งหมด';
+  if(Object.keys(pending).length)msg+='\n(การแก้ไขที่ยังไม่กดบันทึกจะถูกล้างด้วย)';
+  if((src.price_group||'base')!==(dst.price_group||'base'))
+    msg+='\n\n\u26a0\ufe0f กลุ่มราคาต่างกัน \u2014 ต้นทาง: '+gl[src.price_group||'base']+' / ปลายทาง: '+gl[dst.price_group||'base']
+      +'\nรายการที่ไม่ได้กำหนดราคาเอง จะคิดตามกลุ่มราคาของร้านปลายทาง';
+  if(!confirm(msg))return;
+  // อัปเสิร์ตก่อน แล้วค่อยลบส่วนเกิน \u2014 ถ้าเน็ตหลุดกลางทาง เมนูเดิมไม่หายเกลี้ยง
+  const ups=rows.map(r=>({customer_id:Number(cid),product_id:r.product_id,price:r.price}));
+  const {error:e1}=await db.from('customer_prices').upsert(ups,{onConflict:'customer_id,product_id'});
+  if(e1){toast('คัดลอกไม่สำเร็จ: '+e1.message);return;}
+  const {error:e2}=await db.from('customer_prices').delete().eq('customer_id',cid)
+    .not('product_id','in','('+rows.map(r=>r.product_id).join(',')+')');
+  if(e2){toast('ลบรายการส่วนเกินไม่สำเร็จ: '+e2.message);return;}
+  toast('\ud83d\udccb คัดลอกแล้ว '+rows.length+' รายการ จาก '+src.code+' \u2192 '+dst.code);
+  const qEl=document.getElementById('pr-copy-q');if(qEl)qEl.value='';
+  loadPricing(); loadCustomers();
+}
 async function loadPricing(){
   const cid=document.getElementById('pr-customer').value;
   pending={}; updateChangeCount();
+  fillCopySrcSelect();
   if(!cid){document.getElementById('pr-body').innerHTML='';document.getElementById('pr-summary').textContent='';return;}
   const {data,error}=await db.from('customer_prices').select('product_id,price').eq('customer_id',cid);
   if(error){toast('โหลดข้อมูลไม่ได้: '+error.message);return;}
