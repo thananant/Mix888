@@ -3894,7 +3894,9 @@ function scStart(){
       system_qty:(stockByProd[p.id]||{})[wh]||0,counted:null,good:null,damaged:null}))
     .filter(it=>!only||it.system_qty>0)
     .sort((a,b)=>a.sku.localeCompare(b.sku));
+  const restored=scRestoreDraft();
   scRender();
+  if(restored&&!window.scDraftToasted){window.scDraftToasted=true;toast('📝 กู้ค่าที่นับค้างไว้ '+restored+' รายการให้แล้ว (ระบบเซฟให้อัตโนมัติทุกครั้งที่กรอก)');}
 }
 function scRender(){
   const mode=document.getElementById('sc-mode').value;
@@ -3922,7 +3924,30 @@ function scRender(){
       <td class="num" style="font-weight:700;color:${bad?'var(--danger,#b52020)':'var(--ok,#159b78)'}">${has?(diff>0?'+':'')+diff:''}</td></tr>`;
   }).join('');
 }
-function scSet(i,f,v){scItems[i][f]=v===''?null:Math.max(0,Number(v)||0);scRender();}
+function scDraftKey(){return 'mf_sc_draft_'+document.getElementById('sc-wh').value+'_'+document.getElementById('sc-mode').value;}
+function scSaveDraft(){ // เซฟร่างผลนับอัตโนมัติ — กันหายตอน refresh/สลับฟิลเตอร์
+  try{
+    const raw=localStorage.getItem(scDraftKey());
+    const prev=raw?((JSON.parse(raw)||{}).vals||{}):{};
+    scItems.forEach(it=>{
+      if(it.counted!=null||it.good!=null||it.damaged!=null)prev[it.product_id]={c:it.counted,g:it.good,d:it.damaged};
+      else delete prev[it.product_id];
+    });
+    if(Object.keys(prev).length)localStorage.setItem(scDraftKey(),JSON.stringify({at:Date.now(),vals:prev}));
+    else localStorage.removeItem(scDraftKey());
+  }catch(e){}
+}
+function scRestoreDraft(){
+  try{
+    const raw=localStorage.getItem(scDraftKey());if(!raw)return 0;
+    const d=JSON.parse(raw);
+    if(!d||!d.vals||Date.now()-(d.at||0)>48*3600*1000){localStorage.removeItem(scDraftKey());return 0;}
+    let n=0;
+    scItems.forEach(it=>{const v=d.vals[it.product_id];if(v){it.counted=v.c??null;it.good=v.g??null;it.damaged=v.d??null;n++;}});
+    return n;
+  }catch(e){return 0;}
+}
+function scSet(i,f,v){scItems[i][f]=v===''?null:Math.max(0,Number(v)||0);scSaveDraft();scRender();}
 async function confirmCount(btn){
   const mode=document.getElementById('sc-mode').value;
   const wh=Number(document.getElementById('sc-wh').value);
@@ -3957,6 +3982,7 @@ async function confirmCount(btn){
     }
     toast('บันทึกผลนับ '+cntNo+(diffs.length?' — ไม่ตรง '+diffs.length+' รายการ':' — ตรงทุกตัว ✓')
       +(doAdjust&&diffs.length?' และปรับสต๊อกแล้ว':''));
+    try{localStorage.removeItem(scDraftKey());}catch(e){} // นับจบแล้ว ล้างร่าง
     await loadProducts(); scStart(); loadCountLog();
   }catch(e){toast(String(e.message||e));}
   btn.disabled=false;
