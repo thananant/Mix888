@@ -4197,8 +4197,10 @@ function tfSuggest(){
     const stockTo=tfStockOf(p.id,toW);
     const safety=Number(p.safety_stock)||0;
     const maxS=Number(p.max_stock)||0;
+    const avail=stockTo-reserved;      // คงเหลือจริงหลังหักจองรอส่ง
+    if(avail>=safety)return;           // ยังไม่ต่ำกว่า Safety = ยังไม่ต้องเรียก
     const target=(maxS>0?maxS:safety);
-    let need=Math.ceil(target+reserved-stockTo);
+    let need=Math.ceil(target-avail);  // เรียกเติมกลับให้ถึง Max (= Max - (คงเหลือ-จอง))
     if(need<=0)return;
     const stockFrom=tfStockOf(p.id,fromW);
     tfItems.push({product_id:p.id,name:p.name,sku:p.sku,unit:p.unit||'',
@@ -5089,8 +5091,11 @@ async function loadWhList(){
   if(tfF&&tfT){
     const opts=whList.map(w=>`<option value="${w.id}">${esc(w.name)}</option>`).join('');
     tfF.innerHTML=opts; tfT.innerHTML=opts;
-    const def=whList.find(w=>w.is_default)||whList[0];
-    const other=whList.find(w=>!w.is_default)||whList[0];
+    // ค่าเริ่มต้นตายตัว: กัลปพฤกษ์ (ต้นทาง) → วังหิน (ปลายทาง) — เปลี่ยนเองใน dropdown ได้ตามปกติ
+    const wKlp=whList.find(w=>String(w.name).includes('กัลป'));
+    const wWh=whList.find(w=>String(w.name).includes('วังหิน'));
+    const def=wWh||whList.find(w=>w.is_default)||whList[0];
+    const other=wKlp||whList.find(w=>!w.is_default)||whList[0];
     if(other)tfF.value=other.id;
     if(def)tfT.value=def.id;
   }
