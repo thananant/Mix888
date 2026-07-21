@@ -2,7 +2,7 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <title>Mix Fresh 168 — สั่งสินค้า</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Mali:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -111,6 +111,15 @@ main{max-width:640px;margin:0 auto;padding:12px}
 #errpage{display:none;text-align:center;padding:60px 24px}
 #errpage.show{display:block}
 .empty{text-align:center;color:var(--muted);padding:40px 0}
+/* ===== แก้การแสดงผลบน iPhone (iOS Safari / เบราว์เซอร์ใน LINE) ===== */
+.searchbox,.qin,.drow input{font-size:16px}            /* กัน iOS ซูมหน้าเองตอนแตะช่องกรอก (ตัวอักษร<16px จะโดนซูม) */
+button,input,select,.ctab,.qb,.qbtn{touch-action:manipulation} /* กันดับเบิลแตะปุ่ม +/− แล้วหน้าซูม/กระตุก */
+.sheet{-webkit-overflow-scrolling:touch}
+.drow input[type=date]{min-width:132px;-webkit-appearance:none;appearance:none;background:#fff} /* ช่องวันที่ iOS ไม่หดจนอ่านไม่ได้ */
+body{padding-bottom:calc(90px + env(safe-area-inset-bottom))}
+#cartbar{padding-bottom:calc(12px + env(safe-area-inset-bottom))}   /* ปุ่มสั่งสินค้าไม่จมแถบโฮมล่าง iPhone */
+.sheet{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+#toast{bottom:calc(100px + env(safe-area-inset-bottom))}
 </style>
 </head>
 <body>
@@ -322,8 +331,9 @@ function openConfirm(){
     </div>`).join('');
   document.getElementById('confirm-total').textContent=fmt(ci.reduce((s,x)=>s+x.amount,0));
   document.getElementById('overlay').classList.add('show');
+  document.body.style.overflow='hidden'; // กันหน้าหลังเลื่อนทะลุตอนเปิดชีตบน iOS
 }
-function closeConfirm(){document.getElementById('overlay').classList.remove('show');}
+function closeConfirm(){document.getElementById('overlay').classList.remove('show');document.body.style.overflow='';}
 
 async function placeOrder(){
   const ci=cartItems();if(!ci.length)return;
