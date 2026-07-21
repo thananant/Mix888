@@ -1097,6 +1097,7 @@ function initMenuGroups(){
 document.addEventListener('DOMContentLoaded',initMenuGroups);
 if(document.readyState!=='loading')setTimeout(initMenuGroups,0);
 function showPage(p){
+  try{history.replaceState(null,'','#'+p);}catch(e){} // จำหน้าปัจจุบันไว้ใน URL — กด F5 แล้วไม่เด้งกลับภาพรวม
   if(arguments[0]==='cost')setTimeout(costShowLock,0);
   document.querySelectorAll('.page').forEach(e=>e.classList.remove('active'));
   document.querySelectorAll('.mi').forEach(e=>e.classList.toggle('active',e.dataset.page===p));
@@ -5019,6 +5020,10 @@ function enterApp(user){
   document.getElementById('ac-staff').value=user.display_name||user.username;
   document.getElementById('rc-staff').value=user.display_name||user.username;
   startApp();
+  // F5/เปิดใหม่ แล้วกลับหน้าที่ค้างไว้ (อ่านจาก #hash)
+  let hp=(location.hash||'').replace('#','');
+  if(hp==='users'&&user.role!=='admin')hp=''; // staff ห้ามเด้งเข้าหน้าผู้ใช้
+  if(hp&&hp!=='dashboard'&&document.getElementById('page-'+hp))showPage(hp);
 }
 async function loadUsers(){
   if(!currentUser||currentUser.role!=='admin')return;
