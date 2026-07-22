@@ -246,6 +246,15 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div class="card"><h3 class="ct">สินค้าขายออกวันนี้</h3><div style="overflow-x:auto"><table><thead><tr><th>สินค้า</th><th class="num">จำนวน</th><th class="num">ยอดขาย</th></tr></thead><tbody id="d-sold"></tbody></table></div></div>
     <div class="card"><h3 class="ct">ใกล้หมดอายุ (≤ 3 เดือน)</h3><div style="overflow-x:auto"><table><thead><tr><th>สินค้า</th><th class="num">รับเข้า</th><th>หมดอายุ</th></tr></thead><tbody id="d-exp"></tbody></table></div></div>
   </div>
+  <div class="charts" style="margin-top:16px">
+    <div class="card"><h3 class="ct">💰 ลูกหนี้ค้างชำระ (ตามอายุหนี้)</h3>
+      <div id="ar-buckets" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px"></div>
+      <div style="overflow-x:auto;max-height:340px;overflow-y:auto"><table>
+        <thead><tr><th>ร้าน</th><th class="num">บิลค้าง</th><th class="num">ยอดค้าง</th><th class="num">ค้างนานสุด</th></tr></thead>
+        <tbody id="ar-body"></tbody></table></div>
+      <p class="hint" id="ar-note" style="margin-top:8px"></p>
+    </div>
+  </div>
   <div class="card">
     <h3 class="ct">สินค้าใกล้หมด / หมด</h3>
     <div style="overflow-x:auto"><table>
@@ -5561,6 +5570,52 @@ async function delWarehouse(id){
   toast('ลบคลังแล้ว'); loadWarehouse();
 }
 
+/* ==================== ลูกหนี้ค้างชำระ (AR Aging) ==================== */
+const AR_BUCKETS=[{k:'0-7',lo:0,hi:7,c:'#159b78'},{k:'8-15',lo:8,hi:15,c:'#8ba300'},
+  {k:'16-30',lo:16,hi:30,c:'#e07b00'},{k:'31+',lo:31,hi:1e9,c:'#c0201f'}];
+function arDays(d,now){return Math.max(0,Math.floor(((now||Date.now())-new Date(d).getTime())/86400000));}
+function arBucketOf(days){return (AR_BUCKETS.find(b=>days>=b.lo&&days<=b.hi)||AR_BUCKETS[AR_BUCKETS.length-1]).k;}
+/** สรุปหนี้ค้าง: คืน {buckets, shops, total, count} — เรียงร้านตามยอดค้างมากสุด */
+function arSummarize(rows,now){
+  const buckets={},shops={};
+  AR_BUCKETS.forEach(b=>buckets[b.k]={count:0,sum:0});
+  let total=0,count=0;
+  (rows||[]).forEach(b=>{
+    const out=Math.round((Number(b.total)||0)-(Number(b.paid_amount)||0));
+    if(out<=0)return;
+    const days=arDays(b.created_at,now), bk=arBucketOf(days);
+    buckets[bk].count++;buckets[bk].sum+=out;total+=out;count++;
+    const c=b.customers||{},key=c.code||'?';
+    const sh=shops[key]||(shops[key]={code:key,name:c.name||'',branch:c.branch_name||'',bills:0,sum:0,maxDays:0});
+    sh.bills++;sh.sum+=out;if(days>sh.maxDays)sh.maxDays=days;
+  });
+  return {buckets,total,count,shops:Object.values(shops).sort((a,b)=>b.sum-a.sum)};
+}
+async function loadArAging(){
+  const {data,error}=await db.from('bills')
+    .select('total,paid_amount,created_at,payment_status,ship_status,customers(code,name,branch_name)')
+    .neq('payment_status','paid').limit(5000);
+  const box=document.getElementById('ar-buckets'),body=document.getElementById('ar-body'),note=document.getElementById('ar-note');
+  if(error){note.textContent='โหลดข้อมูลลูกหนี้ไม่ได้: '+error.message;return;}
+  const rows=(data||[]).filter(b=>b.ship_status!=='cancelled');
+  const r=arSummarize(rows);
+  box.innerHTML=AR_BUCKETS.map(b=>{
+    const v=r.buckets[b.k];
+    return '<div style="flex:1;min-width:120px;border:1px solid var(--line,#eee);border-left:4px solid '+b.c+';border-radius:10px;padding:8px 10px">'
+      +'<div style="font-size:11.5px;color:var(--muted)">ค้าง '+b.k+' วัน</div>'
+      +'<div style="font-size:17px;font-weight:700;color:'+b.c+'">'+fmt(v.sum)+'</div>'
+      +'<div style="font-size:11.5px;color:var(--muted)">'+v.count+' บิล</div></div>';
+  }).join('');
+  body.innerHTML=r.shops.length?r.shops.slice(0,50).map(s=>{
+    const col=s.maxDays>=31?'#c0201f':s.maxDays>=16?'#e07b00':'var(--muted)';
+    return '<tr><td><b>'+esc(s.code)+'</b> '+esc(s.name)+(s.branch?' <span style="color:var(--muted)">• '+esc(s.branch)+'</span>':'')+'</td>'
+      +'<td class="num">'+s.bills+'</td><td class="num"><b>'+fmt(s.sum)+'</b></td>'
+      +'<td class="num" style="color:'+col+'">'+s.maxDays+' วัน</td></tr>';
+  }).join(''):'<tr><td colspan="4" style="color:var(--muted)">ไม่มีบิลค้างชำระ 🎉</td></tr>';
+  note.textContent='รวม '+r.count+' บิล ยอดค้าง '+fmt(r.total)+' จาก '+r.shops.length+' ร้าน'
+    +(r.shops.length>50?' (แสดง 50 ร้านแรก เรียงตามยอดค้างมากสุด)':'')+' · นับอายุจากวันที่ออกบิล';
+}
+
 /* ==================== สำรองข้อมูล ==================== */
 const BACKUP_TABLES=['customers','products','customer_prices','orders','order_items','bills',
  'sales','warehouses','stock','stock_lots','stock_movements','stock_receives','stock_receive_items',
@@ -5679,18 +5734,10 @@ async function loadCRM(){
 
 /* ==================== เริ่มต้น ==================== */
 async function startApp(){
-  await loadSettings(); // ต้องมาก่อนทุกอย่าง: เวลาตัดรอบ/กลุ่มไลน์กลาง/ชื่อร้าน ใช้ค่าจากนี่
-  await loadProducts();
-  await loadCustomers();
-  await loadSales();
-  await loadOrders();
-  await loadBills();
-  loadRcvHistory();
-  loadUsers();
-  await loadWhList();
-  loadTransfers();
-  loadQuotes();
-  loadSkuCats();
+  await loadSettings();                                   // ต้องมาก่อน: เวลาตัดรอบ/กลุ่มไลน์กลาง/ชื่อร้าน
+  await Promise.all([loadProducts(),loadCustomers(),loadSales(),loadWhList()]);  // ข้อมูลหลัก โหลดพร้อมกัน
+  await Promise.all([loadOrders(),loadBills()]);          // ตัวที่ใช้ข้อมูลหลักข้างบน
+  loadRcvHistory();loadUsers();loadTransfers();loadQuotes();loadSkuCats();loadArAging();
   setRange('month');
 }
 (async function(){
