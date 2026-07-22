@@ -889,6 +889,12 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-p" onclick="saveSettings()">บันทึกตั้งค่า</button>
     </div>
     <p class="hint">กลุ่มกลาง = กลุ่มทีมภายใน (ต่างจากกลุ่มลูกค้าแต่ละราย) ไว้รับแจ้งเตือนออเดอร์ใหม่และสรุปออเดอร์รายวันสำหรับจัดส่ง</p>
+    <h3 class="ct" style="margin-top:18px">💾 สำรองข้อมูล</h3>
+    <div class="row" style="align-items:center">
+      <button class="btn-p" id="bk-btn" onclick="downloadBackup(this)">⬇️ ดาวน์โหลดไฟล์สำรอง</button>
+      <span id="bk-status" style="font-size:12.5px;color:var(--muted)"></span>
+    </div>
+    <p class="hint">ดึงข้อมูลทุกตารางเป็นไฟล์เดียวเก็บไว้ในเครื่อง/ไดรฟ์ — แนะนำทำสัปดาห์ละครั้ง (ไม่รวมรูปภาพในสตอเรจ)</p>
     <h3 class="ct" style="margin-top:18px">🧾 ข้อมูลบนหัวบิล</h3>
     <div class="row">
       <div style="min-width:150px"><label>ชื่อร้าน</label><input id="st-shopname" style="width:100%" placeholder="Mixfresh"></div>
@@ -2901,7 +2907,7 @@ async function makeBill(orderId,btn,sendLine){
     const cv=result.cv;
     const blob=await new Promise(res=>cv.toBlob(res,'image/png'));
 
-    const path=billNo+'.png';
+    const path=billNo+'-'+rndTag(10)+'.png';
     const {error:upErr}=await db.storage.from('bills').upload(path,blob,{contentType:'image/png',upsert:true});
     if(upErr)throw new Error('อัพรูปไม่สำเร็จ: '+upErr.message);
     const {data:pub}=db.storage.from('bills').getPublicUrl(path);
@@ -3810,7 +3816,7 @@ async function makeQuote(btn,modeOut){
       const c=customers.find(x=>x.id===custId);
       if(!c?.line_group_id)throw new Error('ลูกค้ายังไม่ผูกกลุ่ม LINE');
       const blob=await new Promise(res=>cv.toBlob(res,'image/png'));
-      const path=qtNo+'.png';
+      const path=qtNo+'-'+rndTag(10)+'.png';
       const {error:ue}=await db.storage.from('bills').upload(path,blob,{contentType:'image/png',upsert:true});
       if(ue)throw new Error(ue.message);
       const url=db.storage.from('bills').getPublicUrl(path).data.publicUrl;
@@ -4853,7 +4859,7 @@ async function saveEditBill(btn){
       .eq('id',o.id).single();
     const result=await drawBill(o2,b.bill_no,{shipFee:ship,discount:disc,grand,revision:newRev,docType:b.doc_type||'บิลเงินสด'});
     const blob=await new Promise(res=>result.cv.toBlob(res,'image/png'));
-    const path=b.bill_no+'_v'+newRev+'.png';
+    const path=b.bill_no+'_v'+newRev+'-'+rndTag(10)+'.png';
     const {error:upErr}=await db.storage.from('bills').upload(path,blob,{contentType:'image/png',upsert:true});
     if(upErr)throw new Error('อัพรูปบิลไม่สำเร็จ: '+upErr.message);
     const imageUrl=db.storage.from('bills').getPublicUrl(path).data.publicUrl;
@@ -5150,7 +5156,7 @@ async function confirmPaid(btn){
     const f=document.getElementById('sp-file');
     if(f.files[0]){
       const ext=(f.files[0].name.split('.').pop()||'jpg').toLowerCase();
-      const path='slip_'+b.bill_no+'_'+Date.now()+'.'+ext;
+      const path='slip_'+b.bill_no+'_'+Date.now()+'-'+rndTag(10)+'.'+ext;
       const {error:se}=await db.storage.from('slips').upload(path,f.files[0],{upsert:true});
       if(se)throw new Error('อัพสลิปไม่สำเร็จ: '+se.message+' (เช็คว่าสร้าง bucket slips แล้ว)');
       slipUrl=db.storage.from('slips').getPublicUrl(path).data.publicUrl;
@@ -5227,6 +5233,11 @@ async function unmarkPaid(id){
   toast('ยกเลิกรับยอด '+b.bill_no+' แล้ว');
   loadBills();
 }
+
+/* สุ่มรหัสต่อท้ายชื่อไฟล์ในสตอเรจ — กันคนไล่เดาเลขบิลแล้วโหลดรูปบิลคนอื่น */
+function rndTag(n){const c='abcdefghijklmnopqrstuvwxyz0123456789';let o='';
+  const a=new Uint8Array(n||10);(crypto&&crypto.getRandomValues)?crypto.getRandomValues(a):a.forEach((_,i)=>a[i]=Math.floor(Math.random()*256));
+  for(let i=0;i<a.length;i++)o+=c[a[i]%c.length];return o;}
 
 /* ==================== Login / ผู้ใช้ ==================== */
 let currentUser=null, users=[], editUserName=null;
@@ -5548,6 +5559,49 @@ async function delWarehouse(id){
   const {error}=await db.from('warehouses').update({active:false}).eq('id',id);
   if(error){toast('ลบไม่สำเร็จ: '+error.message);return;}
   toast('ลบคลังแล้ว'); loadWarehouse();
+}
+
+/* ==================== สำรองข้อมูล ==================== */
+const BACKUP_TABLES=['customers','products','customer_prices','orders','order_items','bills',
+ 'sales','warehouses','stock','stock_lots','stock_movements','stock_receives','stock_receive_items',
+ 'transfers','transfer_items','stock_counts','stock_adjustments','conversions','quotations',
+ 'sku_categories','settings','app_users','summary_log'];
+async function fetchAllRows(t){                      // ดึงทีละ 1000 แถวจนหมด (ไม่ชนลิมิต)
+  const out=[];let from=0;const step=1000;
+  for(;;){
+    const {data,error}=await db.from(t).select('*').range(from,from+step-1);
+    if(error)return {rows:out,error:error.message};
+    out.push(...(data||[]));
+    if(!data||data.length<step)return {rows:out};
+    from+=step;
+  }
+}
+function scrubBackup(t,rows){                        // ไม่เอารหัสผ่านออกไปกับไฟล์สำรอง
+  if(t!=='app_users')return rows;
+  return rows.map(r=>{const c={...r};delete c.password_hash;return c;});
+}
+async function downloadBackup(btn){
+  btn.disabled=true;const st=document.getElementById('bk-status');
+  const out={_meta:{at:new Date().toISOString(),by:currentUser?.display_name||currentUser?.username||'',counts:{},failed:{}}};
+  for(let i=0;i<BACKUP_TABLES.length;i++){
+    const t=BACKUP_TABLES[i];
+    btn.textContent='กำลังสำรอง '+(i+1)+'/'+BACKUP_TABLES.length+'…';
+    st.textContent=t;
+    const r=await fetchAllRows(t);
+    if(r.error)out._meta.failed[t]=r.error;
+    out[t]=scrubBackup(t,r.rows);
+    out._meta.counts[t]=r.rows.length;
+  }
+  const total=Object.values(out._meta.counts).reduce((a,b)=>a+b,0);
+  const d=new Date(),pad=n=>String(n).padStart(2,'0');
+  const name='mixfresh-backup-'+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'-'+pad(d.getHours())+pad(d.getMinutes())+'.json';
+  const url=URL.createObjectURL(new Blob([JSON.stringify(out)],{type:'application/json'}));
+  const a=document.createElement('a');a.href=url;a.download=name;a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),4000);
+  btn.disabled=false;btn.textContent='⬇️ ดาวน์โหลดไฟล์สำรอง';
+  const bad=Object.keys(out._meta.failed);
+  st.textContent='สำรองแล้ว '+total.toLocaleString()+' แถว'+(bad.length?' · พลาด: '+bad.join(', '):' ✓');
+  toast(bad.length?'สำรองเสร็จ แต่มีตารางพลาด: '+bad.join(', '):'สำรองข้อมูลครบ '+total.toLocaleString()+' แถวแล้ว ✓');
 }
 
 /* ==================== ตั้งค่าระบบ ==================== */
