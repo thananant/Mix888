@@ -5231,7 +5231,31 @@ async function unmarkPaid(id){
 /* ==================== Login / ผู้ใช้ ==================== */
 let currentUser=null, users=[], editUserName=null;
 
-function doLogout(){
+const AUTH_DOMAIN='@mf168.local';
+function authEmail(u){return String(u||'').trim().toLowerCase()+AUTH_DOMAIN;}
+const USER_COLS='id,username,display_name,role,active,auth_uid';
+/* ล็อกอินจริงผ่าน Supabase Auth — คืน row ของ app_users ถ้าผ่าน, null ถ้าไม่ผ่าน (แล้วไปใช้วิธีสำรอง) */
+async function authLogin(u,p){
+  try{
+    const {data,error}=await db.auth.signInWithPassword({email:authEmail(u),password:p});
+    if(error||!data||!data.user)return null;
+    const uid=data.user.id, uname=String(u).trim().toLowerCase();
+    let r=await db.from('app_users').select(USER_COLS).eq('auth_uid',uid).limit(1);
+    let rows=r.data;
+    if(!rows||!rows.length){                       // ครั้งแรก: ยังไม่ผูก → หาโดยชื่อผู้ใช้แล้วผูกให้อัตโนมัติ
+      const r2=await db.from('app_users').select(USER_COLS).eq('username',uname).limit(1);
+      rows=r2.data;
+      if(rows&&rows.length&&!rows[0].auth_uid){
+        await db.from('app_users').update({auth_uid:uid}).eq('id',rows[0].id);
+        rows[0].auth_uid=uid;
+      }
+    }
+    if(!rows||!rows.length||!rows[0].active){await db.auth.signOut();return null;}
+    return rows[0];
+  }catch(e){console.warn('authLogin:',e);return null;}
+}
+async function doLogout(){
+  try{await db.auth.signOut();}catch(e){}
   localStorage.removeItem('mix888_user');
   location.reload();
 }
@@ -5242,7 +5266,9 @@ async function doLogin(){
   if(!u||!p){err.textContent='กรอกชื่อผู้ใช้และรหัสผ่าน';err.style.display='block';return;}
   const btn=document.getElementById('lg-btn');
   btn.disabled=true;btn.textContent='กำลังตรวจสอบ…';
-  const {data,error}=await db.rpc('app_login',{p_username:u,p_password:p});
+  const au=await authLogin(u,p);                    // 1) ล็อกอินจริง (Supabase Auth)
+  if(au){btn.disabled=false;btn.textContent='เข้าสู่ระบบ';localStorage.setItem('mix888_user',JSON.stringify(au));enterApp(au);return;}
+  const {data,error}=await db.rpc('app_login',{p_username:u,p_password:p});  // 2) สำรอง: วิธีเดิม
   btn.disabled=false;btn.textContent='เข้าสู่ระบบ';
   if(error){err.textContent='เชื่อมต่อไม่ได้: '+error.message;err.style.display='block';return;}
   if(!data){err.textContent='ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';err.style.display='block';return;}
@@ -5608,9 +5634,16 @@ async function startApp(){
   loadSkuCats();
   setRange('month');
 }
-(function(){
+(async function(){
   initRtimeSelects();
-  try{
+  try{                                              // 1) มีตั๋ว Auth ที่ยังไม่หมดอายุไหม
+    const {data:sess}=await db.auth.getSession();
+    if(sess&&sess.session&&sess.session.user){
+      const {data:rows}=await db.from('app_users').select(USER_COLS).eq('auth_uid',sess.session.user.id).limit(1);
+      if(rows&&rows.length&&rows[0].active){localStorage.setItem('mix888_user',JSON.stringify(rows[0]));enterApp(rows[0]);return;}
+    }
+  }catch(e){console.warn('auth restore:',e);}
+  try{                                              // 2) สำรอง: ค่าที่จำไว้แบบเดิม
     const saved=localStorage.getItem('mix888_user');
     if(saved){enterApp(JSON.parse(saved));return;}
   }catch(e){}
