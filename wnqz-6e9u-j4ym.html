@@ -540,7 +540,15 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <input type="time" id="bill-cutoff" style="width:110px" title="สรุปออเดอร์และลำดับออเดอร์/วัน จะนับตามรอบนี้ เช่น 18:00 = รอบเมื่อวาน 18:00 → วันนี้ 18:00">
       <button class="btn-g mini" onclick="saveCutoff()">บันทึกรอบ</button>
       <button class="btn-s" onclick="sendDailySummary(this)">📋 ส่งสรุปออเดอร์รอบนี้เข้าไลน์กลาง</button>
+      <span style="border-left:1px solid var(--line,#ddd);height:22px"></span>
+      <label style="font-size:13px;color:var(--muted)">กำหนดเอง</label>
+      <input type="datetime-local" id="cs-from" style="width:172px">
+      <span style="color:var(--muted)">→</span>
+      <input type="datetime-local" id="cs-to" style="width:172px">
+      <button class="btn-s" onclick="sendCustomSummary(this)">📤 ส่งสรุปช่วงนี้</button>
+      <button class="btn-g mini" onclick="toggleSumLog()">🕘 ประวัติการส่งสรุป</button>
     </div></div>
+  <div id="sumlog-box" style="display:none;margin-bottom:12px"></div>
   <div id="orders-list"></div>
 </div>
 
@@ -2950,9 +2958,19 @@ function cutoffRange(ref){
   else{end=boundary;start=new Date(boundary.getTime()-86400000);}
   return {start,end};
 }
+function toLocalInput(d){const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes());}
+function csParseRange(f,t){
+  if(!f||!t)return{err:'เลือกวัน-เวลา จาก/ถึง ให้ครบก่อน'};
+  const start=new Date(f),end=new Date(t);
+  if(isNaN(start)||isNaN(end))return{err:'รูปแบบวัน-เวลาไม่ถูกต้อง'};
+  if(start>=end)return{err:'เวลาเริ่มต้องมาก่อนเวลาสิ้นสุด'};
+  return{start,end,days:(end-start)/86400000};
+}
 function initCutoffInput(){
   const el=document.getElementById('bill-cutoff');
   if(el&&!el.dataset.init){el.value=appSettings.bill_cutoff||'00:00';el.dataset.init='1';}
+  const f=document.getElementById('cs-from'),t=document.getElementById('cs-to');
+  if(f&&t&&!f.value){const r=cutoffRange(new Date());f.value=toLocalInput(r.start);t.value=toLocalInput(r.end);}
 }
 async function saveCutoff(){
   const v=document.getElementById('bill-cutoff').value;
@@ -2979,17 +2997,26 @@ function dsChunks(blocks,lim){
   return msgs;
 }
 async function sendDailySummary(btn){
+  const cyc=cutoffRange(new Date());
+  return sendSummaryRange(btn,cyc.start,cyc.end,'auto');
+}
+async function sendCustomSummary(btn){
+  const r=csParseRange(document.getElementById('cs-from').value,document.getElementById('cs-to').value);
+  if(r.err){toast(r.err);return;}
+  if(r.days>31&&!confirm('ช่วงที่เลือกยาว '+Math.round(r.days)+' วัน ออเดอร์อาจเยอะมาก ส่งเลยไหม?'))return;
+  return sendSummaryRange(btn,r.start,r.end,'custom');
+}
+async function sendSummaryRange(btn,rStart,rEnd,mode){
   if(!appSettings.line_central_group){
     toast('ยังไม่ได้ตั้ง LINE กลุ่มกลาง — ไปตั้งในหน้าผู้ใช้ก่อน');return;
   }
-  btn.disabled=true;btn.textContent='กำลังดึงออเดอร์…';
-  const cyc=cutoffRange(new Date());
+  btn.dataset.t=btn.textContent;btn.disabled=true;btn.textContent='กำลังดึงออเดอร์…';
   const {data:raw,error}=await db.from('orders')
     .select(`order_no,created_at,total,status,
       customers(code,name,sale_name,contact_name,phone,billing_address,map_link,receive_time,note,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address),
       order_items(qty,products(name,unit)),
       bills(bill_no,ship_status)`)
-    .gte('created_at',cyc.start.toISOString()).lt('created_at',cyc.end.toISOString()).neq('status','cancelled')
+    .gte('created_at',rStart.toISOString()).lt('created_at',rEnd.toISOString()).neq('status','cancelled')
     .order('delivery_method',{foreignTable:'customers',ascending:true});
   // ตัดออเดอร์ที่ "ส่งแล้ว" หรือบิลถูก "ยกเลิก" — สรุปเฉพาะที่รอจัดส่งจริง
   const data=(raw||[]).filter(o=>{
@@ -2998,9 +3025,9 @@ async function sendDailySummary(btn){
     if(bs.some(b=>b.ship_status==='shipped')) return false;
     return true;
   });
-  btn.disabled=false;btn.textContent='📋 ส่งสรุปออเดอร์รอบนี้เข้าไลน์กลาง';
+  btn.disabled=false;btn.textContent=btn.dataset.t;
   if(error){toast('ดึงออเดอร์ไม่สำเร็จ: '+error.message);return;}
-  if(!data.length){toast('รอบนี้ไม่มีออเดอร์ที่รอจัดส่ง (ส่งแล้ว/ยกเลิก ไม่นำมาสรุป)');return;}
+  if(!data.length){toast('ช่วงนี้ไม่มีออเดอร์ที่รอจัดส่ง (ส่งแล้ว/ยกเลิก ไม่นำมาสรุป)');return;}
 
   // จัดกลุ่มตามวิธีจัดส่ง
   const groups={};
@@ -3008,7 +3035,8 @@ async function sendDailySummary(btn){
     const m=o.customers?.delivery_method||'อื่นๆ';
     (groups[m]=groups[m]||[]).push(o);
   });
-  const dateStr=new Date().toLocaleDateString('th-TH',{day:'2-digit',month:'2-digit',year:'numeric'});
+  const fD=d=>d.toLocaleDateString('th-TH',{day:'2-digit',month:'2-digit',year:'numeric'});
+  const dateStr=mode==='custom'?fD(rStart)+' - '+fD(rEnd):fD(new Date());
   const blocks=[];
   for(const [method,list] of Object.entries(groups)){
     const head='━━━━━━━━━━━━━━\n📦 ออเดอร์ '+method+' '+dateStr+'\n━━━━━━━━━━━━━━';
@@ -3038,13 +3066,48 @@ async function sendDailySummary(btn){
     const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
       to:appSettings.line_central_group, messages:msgs.slice(i,i+5).map(text=>({type:'text',text}))}});
     if(fnErr||!res||res.status!==200){
-      btn.disabled=false;btn.textContent='📋 ส่งสรุปออเดอร์รอบนี้เข้าไลน์กลาง';
+      btn.disabled=false;btn.textContent=btn.dataset.t;
       toast('ส่งไม่สำเร็จช่วงข้อความ '+(i+1)+'-'+Math.min(i+5,msgs.length)+': '+(fnErr?.message||JSON.stringify(res))+' (ที่ส่งไปแล้ว '+i+' ข้อความถึงกลุ่มเรียบร้อย)');return;
     }
     if(i+5<msgs.length) await new Promise(r=>setTimeout(r,400));
   }
-  btn.disabled=false;btn.textContent='📋 ส่งสรุปออเดอร์รอบนี้เข้าไลน์กลาง';
+  btn.disabled=false;btn.textContent=btn.dataset.t;
+  // บันทึกประวัติ: ใครส่ง ช่วงไหน มีออเดอร์อะไรบ้าง
+  try{
+    const detail=data.map(o=>({order_no:o.order_no,bill_no:((o.bills||[]).find(b=>b.ship_status!=='cancelled')||{}).bill_no||null,
+      customer:((o.customers&&o.customers.code)?o.customers.code+' ':'')+((o.customers&&o.customers.name)||''),
+      method:(o.customers&&o.customers.delivery_method)||'อื่นๆ',total:o.total}));
+    await db.from('summary_log').insert({sent_by:currentUser?.display_name||currentUser?.username||null,
+      mode,range_start:rStart.toISOString(),range_end:rEnd.toISOString(),
+      order_count:data.length,msg_count:msgs.length,detail});
+    if(document.getElementById('sumlog-box').style.display!=='none')loadSumLog();
+  }catch(e){console.warn('summary_log:',e);}
   toast('ส่งสรุป '+data.length+' ออเดอร์ ('+msgs.length+' ข้อความ) เข้าไลน์กลางแล้ว ✓');
+}
+/* ---- ประวัติการส่งสรุป ---- */
+function renderSumLog(rows){
+  if(!rows||!rows.length)return '<div style="padding:12px;color:var(--muted)">ยังไม่มีประวัติการส่งสรุป</div>';
+  const f=d=>new Date(d).toLocaleString('th-TH',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+  return rows.map(r=>{
+    const items=(r.detail||[]).map(d=>'<tr><td>'+esc(d.order_no||'-')+'</td><td>'+esc(d.bill_no||'-')+'</td><td>'+esc(d.customer||'-')+'</td><td>'+esc(d.method||'')+'</td><td style="text-align:right">'+fmt(d.total||0)+'</td></tr>').join('');
+    return '<details style="border:1px solid var(--line,#eee);border-radius:10px;padding:8px 12px;margin-bottom:8px;background:#fff">'
+      +'<summary style="cursor:pointer;font-size:13.5px">🕘 ส่งเมื่อ '+f(r.created_at)+(r.sent_by?' โดย '+esc(r.sent_by):'')
+      +' · '+(r.mode==='custom'?'กำหนดเอง':'รอบตัดอัตโนมัติ')+' '+f(r.range_start)+' → '+f(r.range_end)
+      +' · <b>'+r.order_count+' ออเดอร์</b> / '+r.msg_count+' ข้อความ</summary>'
+      +'<div style="overflow-x:auto;margin-top:8px"><table style="width:100%;font-size:12.5px"><tr><th style="text-align:left">ออเดอร์</th><th style="text-align:left">บิล</th><th style="text-align:left">ร้าน</th><th style="text-align:left">จัดส่ง</th><th style="text-align:right">ยอด</th></tr>'+items+'</table></div></details>';
+  }).join('');
+}
+async function loadSumLog(){
+  const box=document.getElementById('sumlog-box');
+  box.innerHTML='<div style="padding:12px;color:var(--muted)">กำลังโหลด…</div>';
+  const {data,error}=await db.from('summary_log').select('*').order('created_at',{ascending:false}).limit(30);
+  if(error){box.innerHTML='<div style="padding:12px;color:#c0201f">โหลดประวัติไม่ได้: '+esc(error.message)+' (รัน summary_log.sql หรือยัง?)</div>';return;}
+  box.innerHTML=renderSumLog(data);
+}
+function toggleSumLog(){
+  const box=document.getElementById('sumlog-box');
+  if(box.style.display==='none'){box.style.display='block';loadSumLog();}
+  else box.style.display='none';
 }
 
 /* ==================== รับสินค้า ==================== */
