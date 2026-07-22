@@ -222,9 +222,7 @@ function showError(msg){
 
 async function init(){
   if(!token){showError('ลิงก์ไม่ครบถ้วน กรุณาใช้ลิงก์ที่ทางร้านส่งให้ในกลุ่ม LINE');return;}
-  const {data,error}=await db.from('customers')
-    .select('id,code,name,line_group_id,sale_name,contact_name,phone,billing_address,map_link,receive_time,note,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address')
-    .eq('order_token',token).eq('active',true).maybeSingle();
+  const {data,error}=await db.rpc('get_customer_by_token',{p_token:token});
   if(error||!data){showError('ลิงก์ไม่ถูกต้องหรือถูกยกเลิกแล้ว กรุณาติดต่อทางร้าน');return;}
   customer=data;
   document.getElementById('cust-name').textContent=customer.name+' ('+customer.code+')';
@@ -427,9 +425,7 @@ function histRange(r){
   renderHistory();
 }
 async function loadHistory(){
-  const {data,error}=await db.from('orders')
-    .select('id,order_no,total,status,created_at, bills(bill_no,ship_status,payment_status,line_sent)')
-    .eq('customer_id',customer.id).order('created_at',{ascending:false}).limit(500);
+  const {data,error}=await db.rpc('get_customer_orders',{p_token:token});
   if(error){console.warn(error);return;}
   allOrders=data||[];
   if(!document.getElementById('h-from').value && !document.getElementById('h-to').value){
@@ -508,6 +504,8 @@ function subscribeOrders(){
     .on('postgres_changes',{event:'*',schema:'public',table:'orders',filter:'customer_id=eq.'+customer.id},refreshHistorySoon)
     .on('postgres_changes',{event:'*',schema:'public',table:'bills',filter:'customer_id=eq.'+customer.id},refreshHistorySoon)
     .subscribe();
+  // ตาราง orders/bills ถูกล็อกด้วย RLS แล้ว realtime จะไม่ส่งให้ลูกค้า → เช็คสถานะซ้ำทุก 60 วิ (เฉพาะตอนเปิดหน้าอยู่)
+  setInterval(()=>{ if(!document.hidden) refreshHistorySoon(); }, 60000);
 }
 function subscribeStock(){
   db.channel('stock-live')
