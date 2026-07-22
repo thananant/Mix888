@@ -139,6 +139,8 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   .charts{grid-template-columns:1fr}
 }
 </style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 </head>
 <body>
 
@@ -181,6 +183,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <div class="mi" data-page="pricing" onclick="showPage('pricing')"><span class="ic">🏷️</span>จัดสินค้า</div>
         <div class="mi" data-page="shipcalc" onclick="showPage('shipcalc')"><span class="ic">🚚</span>คำนวณค่าส่ง</div>
         <div class="mi" data-page="crm" onclick="showPage('crm')"><span class="ic">📇</span>ลูกค้า CRM</div>
+        <div class="mi" data-page="custmap" onclick="showPage('custmap')"><span class="ic">🗺️</span>แผนที่ลูกค้า</div>
       </div>
     </div>
 
@@ -477,6 +480,21 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 </div>
 
 <!-- ============ จัดสินค้าให้ลูกค้า ============ -->
+<div class="page" id="page-custmap">
+  <div class="pagehead"><h2>🗺️ แผนที่ลูกค้า</h2><span class="date">หมุดขนาด/สีตามยอดขายในช่วงที่เลือก · คลิกหมุดดูรายละเอียด</span></div>
+  <div style="background:#fff;border:1px solid var(--line,#eee);border-radius:14px;padding:14px">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <select id="cm-days" onchange="cmChangeDays()"><option value="30">ยอด 30 วัน</option><option value="90" selected>ยอด 90 วัน</option><option value="365">ยอด 1 ปี</option><option value="0">ยอดทั้งหมด</option></select>
+      <select id="cm-sale" onchange="cmRender()" style="min-width:140px"><option value="">เซลล์ทุกคน</option></select>
+      <label style="font-size:13px"><input type="checkbox" id="cm-hasrev" onchange="cmRender()"> เฉพาะร้านที่มียอด</label>
+      <button class="btn-g" id="cm-geo-btn" onclick="cmGeocodeAll()">📍 หาพิกัดร้านที่ยังไม่มี</button>
+      <span id="cm-geo-progress" style="font-size:12.5px;color:var(--muted,#999)"></span>
+      <span id="cm-count" style="font-size:12.5px;color:var(--muted,#999);margin-left:auto"></span>
+    </div>
+    <div style="font-size:12px;color:var(--muted,#999);margin-top:6px">🔴 ยอดสูง (≥60% ของร้านท็อป) · 🟠 ปานกลาง (≥25%) · 🟢 มียอด · ⚪ ไม่มียอดในช่วงนี้ · ขนาดหมุด = ยอดขาย</div>
+    <div id="cm-map" style="height:72vh;min-height:420px;border-radius:12px;margin-top:10px;border:1px solid var(--line,#eee)"></div>
+  </div>
+</div>
 <div class="page" id="page-pricing">
   <div class="pagehead"><h2>จัดสินค้าให้ลูกค้า</h2></div>
   <div class="card">
@@ -1105,6 +1123,7 @@ function showPage(p){
   document.getElementById('page-'+p).classList.add('active');
   if(p==='dashboard') loadDashboard();
   if(p==='crm') loadCRM();
+  if(p==='custmap') loadCustMap();
   if(p==='pricing') fillCustomerSelect();
   if(p==='sales') renderSales();
   if(p==='orders') loadOrders();
@@ -1113,6 +1132,118 @@ function showPage(p){
   if(p==='warehouse') loadWarehouse();
   if(p==='skucat') loadSkuCatPage();
   if(p==='users') loadUsers();
+}
+
+/* ==================== แผนที่ลูกค้า ==================== */
+let cmMap=null,cmLayer=null,cmRevenue={},cmGeoBusy=false;
+function cmParseMapLink(ml){ // ดึงพิกัดจากลิงก์ Google Maps แบบเต็ม (ลิงก์ย่อ goo.gl อ่านไม่ได้)
+  ml=String(ml||'');
+  const m=ml.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/)
+        ||ml.match(/[?&]q=(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/)
+        ||ml.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+  if(!m)return null;
+  const lat=+m[1],lng=+m[2];
+  if(lat<4||lat>21||lng<96||lng>106.5)return null; // นอกเขตไทย = ลิงก์เพี้ยน
+  return{lat,lng,src:'maplink'};
+}
+function cmAddrText(c,level){ // 0=ระดับถนน/ตำบล · 1=หยาบ อำเภอ+จังหวัด
+  const g=k=>String(c['ship_'+k]||c['bill_'+k]||'').trim();
+  if(level===0)return [g('road'),g('subdistrict'),g('district'),g('province'),g('postcode')].filter(Boolean).join(' ');
+  return [g('district'),g('province')].filter(Boolean).join(' ');
+}
+function cmAggRevenue(rows){ // รวมยอดขายต่อลูกค้า (ตัดบิลยกเลิก)
+  const out={};
+  (rows||[]).forEach(b=>{
+    if(b.ship_status==='cancelled')return;
+    const o=out[b.customer_id]||(out[b.customer_id]={sum:0,count:0});
+    o.sum+=Number(b.total)||0;o.count++;
+  });
+  return out;
+}
+function cmMarkerStyle(v,max){
+  if(v<=0)return{r:4,c:'#b9a8a0'};
+  const t=v/Math.max(1,max);
+  return{r:5+Math.round(17*Math.sqrt(t)),c:t>=0.6?'#c0201f':t>=0.25?'#e07b00':'#159b78'};
+}
+async function loadCustMap(){
+  if(typeof L==='undefined'){toast('โหลดไลบรารีแผนที่ไม่ขึ้น ลองรีเฟรช/เช็คเน็ต');return;}
+  if(!cmMap){
+    cmMap=L.map('cm-map').setView([13.75,100.52],10);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(cmMap);
+    cmLayer=L.layerGroup().addTo(cmMap);
+    const names=[...new Set(customers.map(c=>c.sale_name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'th'));
+    document.getElementById('cm-sale').innerHTML='<option value="">เซลล์ทุกคน</option>'+names.map(n=>'<option>'+esc(n)+'</option>').join('');
+  }
+  setTimeout(()=>cmMap.invalidateSize(),80);
+  await cmLoadRevenue();
+  cmRender();
+}
+async function cmLoadRevenue(){
+  const days=Number(document.getElementById('cm-days').value)||0;
+  let q=db.from('bills').select('customer_id,total,ship_status,created_at').limit(20000);
+  if(days>0){const d=new Date();d.setDate(d.getDate()-days);q=q.gte('created_at',d.toISOString());}
+  const {data,error}=await q;
+  if(error){toast('โหลดยอดขายไม่ได้: '+error.message);return;}
+  cmRevenue=cmAggRevenue(data);
+}
+async function cmChangeDays(){await cmLoadRevenue();cmRender();}
+function cmRender(){
+  if(!cmMap)return;
+  cmLayer.clearLayers();
+  const saleF=document.getElementById('cm-sale').value;
+  const onlyRev=document.getElementById('cm-hasrev').checked;
+  const pts=customers.filter(c=>c.lat&&c.lng)
+    .filter(c=>!saleF||c.sale_name===saleF)
+    .map(c=>({c,rev:cmRevenue[c.id]||{sum:0,count:0}}))
+    .filter(x=>!onlyRev||x.rev.sum>0);
+  const max=Math.max(1,...pts.map(x=>x.rev.sum));
+  pts.forEach(x=>{
+    const st=cmMarkerStyle(x.rev.sum,max);
+    const m=L.circleMarker([x.c.lat,x.c.lng],{radius:st.r,color:st.c,fillColor:st.c,fillOpacity:.72,weight:1});
+    m.bindPopup('<b>'+esc(x.c.code+' '+x.c.name+(x.c.branch_name?' \u2022 '+x.c.branch_name:''))+'</b>'
+      +'<br>ยอดขายช่วงนี้: <b>'+fmt(x.rev.sum)+'</b> ('+x.rev.count+' บิล)'
+      +(x.c.sale_name?'<br>เซลล์: '+esc(x.c.sale_name):'')
+      +'<br><span style="color:#888;font-size:11px">พิกัดจาก: '+(x.c.geo_src==='maplink'?'ลิงก์แผนที่ (แม่นสุด)':x.c.geo_src==='district'?'ระดับอำเภอ (คร่าว)':'ที่อยู่')+'</span>');
+    cmLayer.addLayer(m);
+  });
+  const noGeo=customers.filter(c=>!(c.lat&&c.lng)).length;
+  document.getElementById('cm-count').textContent=pts.length+' หมุด'+(noGeo?' · ยังไม่มีพิกัด '+noGeo+' ร้าน':'');
+}
+function cmSleep(ms){return new Promise(r=>setTimeout(r,ms));}
+async function cmNominatim(qtext){
+  if(!qtext)return null;
+  const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=th&q='+encodeURIComponent(qtext));
+  if(!r.ok)return null;
+  const j=await r.json().catch(()=>null);
+  if(!(j&&j[0]))return null;
+  const lat=+j[0].lat,lng=+j[0].lon;
+  if(lat<4||lat>21||lng<96||lng>106.5)return null;
+  return{lat,lng};
+}
+async function cmGeocodeAll(){
+  if(cmGeoBusy)return;
+  const list=customers.filter(c=>!(c.lat&&c.lng));
+  if(!list.length){toast('ทุกร้านมีพิกัดครบแล้ว');return;}
+  if(!confirm('หาพิกัดให้ '+list.length+' ร้านที่ยังไม่มีพิกัด\nใช้เวลาราว '+Math.ceil(list.length*1.2/60)+' นาที — เปิดหน้านี้ทิ้งไว้จนจบ\n(ร้านที่มีลิงก์แผนที่แบบเต็มจะได้พิกัดแม่นทันที ที่เหลือค้นจากที่อยู่)\n\nเริ่มเลย?'))return;
+  cmGeoBusy=true;const btn=document.getElementById('cm-geo-btn');btn.disabled=true;
+  const prog=document.getElementById('cm-geo-progress');
+  let ok=0,miss=0,i=0;
+  for(const c of list){
+    i++;prog.textContent='📍 '+i+'/'+list.length+' — '+c.code;
+    let g=cmParseMapLink(c.map_link);
+    try{
+      if(!g){const r0=await cmNominatim(cmAddrText(c,0));await cmSleep(1100);if(r0)g={...r0,src:'addr'};}
+      if(!g){const r1=await cmNominatim(cmAddrText(c,1));await cmSleep(1100);if(r1)g={...r1,src:'district'};}
+    }catch(e){}
+    if(g){
+      const {error}=await db.from('customers').update({lat:g.lat,lng:g.lng,geo_src:g.src}).eq('id',c.id);
+      if(!error){c.lat=g.lat;c.lng=g.lng;c.geo_src=g.src;ok++;}else miss++;
+    }else miss++;
+    if(i%10===0)cmRender();
+  }
+  cmGeoBusy=false;btn.disabled=false;prog.textContent='';
+  cmRender();
+  toast('📍 เสร็จ: ได้พิกัด '+ok+' ร้าน'+(miss?' · หาไม่เจอ '+miss+' ร้าน — เพิ่มลิงก์ Google Maps แบบเต็มในหน้าลูกค้า แล้วกดปุ่มนี้ซ้ำ':''));
 }
 
 /* ==================== ภาพรวม ==================== */
