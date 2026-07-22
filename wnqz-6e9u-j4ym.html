@@ -5243,11 +5243,16 @@ async function authLogin(u,p){
     let r=await db.from('app_users').select(USER_COLS).eq('auth_uid',uid).limit(1);
     let rows=r.data;
     if(!rows||!rows.length){                       // ครั้งแรก: ยังไม่ผูก → หาโดยชื่อผู้ใช้แล้วผูกให้อัตโนมัติ
-      const r2=await db.from('app_users').select(USER_COLS).eq('username',uname).limit(1);
+      try{await db.rpc('link_my_account');}catch(e){console.warn('link:',e);}   // ผูกฝั่งฐานข้อมูล (ปลอดภัยแม้เปิด RLS แล้ว)
+      const r2=await db.from('app_users').select(USER_COLS).eq('auth_uid',uid).limit(1);
       rows=r2.data;
-      if(rows&&rows.length&&!rows[0].auth_uid){
-        await db.from('app_users').update({auth_uid:uid}).eq('id',rows[0].id);
-        rows[0].auth_uid=uid;
+      if(!rows||!rows.length){                                                  // สำรอง: ก่อนเปิด RLS
+        const r3=await db.from('app_users').select(USER_COLS).eq('username',uname).limit(1);
+        rows=r3.data;
+        if(rows&&rows.length&&!rows[0].auth_uid){
+          await db.from('app_users').update({auth_uid:uid}).eq('id',rows[0].id);
+          rows[0].auth_uid=uid;
+        }
       }
     }
     if(!rows||!rows.length||!rows[0].active){await db.auth.signOut();return null;}
