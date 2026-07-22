@@ -342,8 +342,8 @@ async function placeOrder(){
   const ci=cartItems();if(!ci.length)return;
   const btn=document.getElementById('confirm-btn');
   btn.disabled=true;btn.textContent='กำลังส่งออเดอร์…';
-  const {data,error}=await db.rpc('place_order',{
-    p_customer_id:customer.id,
+  const {data,error}=await db.rpc('place_order_v2',{
+    p_token:token,
     p_items:ci.map(x=>({product_id:x.product_id,qty:x.qty}))
   });
   btn.disabled=false;btn.textContent='✓ ยืนยันสั่งสินค้า';
@@ -355,6 +355,13 @@ async function placeOrder(){
       await loadCatalog();
     } else if(error.message.includes('NOT_ALLOWED')){
       toast('มีสินค้าที่ไม่อยู่ในรายการของคุณ กรุณารีเฟรชหน้า');
+      await loadCatalog();
+    } else if(error.message.includes('INVALID_TOKEN')){
+      toast('ลิงก์ไม่ถูกต้องหรือถูกยกเลิกแล้ว กรุณาติดต่อทางร้าน');
+    } else if(error.message.includes('TOO_MANY')){
+      toast('สั่งถี่เกินไป กรุณารอสักครู่แล้วลองใหม่');
+    } else if(error.message.includes('BAD_QTY')||error.message.includes('EMPTY')||error.message.includes('TOO_BIG')){
+      toast('รายการสั่งซื้อไม่ถูกต้อง กรุณารีเฟรชหน้าแล้วลองใหม่');
       await loadCatalog();
     } else toast('สั่งไม่สำเร็จ: '+error.message);
     return;
