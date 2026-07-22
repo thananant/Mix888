@@ -5525,6 +5525,8 @@ async function loadSettings(){
   const {data,error}=await db.from('settings').select('key,value');
   if(error)return;
   appSettings={};(data||[]).forEach(r=>appSettings[r.key]=r.value);
+  const bc=document.getElementById('bill-cutoff');
+  if(bc&&document.activeElement!==bc){bc.value=appSettings.bill_cutoff||'00:00';bc.dataset.init='1';}
   const el=document.getElementById('st-central');
   if(el)el.value=appSettings.line_central_group||'';
   const map={'st-shopname':'shop_name','st-taxid':'shop_taxid','st-address':'shop_address','st-phone':'shop_phone','st-email':'shop_email'};
@@ -5592,6 +5594,7 @@ async function loadCRM(){
 
 /* ==================== เริ่มต้น ==================== */
 async function startApp(){
+  await loadSettings(); // ต้องมาก่อนทุกอย่าง: เวลาตัดรอบ/กลุ่มไลน์กลาง/ชื่อร้าน ใช้ค่าจากนี่
   await loadProducts();
   await loadCustomers();
   await loadSales();
@@ -5599,7 +5602,6 @@ async function startApp(){
   await loadBills();
   loadRcvHistory();
   loadUsers();
-  loadSettings();
   await loadWhList();
   loadTransfers();
   loadQuotes();
