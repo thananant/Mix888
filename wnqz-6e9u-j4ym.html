@@ -2964,6 +2964,20 @@ async function saveCutoff(){
   const f=d=>d.toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
   toast('ตั้งเวลาตัดรอบ '+v+' แล้ว ✓ รอบปัจจุบัน: '+f(r.start)+' → '+f(r.end));
 }
+/* หั่นสรุปเป็นข้อความละไม่เกิน lim ตัวอักษร — ตัดที่ขอบเขตรายออเดอร์ บล็อกที่แตกต่อจะขึ้นหัว (ต่อ) */
+function dsChunks(blocks,lim){
+  const msgs=[];
+  for(const b of blocks){
+    let cur=b.head;
+    for(let it of b.items){
+      if(it.length>lim-100) it=it.slice(0,lim-120)+'\n…(ยาวเกิน ตัดท้าย)';
+      if((cur+'\n\n'+it).length>lim){ msgs.push(cur); cur=b.head+' (ต่อ)'; }
+      cur+='\n\n'+it;
+    }
+    msgs.push(cur);
+  }
+  return msgs;
+}
 async function sendDailySummary(btn){
   if(!appSettings.line_central_group){
     toast('ยังไม่ได้ตั้ง LINE กลุ่มกลาง — ไปตั้งในหน้าผู้ใช้ก่อน');return;
@@ -2997,10 +3011,10 @@ async function sendDailySummary(btn){
   const dateStr=new Date().toLocaleDateString('th-TH',{day:'2-digit',month:'2-digit',year:'numeric'});
   const blocks=[];
   for(const [method,list] of Object.entries(groups)){
-    let t='━━━━━━━━━━━━━━\n📦 ออเดอร์ '+method+' '+dateStr+'\n━━━━━━━━━━━━━━';
-    list.forEach((o,i)=>{
+    const head='━━━━━━━━━━━━━━\n📦 ออเดอร์ '+method+' '+dateStr+'\n━━━━━━━━━━━━━━';
+    const items=list.map((o,i)=>{
       const c=o.customers||{};
-      t+='\n\n('+(i+1)+')';
+      let t='('+(i+1)+')';
       const bill=(o.bills||[]).find(b=>b.ship_status!=='cancelled');
       if(bill) t+='\nเลขที่บิล : '+bill.bill_no;
       if(c.sale_name) t+='\nSale : '+c.sale_name;
@@ -3012,22 +3026,25 @@ async function sendDailySummary(btn){
       t+='\nรายการ :';
       o.order_items.forEach(it=>{ t+='\n'+(it.products?.name||'?')+' '+Number(it.qty)+' '+(it.products?.unit||''); });
       if(c.note) t+='\nหมายเหตุ : '+c.note;
+      return t;
     });
-    blocks.push(t);
+    blocks.push({head,items});
   }
-  // รวมเป็นข้อความ แบ่งชิ้นละ ≤4500 ตัวอักษร สูงสุด 5 ข้อความ
-  const msgs=[]; let cur='';
-  for(const b of blocks){
-    if((cur+'\n\n'+b).length>4500){ if(cur)msgs.push(cur); cur=b; }
-    else cur=cur?cur+'\n\n'+b:b;
+  // หั่นระดับรายออเดอร์ (ไม่มีทางเกิน 5,000) แล้วส่งยกละ 5 ข้อความจนครบ — LINE รับได้ครั้งละ 5
+  const msgs=dsChunks(blocks,4500);
+  btn.disabled=true;
+  for(let i=0;i<msgs.length;i+=5){
+    btn.textContent='กำลังส่ง '+Math.min(i+5,msgs.length)+'/'+msgs.length+' ข้อความ…';
+    const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
+      to:appSettings.line_central_group, messages:msgs.slice(i,i+5).map(text=>({type:'text',text}))}});
+    if(fnErr||!res||res.status!==200){
+      btn.disabled=false;btn.textContent='📋 ส่งสรุปออเดอร์รอบนี้เข้าไลน์กลาง';
+      toast('ส่งไม่สำเร็จช่วงข้อความ '+(i+1)+'-'+Math.min(i+5,msgs.length)+': '+(fnErr?.message||JSON.stringify(res))+' (ที่ส่งไปแล้ว '+i+' ข้อความถึงกลุ่มเรียบร้อย)');return;
+    }
+    if(i+5<msgs.length) await new Promise(r=>setTimeout(r,400));
   }
-  if(cur)msgs.push(cur);
-  const chunks=msgs.slice(0,5).map(text=>({type:'text',text}));
-
-  const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
-    to:appSettings.line_central_group, messages:chunks}});
-  if(fnErr||!res||res.status!==200){toast('ส่งไม่สำเร็จ: '+(fnErr?.message||JSON.stringify(res)));return;}
-  toast('ส่งสรุป '+data.length+' ออเดอร์เข้าไลน์กลางแล้ว ✓');
+  btn.disabled=false;btn.textContent='📋 ส่งสรุปออเดอร์รอบนี้เข้าไลน์กลาง';
+  toast('ส่งสรุป '+data.length+' ออเดอร์ ('+msgs.length+' ข้อความ) เข้าไลน์กลางแล้ว ✓');
 }
 
 /* ==================== รับสินค้า ==================== */
