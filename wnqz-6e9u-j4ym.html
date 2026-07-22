@@ -903,6 +903,11 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-p" id="bk-btn" onclick="downloadBackup(this)">⬇️ ดาวน์โหลดไฟล์สำรอง</button>
       <span id="bk-status" style="font-size:12.5px;color:var(--muted)"></span>
     </div>
+    <div class="row" style="align-items:center;margin-top:8px">
+      <button class="btn-g" id="mg-btn" onclick="migrateStorage(this)">🔒 ย้ายไฟล์เก่าไปชื่อสุ่ม</button>
+      <span id="mg-status" style="font-size:12.5px;color:var(--muted)"></span>
+    </div>
+    <p class="hint">ไฟล์บิล/สลิปที่อัปก่อนหน้านี้ใช้ชื่อตามเลขบิล (เดาได้) — กดครั้งเดียวเปลี่ยนเป็นชื่อสุ่มพร้อมอัปเดตลิงก์ในระบบให้อัตโนมัติ · บิลที่ออกใหม่ปลอดภัยอยู่แล้ว</p>
     <p class="hint">ดึงข้อมูลทุกตารางเป็นไฟล์เดียวเก็บไว้ในเครื่อง/ไดรฟ์ — แนะนำทำสัปดาห์ละครั้ง (ไม่รวมรูปภาพในสตอเรจ)</p>
     <h3 class="ct" style="margin-top:18px">🧾 ข้อมูลบนหัวบิล</h3>
     <div class="row">
@@ -3082,7 +3087,9 @@ async function sendSummaryRange(btn,rStart,rEnd,mode){
       to:appSettings.line_central_group, messages:msgs.slice(i,i+5).map(text=>({type:'text',text}))}});
     if(fnErr||!res||res.status!==200){
       btn.disabled=false;btn.textContent=btn.dataset.t;
-      toast('ส่งไม่สำเร็จช่วงข้อความ '+(i+1)+'-'+Math.min(i+5,msgs.length)+': '+(fnErr?.message||JSON.stringify(res))+' (ที่ส่งไปแล้ว '+i+' ข้อความถึงกลุ่มเรียบร้อย)');return;
+      const em=fnErr?.message||JSON.stringify(res);
+      alertOps('ส่งสรุปออเดอร์เข้าไลน์ไม่สำเร็จ','ช่วงข้อความ '+(i+1)+'-'+Math.min(i+5,msgs.length)+' · '+em);
+      toast('ส่งไม่สำเร็จช่วงข้อความ '+(i+1)+'-'+Math.min(i+5,msgs.length)+': '+em+' (ที่ส่งไปแล้ว '+i+' ข้อความถึงกลุ่มเรียบร้อย)');return;
     }
     if(i+5<msgs.length) await new Promise(r=>setTimeout(r,400));
   }
@@ -5291,14 +5298,11 @@ async function doLogin(){
   if(!u||!p){err.textContent='กรอกชื่อผู้ใช้และรหัสผ่าน';err.style.display='block';return;}
   const btn=document.getElementById('lg-btn');
   btn.disabled=true;btn.textContent='กำลังตรวจสอบ…';
-  const au=await authLogin(u,p);                    // 1) ล็อกอินจริง (Supabase Auth)
-  if(au){btn.disabled=false;btn.textContent='เข้าสู่ระบบ';localStorage.setItem('mix888_user',JSON.stringify(au));enterApp(au);return;}
-  const {data,error}=await db.rpc('app_login',{p_username:u,p_password:p});  // 2) สำรอง: วิธีเดิม
+  const au=await authLogin(u,p);
   btn.disabled=false;btn.textContent='เข้าสู่ระบบ';
-  if(error){err.textContent='เชื่อมต่อไม่ได้: '+error.message;err.style.display='block';return;}
-  if(!data){err.textContent='ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';err.style.display='block';return;}
-  localStorage.setItem('mix888_user',JSON.stringify(data));
-  enterApp(data);
+  if(!au){err.textContent='ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';err.style.display='block';return;}
+  localStorage.setItem('mix888_user',JSON.stringify(au));
+  enterApp(au);
 }
 function enterApp(user){
   currentUser=user;
@@ -5570,6 +5574,38 @@ async function delWarehouse(id){
   toast('ลบคลังแล้ว'); loadWarehouse();
 }
 
+/* ==================== แจ้งเตือนเมื่อระบบสะดุด ==================== */
+const OPS_KEY='mf_ops_alert';
+function opsMsg(where,detail,who,at){
+  return '⚠️ ระบบสะดุด\n📍 '+where+'\n'+String(detail||'').slice(0,300)
+    +'\n👤 '+(who||'-')+'\n🕐 '+(at||new Date().toLocaleString('th-TH'));
+}
+/** กันสแปม: เรื่องเดิมส่งซ้ำได้ทุก 15 นาที · ล้างประวัติเกิน 6 ชม.ทิ้ง */
+function opsThrottle(sig,mins,now,store){
+  try{
+    now=now||Date.now();store=store||localStorage;
+    const m=JSON.parse(store.getItem(OPS_KEY)||'{}');
+    Object.keys(m).forEach(k=>{if(now-m[k]>21600000)delete m[k];});
+    if(m[sig]&&now-m[sig]<(mins||15)*60000){store.setItem(OPS_KEY,JSON.stringify(m));return false;}
+    m[sig]=now;store.setItem(OPS_KEY,JSON.stringify(m));return true;
+  }catch(e){return true;}
+}
+let opsSending=false;
+async function alertOps(where,detail){
+  try{
+    if(opsSending)return false;                      // กันวนซ้ำถ้าตัวส่งเองพัง
+    if(!appSettings||!appSettings.line_central_group)return false;
+    if(!opsThrottle(where+'|'+String(detail||'').slice(0,80),15))return false;
+    opsSending=true;
+    await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
+      messages:[{type:'text',text:opsMsg(where,detail,currentUser?.display_name||currentUser?.username)}]}});
+    return true;
+  }catch(e){console.warn('alertOps:',e);return false;}
+  finally{opsSending=false;}
+}
+window.addEventListener('error',e=>{alertOps('โค้ดหน้าจอผิดพลาด',(e.message||'')+' @'+String(e.filename||'').split('/').pop()+':'+e.lineno);});
+window.addEventListener('unhandledrejection',e=>{const r=e.reason;alertOps('งานเบื้องหลังล้มเหลว',(r&&(r.message||r.error_description))||String(r||''));});
+
 /* ==================== ลูกหนี้ค้างชำระ (AR Aging) ==================== */
 const AR_BUCKETS=[{k:'0-7',lo:0,hi:7,c:'#159b78'},{k:'8-15',lo:8,hi:15,c:'#8ba300'},
   {k:'16-30',lo:16,hi:30,c:'#e07b00'},{k:'31+',lo:31,hi:1e9,c:'#c0201f'}];
@@ -5634,6 +5670,58 @@ async function fetchAllRows(t){                      // ดึงทีละ 10
 function scrubBackup(t,rows){                        // ไม่เอารหัสผ่านออกไปกับไฟล์สำรอง
   if(t!=='app_users')return rows;
   return rows.map(r=>{const c={...r};delete c.password_hash;return c;});
+}
+/* ---- ย้ายไฟล์เก่าในสตอเรจไปชื่อที่เดาไม่ได้ ---- */
+function stgNewName(name){
+  const i=name.lastIndexOf('.');
+  const base=i>0?name.slice(0,i):name, ext=i>0?name.slice(i):'';
+  return base+'-'+rndTag(10)+ext;
+}
+function stgIsRandomized(name){
+  const i=name.lastIndexOf('.');
+  return /-[a-z0-9]{10}$/.test(i>0?name.slice(0,i):name);
+}
+async function stgList(bucket,prefix){
+  const out=[];let offset=0;
+  for(;;){
+    const {data,error}=await db.storage.from(bucket).list(prefix||'',{limit:100,offset,sortBy:{column:'name',order:'asc'}});
+    if(error||!data||!data.length)break;
+    for(const f of data){
+      const full=(prefix?prefix+'/':'')+f.name;
+      if(f.id===null||f.metadata===null){out.push(...await stgList(bucket,full));}   // โฟลเดอร์ย่อย เช่น slips/auto
+      else out.push(full);
+    }
+    if(data.length<100)break;
+    offset+=100;
+  }
+  return out;
+}
+async function migrateStorage(btn){
+  if(!confirm('ย้ายไฟล์บิล/สลิปเก่าไปชื่อที่เดาไม่ได้\n\n✅ ปิดช่องที่คนไล่เดาเลขบิลแล้วโหลดรูปบิลคนอื่นได้\n⚠️ รูปบิลในข้อความไลน์เก่า ๆ อาจแสดงไม่ขึ้นถ้าไลน์ไม่ได้แคชไว้ (ข้อมูลในระบบไม่หาย ดูบิลจากหลังบ้านได้ปกติ)\n\nทำเลยไหม?'))return;
+  btn.disabled=true;const st=document.getElementById('mg-status');
+  let moved=0,updated=0,failed=0,skipped=0;
+  for(const [bucket,col] of [['bills','image_url'],['slips','slip_url']]){
+    const files=await stgList(bucket,'');
+    for(let i=0;i<files.length;i++){
+      const f=files[i], nameOnly=f.split('/').pop();
+      btn.textContent='ย้าย '+(i+1)+'/'+files.length+' ('+bucket+')…';
+      if(stgIsRandomized(nameOnly)){skipped++;continue;}
+      const dir=f.includes('/')?f.slice(0,f.lastIndexOf('/')+1):'';
+      const nf=dir+stgNewName(nameOnly);
+      const oldUrl=db.storage.from(bucket).getPublicUrl(f).data.publicUrl;
+      const {error}=await db.storage.from(bucket).move(f,nf);
+      if(error){failed++;console.warn('move',f,error.message);continue;}
+      moved++;
+      const newUrl=db.storage.from(bucket).getPublicUrl(nf).data.publicUrl;
+      const {data:up}=await db.from('bills').update({[col]:newUrl}).eq(col,oldUrl).select('id');
+      updated+=(up||[]).length;
+    }
+    st.textContent=bucket+': ย้าย '+moved+' ไฟล์';
+  }
+  btn.disabled=false;btn.textContent='🔒 ย้ายไฟล์เก่าไปชื่อสุ่ม';
+  st.textContent='ย้าย '+moved+' ไฟล์ · อัปเดตลิงก์ในระบบ '+updated+' บิล · ข้ามที่ปลอดภัยอยู่แล้ว '+skipped+(failed?' · พลาด '+failed:'');
+  toast(failed?('ย้ายเสร็จ '+moved+' ไฟล์ แต่พลาด '+failed+' ไฟล์'):('🔒 ย้ายไฟล์เรียบร้อย '+moved+' ไฟล์'));
+  if(failed)alertOps('ย้ายไฟล์สตอเรจไม่สำเร็จบางไฟล์',failed+' ไฟล์');
 }
 async function downloadBackup(btn){
   btn.disabled=true;const st=document.getElementById('bk-status');
@@ -5749,10 +5837,6 @@ async function startApp(){
       if(rows&&rows.length&&rows[0].active){localStorage.setItem('mix888_user',JSON.stringify(rows[0]));enterApp(rows[0]);return;}
     }
   }catch(e){console.warn('auth restore:',e);}
-  try{                                              // 2) สำรอง: ค่าที่จำไว้แบบเดิม
-    const saved=localStorage.getItem('mix888_user');
-    if(saved){enterApp(JSON.parse(saved));return;}
-  }catch(e){}
   document.getElementById('login').style.display='flex';
   setTimeout(()=>document.getElementById('lg-user').focus(),100);
 })();
