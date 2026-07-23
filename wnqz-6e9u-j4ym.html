@@ -999,6 +999,27 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   </div>
 </div>
 <!-- ===== ปรับสต๊อก ===== -->
+<div id="billopt-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)boClose(false)">
+  <div class="card" style="max-width:420px;width:100%">
+    <h3 style="margin:0 0 4px">🧾 ออกบิล</h3>
+    <div id="bo-title" style="color:var(--muted);font-size:13.5px;margin-bottom:12px"></div>
+    <label>หัวบิล (มุมขวาบน)</label>
+    <select id="bo-doctype" style="width:100%">
+      <option value="บิลเงินสด">บิลเงินสด</option><option value="ใบเสร็จรับเงิน">ใบเสร็จรับเงิน</option><option value="ใบเสร็จรับเงิน / ใบกำกับภาษี">ใบเสร็จรับเงิน / ใบกำกับภาษี</option><option value="ใบแจ้งหนี้ / ใบวางบิล">ใบแจ้งหนี้ / ใบวางบิล</option>
+    </select>
+    <label style="margin-top:10px;display:block">ข้อมูลร้านเราบนบิล (มุมซ้ายบน)</label>
+    <select id="bo-seller" style="width:100%">
+      <option value="none">— ไม่ใส่ —</option>
+      <option value="brief">ชื่อร้าน + เบอร์ติดต่อ</option>
+      <option value="full">ที่อยู่เต็ม + เลขผู้เสียภาษี + ช่องเซ็น 4 จุด</option>
+    </select>
+    <p class="hint" style="margin-top:8px">ค่าเริ่มต้นมาจากที่ตั้งไว้ในข้อมูลลูกค้า · ที่อยู่ลูกค้า/ที่อยู่จัดส่ง/ผู้รับสินค้า ขึ้นให้เสมออยู่แล้ว</p>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn-p" id="bo-ok" onclick="boClose(true)" style="flex:1">✓ ออกบิลเลย</button>
+      <button class="btn-g" onclick="boClose(false)">ยกเลิก</button>
+    </div>
+  </div>
+</div>
 <div id="extra-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)this.style.display='none'">
   <div class="card" style="max-width:400px;width:100%">
     <h3 style="margin:0 0 4px">💸 ค่าใช้จ่ายเพิ่มของออเดอร์</h3>
@@ -2668,14 +2689,7 @@ function renderOrders(){
         </tbody>
       </table>
       <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap;align-items:flex-end">
-        <div><label style="font-size:12px;color:var(--muted)">ประเภทบิล (ตั้งไว้ที่ลูกค้า)</label><br><select id="bs-doctype-${o.id}" style="min-width:150px">
-          ${['บิลเงินสด','ใบเสร็จรับเงิน','ใบเสร็จรับเงิน / ใบกำกับภาษี','ใบแจ้งหนี้ / ใบวางบิล'].map(t=>
-            `<option value="${t}"${(o.customers?.doc_type||'บิลเงินสด')===t?' selected':''}>${t}</option>`).join('')}
-        </select></div>
-        <div><label style="font-size:12px;color:var(--muted)">ข้อมูลร้านเราบนบิล</label><br><select id="bs-seller-${o.id}" style="min-width:175px" title="เลือกว่าจะใส่ข้อมูลร้านเราบนหัวบิลแค่ไหน">
-          ${[['none','— ไม่ใส่ —'],['brief','ชื่อร้าน + เบอร์ติดต่อ'],['full','ที่อยู่เต็ม + เลขผู้เสียภาษี']].map(([v,t])=>
-            `<option value="${v}"${(o.customers?.bill_seller_mode||'none')===v?' selected':''}>${t}</option>`).join('')}
-        </select></div>
+
         <div><label style="font-size:12px;color:var(--muted)">ค่าขนส่ง (฿)</label><br><input id="bs-ship-${o.id}" type="number" step="0.01" min="0" value="0" class="num" style="width:100px" oninput="updGrand(${o.id},${o.total})"></div>
         <button class="btn-g mini" style="margin-bottom:6px" onclick="fillBIShip(${o.id})" title="คำนวณค่าส่ง BI ตามเรทลูกค้า">🧮 ค่าส่ง BI</button>
         <div><label style="font-size:12px;color:var(--muted)">ส่วนลด (฿)</label><br><input id="bs-disc-${o.id}" type="number" step="0.01" min="0" value="0" class="num" style="width:100px" oninput="updGrand(${o.id},${o.total})"></div>
@@ -3035,16 +3049,39 @@ function updGrand(oid,total){
   const el=document.getElementById('bs-grand-'+oid);
   if(el)el.textContent=fmt(g);
 }
-async function makeBill(orderId,btn,sendLine){
+let _boResolve=null;
+/** ถามหัวบิล + ข้อมูลร้านเรา — คืน {docType,sellerMode} หรือ null ถ้ายกเลิก */
+function askBillOptions(cust,label){
+  return new Promise(res=>{
+    _boResolve=res;
+    document.getElementById('bo-title').textContent=label||'';
+    const dt=document.getElementById('bo-doctype');
+    dt.value=(cust&&cust.doc_type)||'บิลเงินสด';
+    if(!dt.value)dt.value='บิลเงินสด';
+    document.getElementById('bo-seller').value=(cust&&cust.bill_seller_mode)||'none';
+    document.getElementById('billopt-modal').style.display='flex';
+  });
+}
+function boClose(ok){
+  document.getElementById('billopt-modal').style.display='none';
+  const r=_boResolve;_boResolve=null;
+  if(r)r(ok?{docType:document.getElementById('bo-doctype').value,
+             sellerMode:document.getElementById('bo-seller').value}:null);
+}
+async function makeBill(orderId,btn,sendLine,opts){
   const o=orders.find(x=>x.id===orderId);if(!o)return;
   const shipFee=Number(document.getElementById('bs-ship-'+orderId)?.value)||0;
   const discount=Number(document.getElementById('bs-disc-'+orderId)?.value)||0;
-  const docType=document.getElementById('bs-doctype-'+orderId)?.value||o.customers?.doc_type||'บิลเงินสด';
+  if(!opts){
+    opts=await askBillOptions(o.customers,(o.order_no||'')+' · '+((o.customers&&o.customers.name)||'')+' · ฿'+fmt(o.total));
+    if(!opts)return;
+  }
+  const docType=opts.docType||o.customers?.doc_type||'บิลเงินสด';
+  const sellerMode=opts.sellerMode||'none';
   const grand=Math.max(0,Number(o.total)+shipFee-discount);
   btn.disabled=true;btn.textContent='กำลังออกบิล…';
   try{
     const billNo=await nextBillNo();
-    const sellerMode=document.getElementById('bs-seller-'+orderId)?.value||o.customers?.bill_seller_mode||'none';
     const result=await drawBill(o,billNo,{shipFee,discount,grand,revision:1,docType,sellerMode});
     const cv=result.cv;
     const blob=await new Promise(res=>cv.toBlob(res,'image/png'));
@@ -4101,18 +4138,19 @@ function qtReuse(id){
 }
 
 /* ---- ออกบิลจากหน้าบัญชี (บิลเงินสด ไม่มีค่าส่ง/ส่วนลด — ถ้าต้องใส่ ใช้หน้าทำบิล) ---- */
-async function acIssueBill(orderId,btn,silent){
+async function acIssueBill(orderId,btn,silent,opts){
   const {data:o,error}=await db.from('orders')
     .select(`*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,bill_seller_mode,ship_shop_name,ship_receiver,ship_phone,ship_address),
              order_items(qty,price,amount,product_id,products(name,unit))`)
     .eq('id',orderId).single();
   if(error||!o){toast('โหลดออเดอร์ไม่ได้: '+(error?.message||''));return;}
   if(o.status!=='new'){if(silent)throw new Error(o.order_no+' ถูกออกบิล/ยกเลิกไปแล้ว');toast('ออเดอร์นี้ถูกออกบิล/ยกเลิกไปแล้ว');loadBills();return;}
-  if(!silent){
-    if(!confirm('ออกบิล '+o.order_no+' ('+(o.customers?.doc_type||'บิลเงินสด')+')\nยอด ฿'+fmt(o.total)+'\n\n✓ ระบบจะดาวน์โหลด PDF ให้ทันที\n✗ ยังไม่ส่งเข้ากลุ่ม LINE — กดปุ่ม "ส่ง LINE" ที่แถวบิลทีหลังได้'))return;
+  if(!silent&&!opts){
+    opts=await askBillOptions(o.customers,o.order_no+' · '+(o.customers?.name||'')+' · ฿'+fmt(o.total)+'  (ได้ PDF ทันที · ยังไม่ส่ง LINE)');
+    if(!opts)return;
   }
   if(!orders.some(x=>x.id===o.id))orders.push(o);
-  await makeBill(o.id,btn,false);   // ใช้ค่า "ข้อมูลร้านเราบนบิล" ที่ตั้งไว้ที่ลูกค้า
+  await makeBill(o.id,btn,false,opts||{docType:o.customers?.doc_type||'บิลเงินสด',sellerMode:o.customers?.bill_seller_mode||'none'});
   // ดาวน์โหลด PDF ของบิลที่เพิ่งออก
   try{
     const {data:nb}=await db.from('bills').select('id')
@@ -4134,11 +4172,13 @@ async function acIssueSelected(btn){
   const sel=acPendingOrders.filter(o=>ids.includes(o.id));
   const sum=sel.reduce((s,o)=>s+Number(o.total||0),0);
   if(!confirm('ออกบิล '+ids.length+' ออเดอร์รวดเดียว รวม ฿'+fmt(sum)+'\n\n✓ ได้ PDF แยกทีละไฟล์ครบทุกบิล (เบราว์เซอร์อาจถามอนุญาตดาวน์โหลดหลายไฟล์ — กดอนุญาต)\n✗ ยังไม่ส่ง LINE'))return;
+  const batchOpts=await askBillOptions(sel[0]&&sel[0].customers,'ใช้กับทั้ง '+ids.length+' บิลที่เลือก');
+  if(!batchOpts)return;
   btn.disabled=true;
   let ok=0;const fails=[];
   for(let i=0;i<ids.length;i++){
     btn.textContent='กำลังออกบิล '+(i+1)+'/'+ids.length+'…';
-    try{await acIssueBill(ids[i],btn,true);ok++;}
+    try{await acIssueBill(ids[i],btn,true,batchOpts);ok++;}
     catch(e){fails.push(String(e.message||e));}
     await new Promise(r=>setTimeout(r,400));
   }
