@@ -3310,16 +3310,20 @@ async function sendSummaryRange(btn,rStart,rEnd,mode){
   });
   const fD=d=>d.toLocaleDateString('th-TH',{day:'2-digit',month:'2-digit',year:'numeric'});
   const dateStr=mode==='custom'?fD(rStart)+' - '+fD(rEnd):fD(new Date());
-  // เลขออเดอร์ตรงกับใบปะหน้า: ลำดับตามเวลาสั่ง นับรวมทุกออเดอร์ในรอบ (ตัดยกเลิกแล้ว)
+  // เลขลำดับ "แยกตามวิธีจัดส่ง" เรียงตามเวลาสั่ง (ตรงกับใบปะหน้า)
   const daySorted=[...(raw||[])].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
-  const seqMap={};daySorted.forEach((o,ix)=>seqMap[o.order_no]=ix+1);
-  const dayTotal=daySorted.length;
+  const seqMap={},mCount={};
+  daySorted.forEach(o=>{
+    const m=(o.customers&&o.customers.delivery_method)||'อื่นๆ';
+    mCount[m]=(mCount[m]||0)+1;
+    seqMap[o.order_no]=mCount[m];
+  });
   const blocks=[];
   for(const [method,list] of Object.entries(groups)){
     const head='━━━━━━━━━━━━━━\n📦 ออเดอร์ '+method+' '+dateStr+'\n━━━━━━━━━━━━━━';
     const items=list.map((o,i)=>{
       const c=o.customers||{};
-      let t='(ออเดอร์ '+(seqMap[o.order_no]||(i+1))+'/'+dayTotal+')';
+      let t='(ออเดอร์ '+(seqMap[o.order_no]||(i+1))+'/'+(mCount[method]||list.length)+')';
       const bill=(o.bills||[]).find(b=>b.ship_status!=='cancelled');
       if(bill) t+='\nเลขที่บิล : '+bill.bill_no+((bill.revision||1)>1?' (v.'+bill.revision+')':'');
       if(bill&&bill.edit_note) t+='\n🔴 แก้บิล: '+bill.edit_note;
@@ -5341,11 +5345,14 @@ async function makeLabel(billId,btn){
     const cyc=cutoffRange(od);
     let seq=0,totalDay=0;
     try{
-      const {data:dayOrders}=await db.from('orders').select('id')
+      const {data:dayOrders}=await db.from('orders').select('id, customers(delivery_method)')
         .gte('created_at',cyc.start.toISOString()).lt('created_at',cyc.end.toISOString())
         .neq('status','cancelled').order('created_at',{ascending:true});
-      totalDay=(dayOrders||[]).length;
-      seq=(dayOrders||[]).findIndex(x=>x.id===b.order_id)+1;
+      // นับเฉพาะออเดอร์ที่ใช้ขนส่งเดียวกัน (ให้ตรงกับสรุปในไลน์ที่แยกกลุ่มตามขนส่ง)
+      const meth=c.delivery_method||'อื่นๆ';
+      const same=(dayOrders||[]).filter(x=>((x.customers&&x.customers.delivery_method)||'อื่นๆ')===meth);
+      totalDay=same.length;
+      seq=same.findIndex(x=>x.id===b.order_id)+1;
     }catch(e){console.warn('seq',e);}
 
     await document.fonts.load('700 60px "IBM Plex Sans Thai"');
