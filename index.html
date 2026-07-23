@@ -326,12 +326,15 @@ function updateCartBar(){
 
 function openConfirm(){
   const ci=cartItems();if(!ci.length)return;
-  document.getElementById('confirm-list').innerHTML=ci.map(x=>`
-    <div class="cline">
+  document.getElementById('confirm-list').innerHTML=ci.map(x=>{
+    const img=(items.find(p=>p.product_id===x.product_id)||{}).image_url;
+    return `
+    <div class="cline" style="align-items:center">
+      ${img?'<img src="'+img+'" onerror="this.style.display=\'none\'" style="width:44px;height:44px;object-fit:cover;border-radius:10px;flex:none;margin-right:8px;background:#f6efe9">':''}
       <span class="cn">${esc(x.name)}</span>
       <span class="cq">${x.qty} ${esc(x.unit)} × ${fmt(x.price)}</span>
       <span class="ca">${fmt(x.amount)}</span>
-    </div>`).join('');
+    </div>`;}).join('');
   document.getElementById('confirm-total').textContent=fmt(ci.reduce((s,x)=>s+x.amount,0));
   document.getElementById('overlay').classList.add('show');
   document.body.style.overflow='hidden'; // กันหน้าหลังเลื่อนทะลุตอนเปิดชีตบน iOS
