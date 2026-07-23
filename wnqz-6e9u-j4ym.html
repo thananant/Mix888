@@ -483,6 +483,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="card">
     <div class="row" style="margin-bottom:12px;align-items:center">
       <input id="c-search" placeholder="ค้นหาลูกค้า…" style="flex:1;min-width:200px" oninput="renderCustomers()">
+      <button class="btn-p mini" id="bulk-link-btn" onclick="bulkSendLinks(this)" title="ส่งลิงก์สั่งซื้อ + รหัสยืนยัน เข้ากลุ่มไลน์ของทุกร้านที่ผูกกลุ่มไว้">📲 ส่งลิงก์+รหัส ยกชุด</button>
       <span class="count" id="c-count"></span>
     </div>
     <div style="overflow-x:auto">
@@ -2420,19 +2421,26 @@ async function managePin(){
   if(error){toast('อ่านรหัสไม่ได้: '+error.message+' (รัน order_pin.sql หรือยัง?)');return;}
   const cur=data&&data.order_pin?String(data.order_pin):'';
   const when=data&&data.pin_updated_at?new Date(data.pin_updated_at).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
-  const info=cur?('รหัสปัจจุบัน: '+cur+(when?'\nตั้งเมื่อ '+when:'')):'ยังไม่ได้ตั้งรหัส — ตอนนี้ใครมีลิงก์ก็สั่งได้';
+  const hasGroup=!!(c.line_group_id||(c.parent_id&&(customers.find(x=>x.id===c.parent_id)||{}).line_group_id));
+  if(!hasGroup){
+    alert('🔐 รหัสยืนยันคำสั่งซื้อ — '+c.code+' '+c.name
+      +'\n\nร้านนี้ยังไม่ได้ผูกกลุ่มไลน์ จึงไม่ใช้รหัส (สั่งของได้เลย)'
+      +'\n\nระบบจะสุ่มรหัสให้อัตโนมัติทันทีที่ผูกกลุ่มไลน์'
+      +'\nวิธีผูก: พิมพ์ในกลุ่มไลน์ของร้านว่า\nผูกกลุ่ม '+c.code);
+    return;
+  }
+  const info='รหัสปัจจุบัน: '+(cur||'(กำลังสร้าง)')+(when?'\nตั้งเมื่อ '+when:'');
   const v=prompt('🔐 รหัสยืนยันคำสั่งซื้อ — '+c.code+' '+c.name+'\n\n'+info
-    +'\n\n• ใส่เลข 6 หลัก = ตั้ง/เปลี่ยนรหัสให้เลย'
-    +'\n• เว้นว่างแล้วกดตกลง = ยกเลิกการใช้รหัส (กลับไปสั่งได้เลย)'
-    +'\n• ปกติให้ร้านตั้งเองในกลุ่มไลน์: พิมพ์เลข 6 หลัก / เปลี่ยน <6 หลัก>', cur);
+    +'\n\n• ใส่เลข 6 หลัก = เปลี่ยนรหัสให้เลย'
+    +'\n• ร้านนี้ผูกกลุ่มไลน์แล้ว จึงต้องใช้รหัสเสมอ (ยกเลิกไม่ได้ — ถ้าไม่ต้องการใช้รหัส ให้ปลดกลุ่มไลน์)'
+    +'\n• ปกติให้ร้านเปลี่ยนเองในกลุ่มไลน์: เปลี่ยน <เลข 6 หลัก>', cur);
   if(v===null)return;
   const pin=String(v).replace(/\D/g,'');
-  if(v.trim()!==''&&pin.length!==6){toast('ต้องเป็นตัวเลข 6 หลัก');return;}
-  if(v.trim()===''&&cur&&!confirm('⚠️ ยกเลิกการใช้รหัสของร้านนี้?\nหลังจากนี้ใครมีลิงก์ก็สั่งของได้ทันที'))return;
+  if(pin.length!==6){toast('ต้องเป็นตัวเลข 6 หลัก');return;}
   const {error:e2}=await db.from('customers').update({
-    order_pin:pin||null,pin_updated_at:pin?new Date().toISOString():null}).eq('id',c.id);
+    order_pin:pin,pin_updated_at:new Date().toISOString()}).eq('id',c.id);
   if(e2){toast('บันทึกไม่สำเร็จ: '+e2.message);return;}
-  toast(pin?('ตั้งรหัส '+pin+' ให้ '+c.code+' แล้ว ✓ — แจ้งร้านด้วยนะครับ'):'ยกเลิกการใช้รหัสแล้ว');
+  toast('ตั้งรหัส '+pin+' ให้ '+c.code+' แล้ว ✓ — แจ้งร้านด้วยนะครับ');
 }
 function openResetLink(){
   const c=customers.find(x=>x.id===lkCustomerId);if(!c)return;
@@ -2462,6 +2470,78 @@ async function lkCopy(){
   const url=document.getElementById('lk-url').value;
   try{await navigator.clipboard.writeText(url);toast('คัดลอกลิงก์แล้ว ✓');}
   catch(e){document.getElementById('lk-url').select();document.execCommand&&document.execCommand('copy');toast('กด Ctrl+C เพื่อคัดลอก');}
+}
+/** เป้าหมายส่งยกชุด: ร้านที่ผูกกลุ่มไลน์แล้ว · ไม่ใช่สาขาย่อย (ใช้ลิงก์ร้านแม่) · 1 กลุ่มส่งครั้งเดียว */
+function bulkTargets(){
+  const seen=new Set(),out=[];
+  customers.filter(c=>c.active!==false&&c.line_group_id&&!c.parent_id).forEach(c=>{
+    if(seen.has(c.line_group_id))return;
+    seen.add(c.line_group_id);out.push(c);
+  });
+  return out;
+}
+async function bulkSendLinks(btn){
+  let list=bulkTargets();
+  const noGroup=customers.filter(c=>c.active!==false&&!c.line_group_id&&!c.parent_id).length;
+  if(!list.length){toast('ยังไม่มีร้านไหนผูกกลุ่มไลน์');return;}
+
+  const onlyActive=!confirm('เลือกกลุ่มที่จะส่ง\n\nตกลง = ทุกร้านที่ผูกกลุ่มไลน์ ('+list.length+' กลุ่ม)\nยกเลิก = เฉพาะร้านที่เคยสั่งของใน 90 วันล่าสุด');
+  if(onlyActive){
+    btn.disabled=true;btn.textContent='กำลังเช็คร้านที่ยัง active…';
+    const since=new Date(Date.now()-90*86400000).toISOString();
+    const ids=new Set();let from=0;
+    for(;;){
+      const {data}=await db.from('orders').select('customer_id').gte('created_at',since).range(from,from+999);
+      if(!data||!data.length)break;
+      data.forEach(o=>ids.add(o.customer_id));
+      if(data.length<1000)break; from+=1000;
+    }
+    // นับสาขาย่อยเป็นความเคลื่อนไหวของร้านแม่ด้วย
+    const childOf={};customers.forEach(c=>{if(c.parent_id)childOf[c.id]=c.parent_id;});
+    const act=new Set();ids.forEach(id=>{act.add(id);if(childOf[id])act.add(childOf[id]);});
+    list=list.filter(c=>act.has(c.id));
+    btn.disabled=false;btn.textContent='📲 ส่งลิงก์+รหัส ยกชุด';
+    if(!list.length){toast('ไม่มีร้านที่สั่งของใน 90 วันล่าสุด');return;}
+  }
+
+  // ดึงรหัสล่าสุดของทุกร้านในรอบเดียว
+  const pinMap={};
+  for(let i=0;i<list.length;i+=200){
+    const ids=list.slice(i,i+200).map(c=>c.id);
+    const {data}=await db.from('customers').select('id,order_pin').in('id',ids);
+    (data||[]).forEach(r=>pinMap[r.id]=r.order_pin||'');
+  }
+  const noPin=list.filter(c=>!pinMap[c.id]).length;
+
+  if(!confirm('📲 ส่งลิงก์สั่งซื้อ + รหัสยืนยัน เข้ากลุ่มไลน์\n\n'
+    +'• จะส่ง '+list.length+' กลุ่ม\n'
+    +(noPin?'• มี '+noPin+' ร้านที่ยังไม่มีรหัส → จะส่งแค่ลิงก์\n':'• ทุกร้านมีรหัสครบ\n')
+    +(noGroup?'• ข้าม '+noGroup+' ร้านที่ยังไม่ผูกกลุ่มไลน์\n':'')
+    +'• สาขาย่อยไม่ส่งซ้ำ (ใช้ลิงก์ร้านแม่)\n\n'
+    +'ใช้เวลาประมาณ '+Math.ceil(list.length*0.5/60)+' นาที — อย่าปิดหน้าจอ\n\nเริ่มส่งเลยไหม?'))return;
+
+  btn.disabled=true;
+  let ok=0;const fails=[];
+  for(let i=0;i<list.length;i++){
+    const c=list[i];
+    btn.textContent='กำลังส่ง '+(i+1)+'/'+list.length+'…';
+    const pin=pinMap[c.id]||'';
+    const txt='🛒 ลิงก์สั่งสินค้า Mix Fresh 168\nร้าน: '+c.name+(c.branch_name?' \u2022 '+c.branch_name:'')+' ('+c.code+')\n\nกดสั่งได้เลยครับ 👇\n'+orderUrlFor(c)
+      +(pin?'\n\n🔐 รหัสยืนยันตอนกดสั่ง: '+pin
+        +'\n(กรอกครั้งเดียว เครื่องเดิมจำให้)'
+        +'\nเปลี่ยนรหัสเองได้ตลอด พิมพ์ในกลุ่มนี้ว่า\nเปลี่ยน 123456':'');
+    try{
+      const {data:res,error}=await db.functions.invoke('line-push',{body:{to:c.line_group_id,messages:[{type:'text',text:txt}]}});
+      if(error||!res||res.status!==200)throw new Error(error?.message||JSON.stringify(res));
+      ok++;
+    }catch(e){fails.push(c.code+' '+c.name);}
+    await new Promise(r=>setTimeout(r,450));   // เว้นจังหวะ กัน LINE ตีกลับ
+  }
+  btn.disabled=false;btn.textContent='📲 ส่งลิงก์+รหัส ยกชุด';
+  if(fails.length){
+    alert('ส่งสำเร็จ '+ok+'/'+list.length+' กลุ่ม\n\nส่งไม่สำเร็จ '+fails.length+' ร้าน (กลุ่มอาจถูกลบ/บอทถูกเตะออก):\n'+fails.slice(0,40).join('\n')+(fails.length>40?'\n…และอีก '+(fails.length-40):''));
+    alertOps('ส่งลิงก์ยกชุดไม่สำเร็จบางร้าน',fails.length+' ร้าน');
+  }else toast('✓ ส่งลิงก์+รหัสครบ '+ok+' กลุ่มแล้ว');
 }
 async function lkSend(btn){
   const c=customers.find(x=>x.id===lkCustomerId);if(!c||!c.line_group_id)return;
