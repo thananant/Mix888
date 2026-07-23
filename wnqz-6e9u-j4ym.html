@@ -3308,6 +3308,8 @@ async function sendSummaryRange(btn,rStart,rEnd,mode){
     const m=o.customers?.delivery_method||'อื่นๆ';
     (groups[m]=groups[m]||[]).push(o);
   });
+  // เรียงในแต่ละกลุ่มตามเวลาสั่ง — ให้เลข 1/4 2/4 3/4 4/4 ไล่ตามลำดับ ไม่กระโดด
+  Object.values(groups).forEach(l=>l.sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)));
   const fD=d=>d.toLocaleDateString('th-TH',{day:'2-digit',month:'2-digit',year:'numeric'});
   const dateStr=mode==='custom'?fD(rStart)+' - '+fD(rEnd):fD(new Date());
   // เลขลำดับ "แยกตามวิธีจัดส่ง" เรียงตามเวลาสั่ง (ตรงกับใบปะหน้า)
