@@ -2795,7 +2795,7 @@ async function drawBill(o,billNo,extra){
   const ctx0=cv.getContext('2d');
   const PAD=40, rowH=64;
   // คำนวณความสูงเนื้อหา
-  const headH=210, custH=150, tableHeadH=46;
+  const headH=210, custH=290, tableHeadH=46;
   const bodyH=items.length*rowH;
   const totalH=120+((_ship||_disc)?52:0), signH=210, footH=40;
   const Hlogic=headH+custH+tableHeadH+bodyH+totalH+signH+footH;
@@ -2839,47 +2839,49 @@ async function drawBill(o,billNo,extra){
   x.strokeStyle='#111';x.lineWidth=1;x.beginPath();x.moveTo(PAD,y);x.lineTo(R,y);x.stroke();
 
   // ---------- ข้อมูลลูกค้า (ซ้าย) + meta (ขวา) ----------
+  // แสดง 2 ชุดเสมอ: ข้อมูลออกบิล / ข้อมูลจัดส่ง (ต่อให้เหมือนกันก็แสดงทั้งคู่)
   y+=28;
+  const y0=y;
+  const MX=Wmm-340, MV=Wmm-215;   // MX=label ฝั่งขวา, MV=ค่าฝั่งขวา
   const billAddr=c.billing_address||c.ship_address||'';
-  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillStyle='#111';
-  x.fillText('ลูกค้า:',PAD,y);
-  x.font='400 13.5px "IBM Plex Sans Thai"';
-  const custName=c.name+(c.code?'  ('+c.code+')':'');
-  x.fillText(custName,PAD+70,y);
-  // meta ขวา
-  const MX=Wmm-340, MV=Wmm-215;   // MX=ตำแหน่ง label, MV=ตำแหน่งค่า (เว้นห่างพอสำหรับ label ยาว)
-  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('วันที่:',MX,y);
-  x.font='400 13.5px "IBM Plex Sans Thai"';
-  x.fillText(new Date().toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'}),MV,y);
-  y+=24;
-  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('ที่อยู่:',PAD,y);
-  x.font='400 13px "IBM Plex Sans Thai"';
-  const addrLines=wrapText2(x,billAddr,MX-PAD-80,'400 13px "IBM Plex Sans Thai"');
-  addrLines.slice(0,3).forEach((l,i)=>x.fillText(l,PAD+70,y+i*18));
-  // meta ขวา ต่อ
-  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('เลขที่:',MX,y);
-  x.font='400 13.5px "IBM Plex Sans Thai"';x.fillText(billNo,MV,y);
-  x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('ผู้สร้างรายการ:',MX,y+24);
-  x.font='400 13.5px "IBM Plex Sans Thai"';x.fillText(info.creator,MV,y+24);
-  const addrBlock=Math.max(addrLines.slice(0,3).length,1)*18;
-  y+=addrBlock+6;
-  if(c.tax_id){x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('เลขผู้เสียภาษี:',PAD,y);
-    x.font='400 13px "IBM Plex Sans Thai"';x.fillText(c.tax_id,PAD+90,y);y+=20;}
-  if(c.phone){x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('โทรศัพท์:',PAD,y);
-    x.font='400 13px "IBM Plex Sans Thai"';x.fillText(c.phone,PAD+70,y);y+=20;}
-  // ที่อยู่จัดส่ง + ผู้รับสินค้า (ขึ้นเสมอ ถ้ามีข้อมูลและต่างจากที่อยู่ออกบิล)
-  {
-    const shipAddr=c.ship_address||'';
-    if(shipAddr && shipAddr!==billAddr){
-      x.font='700 13.5px "IBM Plex Sans Thai"';x.fillStyle='#111';x.fillText('ที่อยู่จัดส่ง:',PAD,y);
-      x.font='400 13px "IBM Plex Sans Thai"';
-      wrapText2(x,shipAddr,MX-PAD-90,'400 13px "IBM Plex Sans Thai"').slice(0,2).forEach((l,i)=>x.fillText(l,PAD+90,y+i*18));
-      y+=Math.max(1,Math.min(2,wrapText2(x,shipAddr,MX-PAD-90).length))*18+2;
-    }
-    const rcv=c.ship_receiver||c.contact_name;
-    if(rcv){x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('ผู้รับสินค้า:',PAD,y);
-      x.font='400 13px "IBM Plex Sans Thai"';x.fillText(rcv+(c.ship_phone?'  โทร. '+c.ship_phone:''),PAD+80,y);y+=20;}
-  }
+  const shipAddr=c.ship_address||c.billing_address||'';
+  const LBLX=PAD, VALX=PAD+104, VALW=MX-(PAD+104)-14;
+  const crow=(label,value,maxLines)=>{
+    const v=String(value==null?'':value).trim();
+    if(!v)return;
+    x.font='700 13.5px "IBM Plex Sans Thai"';x.fillStyle='#111';x.fillText(label,LBLX,y);
+    x.font='400 13px "IBM Plex Sans Thai"';
+    const ls=wrapText2(x,v,VALW,'400 13px "IBM Plex Sans Thai"').slice(0,maxLines||1);
+    ls.forEach((l,i)=>x.fillText(l,VALX,y+i*18));
+    y+=Math.max(1,ls.length)*18+3;
+  };
+
+  // ── ข้อมูลออกบิล ──
+  x.font='700 12px "IBM Plex Sans Thai"';x.fillStyle='#888';x.fillText('ข้อมูลออกบิล',LBLX,y);y+=17;
+  crow('ลูกค้า:', c.name+(c.code?'  ('+c.code+')':''), 2);
+  crow('ที่อยู่:', billAddr, 3);
+  crow('เลขผู้เสียภาษี:', c.tax_id, 1);
+  crow('โทรศัพท์:', c.phone, 1);
+
+  // ── ข้อมูลจัดส่ง ──
+  y+=6;
+  x.font='700 12px "IBM Plex Sans Thai"';x.fillStyle='#888';x.fillText('ข้อมูลจัดส่ง',LBLX,y);y+=17;
+  crow('ชื่อร้าน:', c.ship_shop_name||c.name, 2);
+  crow('ที่อยู่จัดส่ง:', shipAddr, 3);
+  crow('ผู้รับสินค้า:', c.ship_receiver||c.contact_name||'', 1);
+  crow('เบอร์ผู้รับ:', c.ship_phone||c.phone, 1);
+  crow('เวลารับของ:', c.receive_time, 1);
+
+  // ── meta ฝั่งขวา (ยึดตำแหน่งบนสุด ไม่เลื่อนตามฝั่งซ้าย) ──
+  x.fillStyle='#111';
+  const meta=[['วันที่:',new Date().toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'})],
+              ['เลขที่:',billNo],
+              ['ผู้สร้างรายการ:',info.creator]];
+  meta.forEach(([lb,vl],i)=>{
+    x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText(lb,MX,y0+i*24);
+    x.font='400 13.5px "IBM Plex Sans Thai"';x.fillText(String(vl||''),MV,y0+i*24);
+  });
+  y=Math.max(y,y0+3*24+4);
 
   // ---------- ตารางสินค้า ----------
   y+=16;
