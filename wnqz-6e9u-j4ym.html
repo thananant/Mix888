@@ -436,7 +436,8 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <input id="c-rtime" type="hidden">
       </div>
       <div><label>วิธีจัดส่ง</label><select id="c-delivery"><option value="Lalamove">Lalamove</option><option value="BI">BI</option><option value="แพ็คของ">แพ็คของ</option><option value="มารับเอง">มารับเอง</option></select></div>
-      <div><label>ประเภทบิล</label><select id="c-doctype" title="ใช้เป็นค่าเริ่มต้นทุกครั้งที่ออกบิลให้ลูกค้ารายนี้"><option value="บิลเงินสด">บิลเงินสด</option><option value="ใบแจ้งหนี้ / ใบวางบิล">ใบแจ้งหนี้ / ใบวางบิล</option></select></div>
+      <div><label>ประเภทบิล</label><select id="c-doctype" title="ใช้เป็นค่าเริ่มต้นทุกครั้งที่ออกบิลให้ลูกค้ารายนี้"><option value="บิลเงินสด">บิลเงินสด</option><option value="ใบเสร็จรับเงิน">ใบเสร็จรับเงิน</option><option value="ใบเสร็จรับเงิน / ใบกำกับภาษี">ใบเสร็จรับเงิน / ใบกำกับภาษี</option><option value="ใบแจ้งหนี้ / ใบวางบิล">ใบแจ้งหนี้ / ใบวางบิล</option></select></div>
+      <div><label>ข้อมูลร้านเราบนบิล</label><select id="c-sellermode" title="ค่าเริ่มต้นของลูกค้ารายนี้ — เปลี่ยนรายบิลได้ที่หน้าทำบิล"><option value="none">— ไม่ใส่ —</option><option value="brief">ชื่อร้าน + เบอร์ติดต่อ</option><option value="full">ที่อยู่เต็ม + เลขผู้เสียภาษี</option></select></div>
       <div style="align-self:flex-end"><label style="cursor:pointer;user-select:none"><input type="checkbox" id="c-hideprice" style="width:16px;height:16px;vertical-align:-3px"> 🙈 ซ่อนราคาจากหน้าสั่งของ</label><div style="font-size:11.5px;color:var(--muted)">พนักงานร้านนี้จะสั่งของได้โดยไม่เห็นราคา/ยอดรวม</div></div>
       <div><label>ลิงก์ร้าน (อังกฤษเล็ก/ตัวเลข/ขีด)</label><input id="c-slug" placeholder="เช่น tawanmala" style="width:150px" title="ได้ลิงก์สวย www.mixfresh-168.com/ชื่อนี้ — เว้นว่างได้ (ใช้ลิงก์แบบโทเคนแทน)"></div>
       <div><label>เป็นสาขาของร้าน</label><select id="c-parent" style="min-width:180px" onchange="cParentUI()" title="ลูกค้าหลายสาขา: เลือกร้านแม่ ลูกค้าจะใช้ลิงก์+กลุ่มไลน์ของแม่ แต่ราคา/บิล/หนี้ แยกรายสาขา"><option value="">— ไม่ใช่สาขา (ร้านหลัก) —</option></select></div>
@@ -2031,6 +2032,7 @@ function editCustomer(id){
   document.getElementById('c-shipphone').value=c.ship_phone||'';
   document.getElementById('c-pgroup').value=c.price_group||'base';
   document.getElementById('c-hideprice').checked=!!c.hide_prices;
+  document.getElementById('c-sellermode').value=c.bill_seller_mode||'none';
   document.getElementById('c-tax').value=c.tax_id||'';
   document.getElementById('c-map').value=c.map_link||'';
   setRtime(c.receive_time||'');
@@ -2168,6 +2170,7 @@ async function saveCustomer(){
     ship_postcode:document.getElementById('cs-postcode').value.trim()||null,
     price_group:document.getElementById('c-pgroup').value,
     hide_prices:document.getElementById('c-hideprice').checked,
+    bill_seller_mode:document.getElementById('c-sellermode').value,
     tax_id:document.getElementById('c-tax').value.trim()||null,
     map_link:document.getElementById('c-map').value.trim()||null,
     receive_time:document.getElementById('c-rtime').value.trim()||null,
@@ -2598,7 +2601,7 @@ async function savePricing(){
 /* ==================== ทำบิล ==================== */
 async function loadOrders(){
   const {data,error}=await db.from('orders')
-    .select(`*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,ship_shop_name,ship_receiver,ship_phone,ship_address),
+    .select(`*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,bill_seller_mode,ship_shop_name,ship_receiver,ship_phone,ship_address),
              order_items(qty,price,amount,product_id,products(name,unit))`)
     .eq('status','new').order('created_at',{ascending:true});
   if(error){toast('โหลดออเดอร์ไม่ได้: '+error.message);return;}
@@ -2666,8 +2669,12 @@ function renderOrders(){
       </table>
       <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap;align-items:flex-end">
         <div><label style="font-size:12px;color:var(--muted)">ประเภทบิล (ตั้งไว้ที่ลูกค้า)</label><br><select id="bs-doctype-${o.id}" style="min-width:150px">
-          <option value="บิลเงินสด"${(o.customers?.doc_type||'บิลเงินสด')==='บิลเงินสด'?' selected':''}>บิลเงินสด</option>
-          <option value="ใบแจ้งหนี้ / ใบวางบิล"${o.customers?.doc_type==='ใบแจ้งหนี้ / ใบวางบิล'?' selected':''}>ใบแจ้งหนี้ / ใบวางบิล</option>
+          ${['บิลเงินสด','ใบเสร็จรับเงิน','ใบเสร็จรับเงิน / ใบกำกับภาษี','ใบแจ้งหนี้ / ใบวางบิล'].map(t=>
+            `<option value="${t}"${(o.customers?.doc_type||'บิลเงินสด')===t?' selected':''}>${t}</option>`).join('')}
+        </select></div>
+        <div><label style="font-size:12px;color:var(--muted)">ข้อมูลร้านเราบนบิล</label><br><select id="bs-seller-${o.id}" style="min-width:175px" title="เลือกว่าจะใส่ข้อมูลร้านเราบนหัวบิลแค่ไหน">
+          ${[['none','— ไม่ใส่ —'],['brief','ชื่อร้าน + เบอร์ติดต่อ'],['full','ที่อยู่เต็ม + เลขผู้เสียภาษี']].map(([v,t])=>
+            `<option value="${v}"${(o.customers?.bill_seller_mode||'none')===v?' selected':''}>${t}</option>`).join('')}
         </select></div>
         <div><label style="font-size:12px;color:var(--muted)">ค่าขนส่ง (฿)</label><br><input id="bs-ship-${o.id}" type="number" step="0.01" min="0" value="0" class="num" style="width:100px" oninput="updGrand(${o.id},${o.total})"></div>
         <button class="btn-g mini" style="margin-bottom:6px" onclick="fillBIShip(${o.id})" title="คำนวณค่าส่ง BI ตามเรทลูกค้า">🧮 ค่าส่ง BI</button>
@@ -2788,31 +2795,33 @@ async function drawBill(o,billNo,extra){
   const R=Wmm-PAD;
 
   // ---------- หัวบิล ----------
-  const _full=!!extra.fullForm;
+  // ข้อมูลร้านเราบนบิล: none = ไม่ใส่ · brief = ชื่อ+เบอร์ · full = ที่อยู่เต็ม+เลขภาษี
+  const _seller=extra.sellerMode||(extra.fullForm?'full':'none');
   let y=54;
 
   // ชื่อเอกสาร + บาร์โค้ด (ขวาบน)
   x.fillStyle='#111';x.textAlign='right';x.font='700 26px "IBM Plex Sans Thai"';
-  x.fillText(_full?'ใบเสร็จรับเงิน / ใบกำกับภาษี':_docType,R,y-2);
+  x.fillText(_docType,R,y-2);
   if(barcode){const bi=await loadImg(barcode); if(bi){const bw=230,bh=44;x.drawImage(bi,R-bw,y+12,bw,bh);}}
   x.font='400 12px "IBM Plex Sans Thai"';x.fillStyle='#333';
   x.fillText(billNo,R,y+74);
   x.textAlign='left';
 
-  // บล็อกผู้ขาย (เฉพาะบิลเต็มรูปแบบ)
-  if(_full){
+  // บล็อกผู้ขาย (ร้านเรา) — เลือกระดับได้ที่หน้าทำบิล
+  if(_seller!=='none'){
     x.fillStyle='#111';x.font='700 17px "IBM Plex Sans Thai"';
     x.fillText(info.shop||'-',PAD,y+6);
     x.font='400 12px "IBM Plex Sans Thai"';x.fillStyle='#333';let sy=y+26;
-    wrapText2(x,info.addr||'',Wmm-380,'400 12px "IBM Plex Sans Thai"').slice(0,3).forEach(l=>{x.fillText(l,PAD,sy);sy+=16;});
-    if(info.taxid){x.fillText('เลขประจำตัวผู้เสียภาษี: '+info.taxid,PAD,sy);sy+=16;}
-    const ct=[info.phone?'โทร. '+info.phone:'',info.email].filter(Boolean).join('   ');
+    if(_seller==='full'){
+      wrapText2(x,info.addr||'',Wmm-380,'400 12px "IBM Plex Sans Thai"').slice(0,3).forEach(l=>{x.fillText(l,PAD,sy);sy+=16;});
+      if(info.taxid){x.fillText('เลขประจำตัวผู้เสียภาษี: '+info.taxid,PAD,sy);sy+=16;}
+    }
+    const ct=[info.phone?'โทร. '+info.phone:'',_seller==='full'?info.email:''].filter(Boolean).join('   ');
     if(ct){x.fillText(ct,PAD,sy);sy+=16;}
-    y=Math.max(150,sy+6);
-  }
+    y=Math.max(170,sy+6);
+  }else y=170;
 
   // เส้นคั่น
-  y=_full?y:170;
   x.strokeStyle='#111';x.lineWidth=1;x.beginPath();x.moveTo(PAD,y);x.lineTo(R,y);x.stroke();
 
   // ---------- ข้อมูลลูกค้า (ซ้าย) + meta (ขวา) ----------
@@ -2844,8 +2853,8 @@ async function drawBill(o,billNo,extra){
     x.font='400 13px "IBM Plex Sans Thai"';x.fillText(c.tax_id,PAD+90,y);y+=20;}
   if(c.phone){x.font='700 13.5px "IBM Plex Sans Thai"';x.fillText('โทรศัพท์:',PAD,y);
     x.font='400 13px "IBM Plex Sans Thai"';x.fillText(c.phone,PAD+70,y);y+=20;}
-  // ที่อยู่จัดส่ง (เฉพาะเต็มรูปแบบ ถ้าต่างจากที่อยู่ออกบิล)
-  if(_full){
+  // ที่อยู่จัดส่ง + ผู้รับสินค้า (ขึ้นเสมอ ถ้ามีข้อมูลและต่างจากที่อยู่ออกบิล)
+  {
     const shipAddr=c.ship_address||'';
     if(shipAddr && shipAddr!==billAddr){
       x.font='700 13.5px "IBM Plex Sans Thai"';x.fillStyle='#111';x.fillText('ที่อยู่จัดส่ง:',PAD,y);
@@ -2935,7 +2944,7 @@ async function drawBill(o,billNo,extra){
 
   // ---------- ช่องเซ็น 3 จุด ----------
   y+=80;
-  const cols=_full?['ผู้รับสินค้า','ผู้ส่งสินค้า','ผู้รับเงิน','ผู้อนุมัติ']:['ผู้รับสินค้า','ผู้ส่งสินค้า','ผู้รับเงิน'];
+  const cols=_seller==='full'?['ผู้รับสินค้า','ผู้ส่งสินค้า','ผู้รับเงิน','ผู้อนุมัติ']:['ผู้รับสินค้า','ผู้ส่งสินค้า','ผู้รับเงิน'];
   const colW=(Wmm-2*PAD)/cols.length;
   x.textAlign='center';x.fillStyle='#111';
   cols.forEach((t,i)=>{
@@ -3035,7 +3044,8 @@ async function makeBill(orderId,btn,sendLine){
   btn.disabled=true;btn.textContent='กำลังออกบิล…';
   try{
     const billNo=await nextBillNo();
-    const result=await drawBill(o,billNo,{shipFee,discount,grand,revision:1,docType,fullForm:window._issueFullForm||false});
+    const sellerMode=document.getElementById('bs-seller-'+orderId)?.value||o.customers?.bill_seller_mode||'none';
+    const result=await drawBill(o,billNo,{shipFee,discount,grand,revision:1,docType,sellerMode});
     const cv=result.cv;
     const blob=await new Promise(res=>cv.toBlob(res,'image/png'));
 
@@ -3053,7 +3063,7 @@ async function makeBill(orderId,btn,sendLine){
 
     const {error:insErr}=await db.from('bills').insert({
       bill_no:billNo,order_id:o.id,customer_id:o.customers.id,
-      total:grand,shipping_fee:shipFee,discount:discount,revision:1,doc_type:docType,
+      total:grand,shipping_fee:shipFee,discount:discount,revision:1,doc_type:docType,seller_mode:sellerMode,
       image_url:imageUrl,line_sent:false});
     if(insErr)throw new Error('บันทึกบิลไม่สำเร็จ: '+insErr.message);
     await db.from('orders').update({status:'billed'}).eq('id',o.id);
@@ -3487,7 +3497,7 @@ async function downloadBillPDF(billId,btn){
   try{
     // ดึงข้อมูลบิลเต็ม (รวมค่าส่ง/ส่วนลด/ประเภท/เวอร์ชัน ให้ PDF ตรงกับบิลจริง)
     const {data:bill}=await db.from('bills')
-      .select('order_id,bill_no,shipping_fee,discount,total,revision,doc_type')
+      .select('order_id,bill_no,shipping_fee,discount,total,revision,doc_type,seller_mode')
       .eq('id',billId).single();
     if(!bill)throw new Error('ไม่พบบิล');
     const {data:o,error}=await db.from('orders')
@@ -3496,7 +3506,7 @@ async function downloadBillPDF(billId,btn){
     if(error||!o)throw new Error('โหลดข้อมูลบิลไม่ได้');
     const result=await drawBill(o,bill.bill_no,{
       shipFee:Number(bill.shipping_fee)||0,discount:Number(bill.discount)||0,
-      grand:Number(bill.total),revision:bill.revision||1,docType:bill.doc_type||'บิลเงินสด'});
+      grand:Number(bill.total),revision:bill.revision||1,docType:bill.doc_type||'บิลเงินสด',sellerMode:bill.seller_mode||'none'});
     const pdf=await billToPDF(result,bill.bill_no);
     pdf.save(bill.bill_no+'.pdf');
     toast('ดาวน์โหลด PDF '+bill.bill_no+' แล้ว');
@@ -4093,18 +4103,16 @@ function qtReuse(id){
 /* ---- ออกบิลจากหน้าบัญชี (บิลเงินสด ไม่มีค่าส่ง/ส่วนลด — ถ้าต้องใส่ ใช้หน้าทำบิล) ---- */
 async function acIssueBill(orderId,btn,silent){
   const {data:o,error}=await db.from('orders')
-    .select(`*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,ship_shop_name,ship_receiver,ship_phone,ship_address),
+    .select(`*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,bill_seller_mode,ship_shop_name,ship_receiver,ship_phone,ship_address),
              order_items(qty,price,amount,product_id,products(name,unit))`)
     .eq('id',orderId).single();
   if(error||!o){toast('โหลดออเดอร์ไม่ได้: '+(error?.message||''));return;}
   if(o.status!=='new'){if(silent)throw new Error(o.order_no+' ถูกออกบิล/ยกเลิกไปแล้ว');toast('ออเดอร์นี้ถูกออกบิล/ยกเลิกไปแล้ว');loadBills();return;}
   if(!silent){
     if(!confirm('ออกบิล '+o.order_no+' ('+(o.customers?.doc_type||'บิลเงินสด')+')\nยอด ฿'+fmt(o.total)+'\n\n✓ ระบบจะดาวน์โหลด PDF ให้ทันที\n✗ ยังไม่ส่งเข้ากลุ่ม LINE — กดปุ่ม "ส่ง LINE" ที่แถวบิลทีหลังได้'))return;
-    window._issueFullForm=confirm('📄 ต้องการออก "บิลเต็มรูปแบบ" (ใบเสร็จ/ใบกำกับภาษี มีข้อมูลบริษัท ที่อยู่ออกบิล-จัดส่ง เลขผู้เสียภาษี ช่องเซ็น) ไหม?\n\nตกลง = บิลเต็มรูปแบบ\nยกเลิก = บิลปกติ');
-  }else window._issueFullForm=false;
+  }
   if(!orders.some(x=>x.id===o.id))orders.push(o);
-  await makeBill(o.id,btn,false);   // ออกบิลอย่างเดียว ไม่ยิง LINE
-  window._issueFullForm=false;
+  await makeBill(o.id,btn,false);   // ใช้ค่า "ข้อมูลร้านเราบนบิล" ที่ตั้งไว้ที่ลูกค้า
   // ดาวน์โหลด PDF ของบิลที่เพิ่งออก
   try{
     const {data:nb}=await db.from('bills').select('id')
@@ -5127,7 +5135,7 @@ async function saveEditBill(btn){
     const {data:o2}=await db.from('orders')
       .select('*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(qty,price,amount,product_id,products(name,unit))')
       .eq('id',o.id).single();
-    const result=await drawBill(o2,b.bill_no,{shipFee:ship,discount:disc,grand,revision:newRev,docType:b.doc_type||'บิลเงินสด',editNote});
+    const result=await drawBill(o2,b.bill_no,{shipFee:ship,discount:disc,grand,revision:newRev,docType:b.doc_type||'บิลเงินสด',sellerMode:b.seller_mode||'none',editNote});
     const blob=await new Promise(res=>result.cv.toBlob(res,'image/png'));
     const path=b.bill_no+'_v'+newRev+'-'+rndTag(10)+'.png';
     const {error:upErr}=await db.storage.from('bills').upload(path,blob,{contentType:'image/png',upsert:true});
