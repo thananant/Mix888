@@ -169,6 +169,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div class="mhead" onclick="toggleGroup('prod')"><span class="ic">📦</span>สินค้า<span class="badge" id="grp-prod-badge" style="display:none">0</span><span class="chev">▾</span></div>
       <div class="msub">
         <div class="mi" data-page="products" onclick="showPage('products')"><span class="ic">📦</span>สินค้า</div>
+        <div class="mi" data-page="moves" onclick="showPage('moves')"><span class="ic">📊</span>เดินรายการสินค้า</div>
         <div class="mi" data-page="transfer" onclick="showPage('transfer')"><span class="ic">🚛</span>โอนโกดัง<span class="badge" id="tf-badge" style="display:none">0</span></div>
         <div class="mi" data-page="receive" onclick="showPage('receive')"><span class="ic">📥</span>รับสินค้า<span class="badge" id="rc-badge" style="display:none">0</span></div>
         <div class="mi" data-page="warehouse" onclick="showPage('warehouse')"><span class="ic">🏭</span>คลังสินค้า</div>
@@ -288,6 +289,36 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 </div>
 
 <!-- ============ สินค้า ============ -->
+<div class="page" id="page-moves">
+  <div class="pagehead"><h2>เดินรายการสินค้า</h2></div>
+  <div class="card">
+    <div class="row" style="flex-wrap:wrap;align-items:flex-end;gap:10px">
+      <div style="flex:1;min-width:200px"><label>สินค้า</label>
+        <input id="mv-q" list="mv-prodlist" placeholder="ทุกสินค้า — พิมพ์ SKU หรือชื่อ…" style="width:100%" onchange="loadMoves()">
+        <datalist id="mv-prodlist"></datalist></div>
+      <div><label>ประเภท</label><select id="mv-type" onchange="loadMoves()"><option value="">ทุกประเภท</option>
+        <option value="receive">📥 รับเข้า</option><option value="ship">🚚 ตัดส่ง</option>
+        <option value="reserve">🛒 จอง</option><option value="unreserve">↩️ คืนยอดจอง</option>
+        <option value="adjust">⚖️ ปรับสต๊อก</option><option value="convert_in">🔄 แปลงเข้า</option>
+        <option value="convert_out">🔄 แปลงออก</option><option value="transfer_in">📥 โอนเข้า</option>
+        <option value="transfer_out">📤 โอนออก</option><option value="waste">🗑️ ของเสีย</option></select></div>
+      <div><label>โกดัง</label><select id="mv-wh" onchange="loadMoves()"><option value="">ทุกโกดัง</option></select></div>
+      <div><label>ตั้งแต่</label><input type="date" id="mv-from" onchange="loadMoves()"></div>
+      <div><label>ถึง</label><input type="date" id="mv-to" onchange="loadMoves()"></div>
+      <button class="btn-p" onclick="loadMoves()">🔎 ดูรายการ</button>
+      <button class="btn-g" onclick="mvExport()">⬇️ CSV</button>
+    </div>
+    <div id="mv-sum" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px"></div>
+    <div style="overflow-x:auto;margin-top:10px"><table>
+      <thead><tr><th>วันที่</th><th>SKU</th><th>ชื่อสินค้า</th><th>ประเภท</th><th class="num">จำนวน</th><th>โกดัง</th><th>อ้างอิง</th><th>โดย</th></tr></thead>
+      <tbody id="mv-body"><tr><td colspan="8" class="empty">กด "ดูรายการ" เพื่อโหลด</td></tr></tbody></table></div>
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+      <button class="btn-g" id="mv-more" onclick="loadMoves(true)" style="display:none">โหลดเพิ่ม 500 รายการ</button>
+      <span id="mv-note" class="hint"></span>
+    </div>
+  </div>
+</div>
+
 <div class="page" id="page-products">
   <div class="pagehead"><h2>สินค้า</h2></div>
   <div class="card">
@@ -1217,6 +1248,7 @@ function showPage(p){
   if(p==='account') loadBills();
   if(p==='receive') loadProducts();
   if(p==='warehouse') loadWarehouse();
+  if(p==='moves'){mvInit();loadMoves();}
   if(p==='skucat') loadSkuCatPage();
   if(p==='users') loadUsers();
 }
@@ -5998,6 +6030,91 @@ async function alertOps(where,detail){
 }
 window.addEventListener('error',e=>{alertOps('โค้ดหน้าจอผิดพลาด',(e.message||'')+' @'+String(e.filename||'').split('/').pop()+':'+e.lineno);});
 window.addEventListener('unhandledrejection',e=>{const r=e.reason;alertOps('งานเบื้องหลังล้มเหลว',(r&&(r.message||r.error_description))||String(r||''));});
+
+/* ==================== หน้าเดินรายการสินค้า ==================== */
+let mvRows=[], mvLimit=500;
+function mvInit(){
+  const wh=document.getElementById('mv-wh');
+  if(wh&&wh.options.length<=1)whList.forEach(w=>wh.insertAdjacentHTML('beforeend','<option value="'+w.id+'">'+esc(w.name)+'</option>'));
+  const dl=document.getElementById('mv-prodlist');
+  if(dl)dl.innerHTML=products.map(p=>'<option value="'+esc(p.sku)+' · '+esc(p.name)+'">').join('');
+  const f=document.getElementById('mv-from');
+  if(f&&!f.value){const d=new Date(Date.now()-29*86400000);f.value=d.toISOString().slice(0,10);}
+}
+function mvFindProduct(){
+  const q=(document.getElementById('mv-q').value||'').trim().toLowerCase();
+  if(!q)return null;
+  const sku=q.split('·')[0].trim();
+  return products.find(p=>String(p.sku).toLowerCase()===sku)
+      || products.find(p=>String(p.sku).toLowerCase().includes(q)||String(p.name).toLowerCase().includes(q))
+      || null;
+}
+async function loadMoves(more){
+  const body=document.getElementById('mv-body');
+  mvLimit=more?mvLimit+500:500;
+  body.innerHTML='<tr><td colspan="8" class="empty">กำลังโหลด…</td></tr>';
+  let qy=db.from('stock_movements').select('product_id,type,qty,ref_id,note,created_at,created_by')
+        .order('created_at',{ascending:false}).limit(mvLimit);
+  const prod=mvFindProduct();
+  if(prod)qy=qy.eq('product_id',prod.id);
+  const tp=document.getElementById('mv-type').value; if(tp)qy=qy.eq('type',tp);
+  const f=document.getElementById('mv-from').value; if(f)qy=qy.gte('created_at',new Date(f+'T00:00:00').toISOString());
+  const t=document.getElementById('mv-to').value;   if(t)qy=qy.lte('created_at',new Date(t+'T23:59:59').toISOString());
+  const {data,error}=await qy;
+  if(error){body.innerHTML='<tr><td colspan="8" class="empty">โหลดไม่ได้: '+esc(error.message)+'</td></tr>';return;}
+  let rows=data||[];
+  const whF=document.getElementById('mv-wh').value;
+  if(whF)rows=rows.filter(m=>String(mvWhId(m))===String(whF));
+  // อ้างอิงเลขบิล/ออเดอร์
+  const bIds=[...new Set(rows.filter(m=>m.type==='ship'&&m.ref_id).map(m=>m.ref_id))];
+  const oIds=[...new Set(rows.filter(m=>['reserve','unreserve'].includes(m.type)&&m.ref_id).map(m=>m.ref_id))];
+  const refB={},refO={};
+  if(bIds.length){const {data:d}=await db.from('bills').select('id,bill_no').in('id',bIds.slice(0,900));(d||[]).forEach(b=>refB[b.id]=b.bill_no);}
+  if(oIds.length){const {data:d}=await db.from('orders').select('id,order_no').in('id',oIds.slice(0,900));(d||[]).forEach(o=>refO[o.id]=o.order_no);}
+  mvRows=rows.map(m=>{
+    const p=products.find(x=>x.id===m.product_id)||{};
+    const [lbl]=MOVE_LABEL[m.type]||[m.type];
+    const wid=mvWhId(m), w=whList.find(x=>x.id===wid);
+    return {at:m.created_at,sku:p.sku||'',name:p.name||'?',type:m.type,label:lbl,qty:Number(m.qty)||0,
+      unit:p.unit||'',wh:w?w.name:'',ref:m.type==='ship'?(refB[m.ref_id]||''):(['reserve','unreserve'].includes(m.type)?(refO[m.ref_id]||''):''),
+      note:(m.note&&!/^wh:/.test(m.note))?m.note:'',by:m.created_by||''};
+  });
+  renderMoves();
+}
+function mvWhId(m){const g=/wh:(\d+)/.exec(m.note||'');return g?Number(g[1]):null;}
+function renderMoves(){
+  const body=document.getElementById('mv-body');
+  const inQ=mvRows.filter(r=>r.qty>0).reduce((s,r)=>s+r.qty,0);
+  const outQ=mvRows.filter(r=>r.qty<0).reduce((s,r)=>s+r.qty,0);
+  document.getElementById('mv-sum').innerHTML=
+     '<div style="flex:1;min-width:130px;border:1px solid var(--line,#eee);border-left:4px solid #159b78;border-radius:10px;padding:8px 10px"><div style="font-size:11.5px;color:var(--muted)">ของเข้า</div><div style="font-size:17px;font-weight:700;color:#159b78">+'+inQ.toLocaleString()+'</div></div>'
+    +'<div style="flex:1;min-width:130px;border:1px solid var(--line,#eee);border-left:4px solid #b52020;border-radius:10px;padding:8px 10px"><div style="font-size:11.5px;color:var(--muted)">ของออก</div><div style="font-size:17px;font-weight:700;color:#b52020">'+outQ.toLocaleString()+'</div></div>'
+    +'<div style="flex:1;min-width:130px;border:1px solid var(--line,#eee);border-left:4px solid #7a5a00;border-radius:10px;padding:8px 10px"><div style="font-size:11.5px;color:var(--muted)">สุทธิ</div><div style="font-size:17px;font-weight:700">'+(inQ+outQ).toLocaleString()+'</div></div>';
+  if(!mvRows.length){body.innerHTML='<tr><td colspan="8" class="empty">ไม่พบรายการในช่วงที่เลือก</td></tr>';}
+  else body.innerHTML=mvRows.map(r=>{
+    const d=new Date(r.at).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+    return '<tr><td style="font-size:12.5px;color:var(--muted);white-space:nowrap">'+d+'</td>'
+      +'<td style="font-size:12.5px"><b>'+esc(r.sku)+'</b></td><td style="font-size:13px">'+esc(r.name)+'</td>'
+      +'<td style="font-size:12.5px;white-space:nowrap">'+esc(r.label)+'</td>'
+      +'<td class="num" style="font-weight:700;color:'+(r.qty>0?'#159b78':'#b52020')+'">'+(r.qty>0?'+':'')+r.qty+' '+esc(r.unit)+'</td>'
+      +'<td style="font-size:12.5px">'+esc(r.wh)+'</td>'
+      +'<td style="font-size:12.5px">'+esc(r.ref||r.note)+'</td>'
+      +'<td style="font-size:12px;color:var(--muted)">'+esc(r.by)+'</td></tr>';
+  }).join('');
+  document.getElementById('mv-more').style.display=mvRows.length>=mvLimit?'':'none';
+  document.getElementById('mv-note').textContent='แสดง '+mvRows.length.toLocaleString()+' รายการ'+(mvRows.length>=mvLimit?' (อาจมีมากกว่านี้ — กดโหลดเพิ่ม)':'');
+}
+function mvExport(){
+  if(!mvRows.length){toast('ยังไม่มีรายการให้ส่งออก');return;}
+  const head=['วันที่','SKU','ชื่อสินค้า','ประเภท','จำนวน','หน่วย','โกดัง','อ้างอิง','โดย'];
+  const esc2=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+  const lines=[head.map(esc2).join(',')].concat(mvRows.map(r=>[
+    new Date(r.at).toLocaleString('th-TH'),r.sku,r.name,r.label,r.qty,r.unit,r.wh,r.ref||r.note,r.by].map(esc2).join(',')));
+  const url=URL.createObjectURL(new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv;charset=utf-8'}));
+  const a=document.createElement('a');a.href=url;a.download='เดินรายการสินค้า-'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),4000);
+  toast('ส่งออก '+mvRows.length+' รายการแล้ว ✓');
+}
 
 /* ==================== ลูกหนี้ค้างชำระ (AR Aging) ==================== */
 const AR_BUCKETS=[{k:'0-7',lo:0,hi:7,c:'#159b78'},{k:'8-15',lo:8,hi:15,c:'#8ba300'},
