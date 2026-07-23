@@ -876,6 +876,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <input type="date" id="ac-to" onchange="renderAccount()" title="ถึงวันที่">
       <input id="ac-q" placeholder="ค้นหาเลขบิล / ลูกค้า…" style="flex:1;min-width:150px" oninput="renderAccount()">
       <button class="btn-p mini" id="ac-issue-sel" onclick="acIssueSelected(this)" style="display:none">🧾 ออกบิลที่เลือก</button>
+      <button class="btn-p mini" id="ac-pdf-sel" onclick="acPdfSelected(this)" style="display:none">📄 โหลด PDF ที่เลือก</button>
       <label>ผู้ตรวจ</label><input id="ac-staff" style="width:100px" placeholder="ชื่อ">
       <input type="month" id="ac-month" style="width:140px" title="เดือนสำหรับ Export Excel">
       <button class="btn-g" onclick="exportMonthExcel(this)">📊 Excel รายเดือน</button>
@@ -884,7 +885,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th>เลขบิล / SO</th><th>ลูกค้า</th><th class="num">ยอด</th><th>ออกเมื่อ</th><th>LINE</th><th>ส่ง</th><th>ชำระ</th><th>รับยอดโดย</th><th>ขนส่ง</th><th class="num">ค่าใช้จ่าย</th><th></th></tr></thead>
+      <thead><tr><th><input type="checkbox" onclick="acSelAllBills(this)" title="เลือก/ไม่เลือกบิลทั้งหมดในหน้านี้" style="width:16px;height:16px;vertical-align:-3px;margin-right:4px">เลขบิล / SO</th><th>ลูกค้า</th><th class="num">ยอด</th><th>ออกเมื่อ</th><th>LINE</th><th>ส่ง</th><th>ชำระ</th><th>รับยอดโดย</th><th>ขนส่ง</th><th class="num">ค่าใช้จ่าย</th><th></th></tr></thead>
       <tbody id="ac-body"></tbody>
     </table>
     </div>
@@ -3531,8 +3532,9 @@ function setFilter(f){
   document.querySelectorAll('.fbtn').forEach(b=>b.classList.toggle('active',b.dataset.f===f));
   renderAccount();
 }
-async function downloadBillPDF(billId,btn){
-  btn.disabled=true;btn.textContent='…';
+async function downloadBillPDF(billId,btn,silent){
+  const _t0=btn?btn.textContent:'';
+  if(btn&&!silent){btn.disabled=true;btn.textContent='…';}
   try{
     // ดึงข้อมูลบิลเต็ม (รวมค่าส่ง/ส่วนลด/ประเภท/เวอร์ชัน ให้ PDF ตรงกับบิลจริง)
     const {data:bill}=await db.from('bills')
@@ -3548,9 +3550,14 @@ async function downloadBillPDF(billId,btn){
       grand:Number(bill.total),revision:bill.revision||1,docType:bill.doc_type||'บิลเงินสด',sellerMode:bill.seller_mode||'none'});
     const pdf=await billToPDF(result,bill.bill_no);
     pdf.save(bill.bill_no+'.pdf');
-    toast('ดาวน์โหลด PDF '+bill.bill_no+' แล้ว');
-  }catch(e){toast('สร้าง PDF ไม่สำเร็จ: '+(e.message||e));}
-  btn.disabled=false;btn.textContent='PDF';
+    if(!silent)toast('ดาวน์โหลด PDF '+bill.bill_no+' แล้ว');
+    return bill.bill_no;
+  }catch(e){
+    if(silent)throw e;
+    toast('สร้าง PDF ไม่สำเร็จ: '+(e.message||e));
+  }finally{
+    if(btn&&!silent){btn.disabled=false;btn.textContent=_t0||'PDF';}
+  }
 }
 function shipTag(s){
   if(s==='shipped')return '<span class="tag tag-ok">ส่งแล้ว</span>';
@@ -3615,7 +3622,7 @@ function renderAccount(){
     const pd=b.paid_at?new Date(b.paid_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
     const opin=b.orders&&b.orders.pinned, onote=b.orders&&b.orders.op_note;
     return `<tr${opin?' style="background:#fffbe8"':''}>
-      <td>${opin?'📌 ':''}<b>${esc(b.bill_no)}</b>${(b.revision||1)>1?' <span class="tag tag-low">v.'+b.revision+'</span>':''}${b.orders?.order_no?'<div style="font-size:12px;color:var(--muted)">'+esc(b.orders.order_no)+'</div>':''}${onote?'<div style="font-size:12px;color:#a06b00;background:#fff3d6;border-radius:6px;padding:2px 6px;margin-top:3px;max-width:200px">📝 '+esc(onote)+'</div>':''}</td>
+      <td><input type="checkbox" class="ac-selb" value="${b.id}" onchange="acSelCount()" style="width:17px;height:17px;vertical-align:-3px;margin-right:4px">${opin?'📌 ':''}<b>${esc(b.bill_no)}</b>${(b.revision||1)>1?' <span class="tag tag-low">v.'+b.revision+'</span>':''}${b.orders?.order_no?'<div style="font-size:12px;color:var(--muted)">'+esc(b.orders.order_no)+'</div>':''}${onote?'<div style="font-size:12px;color:#a06b00;background:#fff3d6;border-radius:6px;padding:2px 6px;margin-top:3px;max-width:200px">📝 '+esc(onote)+'</div>':''}</td>
       <td>${esc(b.customers?.code)} · ${esc(b.customers?.name)}</td>
       <td class="num"><b>${fmt(b.total)}</b></td>
       <td style="font-size:13px;color:var(--muted)">${d}</td>
@@ -4167,6 +4174,29 @@ function acSelCount(){
   const b=document.getElementById('ac-issue-sel');
   b.style.display=n?'':'none';
   b.textContent='🧾 ออกบิลที่เลือก ('+n+')';
+  const m=document.querySelectorAll('.ac-selb:checked').length;
+  const p=document.getElementById('ac-pdf-sel');
+  p.style.display=m?'':'none';
+  p.textContent='📄 โหลด PDF ที่เลือก ('+m+')';
+}
+function acSelAllBills(cb){
+  document.querySelectorAll('.ac-selb').forEach(x=>x.checked=cb.checked);
+  acSelCount();
+}
+async function acPdfSelected(btn){
+  const ids=[...document.querySelectorAll('.ac-selb:checked')].map(x=>Number(x.value));
+  if(!ids.length){toast('ติ๊กเลือกบิลก่อน');return;}
+  if(!confirm('ดาวน์โหลด PDF '+ids.length+' ใบ (แยกไฟล์ ชื่อไฟล์ = เลขบิล)\n\nเบราว์เซอร์อาจถามอนุญาตดาวน์โหลดหลายไฟล์ — กดอนุญาต'))return;
+  const t0=btn.textContent;btn.disabled=true;
+  let ok=0;const fails=[];
+  for(let i=0;i<ids.length;i++){
+    btn.textContent='กำลังสร้าง '+(i+1)+'/'+ids.length+'…';
+    try{await downloadBillPDF(ids[i],null,true);ok++;}
+    catch(e){fails.push(String(e.message||e));}
+    await new Promise(r=>setTimeout(r,350));
+  }
+  btn.disabled=false;btn.textContent=t0;acSelCount();
+  toast('ดาวน์โหลด PDF แล้ว '+ok+'/'+ids.length+' ใบ'+(fails.length?' · พลาด '+fails.length+' ใบ':' ✓'));
 }
 async function acIssueSelected(btn){
   const ids=[...document.querySelectorAll('.ac-sel:checked')].map(x=>Number(x.value));
