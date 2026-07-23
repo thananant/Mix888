@@ -1026,6 +1026,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-p" id="lk-send" onclick="lkSend(this)">📲 ส่งเข้ากลุ่ม LINE</button>
       <button class="btn-g" onclick="window.open(document.getElementById('lk-url').value,'_blank')">👁️ เปิดดู</button>
       <button class="btn-g" onclick="openResetLink()" title="สร้างลิงก์ใหม่ — ลิงก์เดิมใช้ไม่ได้ทันที">🔄 เปลี่ยนลิงก์ใหม่</button>
+      <button class="btn-g" onclick="managePin()" title="รหัสยืนยันคำสั่งซื้อ 6 หลัก">🔐 รหัสสั่งซื้อ</button>
       <button class="btn-g" style="margin-left:auto" onclick="document.getElementById('link-modal').style.display='none'">ปิด</button>
     </div>
     <p class="hint" id="lk-hint" style="margin-top:8px"></p>
@@ -2413,6 +2414,26 @@ function newOrderToken(){
   return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(9))))
     .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
 }
+async function managePin(){
+  const c=customers.find(x=>x.id===lkCustomerId);if(!c)return;
+  const {data,error}=await db.from('customers').select('order_pin,pin_updated_at').eq('id',c.id).single();
+  if(error){toast('อ่านรหัสไม่ได้: '+error.message+' (รัน order_pin.sql หรือยัง?)');return;}
+  const cur=data&&data.order_pin?String(data.order_pin):'';
+  const when=data&&data.pin_updated_at?new Date(data.pin_updated_at).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+  const info=cur?('รหัสปัจจุบัน: '+cur+(when?'\nตั้งเมื่อ '+when:'')):'ยังไม่ได้ตั้งรหัส — ตอนนี้ใครมีลิงก์ก็สั่งได้';
+  const v=prompt('🔐 รหัสยืนยันคำสั่งซื้อ — '+c.code+' '+c.name+'\n\n'+info
+    +'\n\n• ใส่เลข 6 หลัก = ตั้ง/เปลี่ยนรหัสให้เลย'
+    +'\n• เว้นว่างแล้วกดตกลง = ยกเลิกการใช้รหัส (กลับไปสั่งได้เลย)'
+    +'\n• ปกติให้ร้านตั้งเองในกลุ่มไลน์: พิมพ์เลข 6 หลัก / เปลี่ยน <6 หลัก>', cur);
+  if(v===null)return;
+  const pin=String(v).replace(/\D/g,'');
+  if(v.trim()!==''&&pin.length!==6){toast('ต้องเป็นตัวเลข 6 หลัก');return;}
+  if(v.trim()===''&&cur&&!confirm('⚠️ ยกเลิกการใช้รหัสของร้านนี้?\nหลังจากนี้ใครมีลิงก์ก็สั่งของได้ทันที'))return;
+  const {error:e2}=await db.from('customers').update({
+    order_pin:pin||null,pin_updated_at:pin?new Date().toISOString():null}).eq('id',c.id);
+  if(e2){toast('บันทึกไม่สำเร็จ: '+e2.message);return;}
+  toast(pin?('ตั้งรหัส '+pin+' ให้ '+c.code+' แล้ว ✓ — แจ้งร้านด้วยนะครับ'):'ยกเลิกการใช้รหัสแล้ว');
+}
 function openResetLink(){
   const c=customers.find(x=>x.id===lkCustomerId);if(!c)return;
   document.getElementById('rl-cust').textContent=c.code+' · '+c.name;
@@ -2445,16 +2466,25 @@ async function lkCopy(){
 async function lkSend(btn){
   const c=customers.find(x=>x.id===lkCustomerId);if(!c||!c.line_group_id)return;
   const url=document.getElementById('lk-url').value;
-  if(!confirm('ส่งลิงก์สั่งซื้อเข้ากลุ่ม LINE ของ "'+c.name+'" เลยไหม?'))return;
+  // ดึงรหัสล่าสุดเสมอ — ถ้าร้านเปลี่ยนรหัสไปแล้ว จะได้ส่งตัวใหม่ ไม่ใช่ตัวเก่า
+  let pin='';
+  try{
+    const {data:pc}=await db.from('customers').select('order_pin').eq('id',c.id).single();
+    pin=(pc&&pc.order_pin)?String(pc.order_pin):'';
+  }catch(e){}
+  if(!confirm('ส่งลิงก์สั่งซื้อเข้ากลุ่ม LINE ของ "'+c.name+'" เลยไหม?'
+    +(pin?'\n\n🔐 จะแนบรหัสยืนยัน '+pin+' ไปด้วย':'\n\n(ร้านนี้ยังไม่มีรหัสยืนยัน)')))return;
   btn.disabled=true;
+  const txt='🛒 ลิงก์สั่งสินค้า Mix Fresh 168\nร้าน: '+c.name+(c.branch_name?' \u2022 '+c.branch_name:'')+' ('+c.code+')\n\nกดสั่งได้เลยครับ 👇\n'+url
+    +(pin?'\n\n🔐 รหัสยืนยันตอนกดสั่ง: '+pin
+      +'\n(กรอกครั้งเดียว เครื่องเดิมจำให้)'
+      +'\nเปลี่ยนรหัสเองได้ตลอด พิมพ์ในกลุ่มนี้ว่า\nเปลี่ยน 123456':'');
   const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
-    to:c.line_group_id,
-    messages:[{type:'text',
-      text:'🛒 ลิงก์สั่งสินค้า Mix Fresh 168\nร้าน: '+c.name+(c.branch_name?' \u2022 '+c.branch_name:'')+' ('+c.code+')\n\nกดสั่งได้เลยครับ 👇\n'+url}]
+    to:c.line_group_id, messages:[{type:'text',text:txt}]
   }});
   btn.disabled=false;
   if(fnErr||!res||res.status!==200){toast('ส่ง LINE ไม่สำเร็จ — คัดลอกลิงก์ส่งเองได้');return;}
-  toast('✓ ส่งลิงก์เข้ากลุ่ม LINE ของ '+c.name+' แล้ว');
+  toast('✓ ส่งลิงก์'+(pin?' + รหัส '+pin:'')+' เข้ากลุ่ม LINE ของ '+c.name+' แล้ว');
   document.getElementById('link-modal').style.display='none';
 }
 
