@@ -1866,7 +1866,14 @@ async function loadCustomers(){
   if(error){toast('โหลดลูกค้าไม่ได้: '+error.message);return;}
   customers=data||[];
   qtInit(); shcInit(); fillParentSelect(editCustomerId||null);
-  const {data:cp}=await db.from('customer_prices').select('customer_id');
+  const cp=[];let cpFrom=0;                       // ดึงทีละหน้าให้ครบ (ค่าเริ่มต้นตัดที่ 1,000 แถว ทำให้นับขาด)
+  for(;;){
+    const {data:pg,error:cpErr}=await db.from('customer_prices').select('customer_id').range(cpFrom,cpFrom+999);
+    if(cpErr||!pg||!pg.length)break;
+    cp.push(...pg);
+    if(pg.length<1000)break;
+    cpFrom+=1000;
+  }
   window._priceCounts={};(cp||[]).forEach(r=>window._priceCounts[r.customer_id]=(window._priceCounts[r.customer_id]||0)+1);
   renderCustomers();
 }
@@ -1878,8 +1885,9 @@ function renderCustomers(){
   document.getElementById('c-body').innerHTML=list.map(c=>{
     const sname=saleName(c.sale_id)||c.sale_name;
     const inactive=c.active===false;
-    return `<tr${inactive?' style="opacity:.5"':''}>
-    <td><b>${esc(c.code)}</b>${inactive?' <span class="tag tag-out">ปิดใช้งาน</span>':''}</td>
+    const crmBg=c.crm_color==='red'?'#fdecec':c.crm_color==='yellow'?'#fdf6dd':c.crm_color==='green'?'#e8f6ef':'';
+    return `<tr style="${inactive?'opacity:.5;':''}${crmBg?'background:'+crmBg:''}">
+    <td><span onclick="cycleCrmColor(${c.id})" style="cursor:pointer" title="คลิกเปลี่ยนสี: ⚪→🔴→🟡→🟢">${crmDot(c.crm_color)}</span> <b>${esc(c.code)}</b> <span onclick="editCrmNote(${c.id})" style="cursor:pointer" title="โน้ตลูกค้า">📝</span>${inactive?' <span class="tag tag-out">ปิดใช้งาน</span>':''}${c.crm_note?'<div style="font-size:11.5px;color:#7a5a00;background:#fff3d6;border-radius:6px;padding:2px 6px;margin-top:3px;max-width:170px">'+esc(c.crm_note)+'</div>':''}</td>
     <td>${c.parent_id?'<span style="color:var(--muted)">↳ </span>':''}${esc(c.name)}${
       c.parent_id
         ?' <span class="tag tag-low">🏬 '+esc(c.branch_name||'สาขา')+'</span><div style="font-size:11.5px;color:var(--muted)">สาขาของ '+esc(customers.find(p=>p.id===c.parent_id)?.name||'?')+'</div>'
@@ -3057,12 +3065,16 @@ async function sendSummaryRange(btn,rStart,rEnd,mode){
   });
   const fD=d=>d.toLocaleDateString('th-TH',{day:'2-digit',month:'2-digit',year:'numeric'});
   const dateStr=mode==='custom'?fD(rStart)+' - '+fD(rEnd):fD(new Date());
+  // เลขออเดอร์ตรงกับใบปะหน้า: ลำดับตามเวลาสั่ง นับรวมทุกออเดอร์ในรอบ (ตัดยกเลิกแล้ว)
+  const daySorted=[...(raw||[])].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+  const seqMap={};daySorted.forEach((o,ix)=>seqMap[o.order_no]=ix+1);
+  const dayTotal=daySorted.length;
   const blocks=[];
   for(const [method,list] of Object.entries(groups)){
     const head='━━━━━━━━━━━━━━\n📦 ออเดอร์ '+method+' '+dateStr+'\n━━━━━━━━━━━━━━';
     const items=list.map((o,i)=>{
       const c=o.customers||{};
-      let t='('+(i+1)+')';
+      let t='(ออเดอร์ '+(seqMap[o.order_no]||(i+1))+'/'+dayTotal+')';
       const bill=(o.bills||[]).find(b=>b.ship_status!=='cancelled');
       if(bill) t+='\nเลขที่บิล : '+bill.bill_no;
       if(c.sale_name) t+='\nSale : '+c.sale_name;
@@ -3241,13 +3253,50 @@ document.addEventListener('click',e=>{
 
 /* ==================== บัญชี ==================== */
 let acPendingOrders=[];
+async function togglePin(orderId,cur){
+  const {error}=await db.from('orders').update({pinned:!cur}).eq('id',orderId);
+  if(error){toast('ปักหมุดไม่สำเร็จ: '+error.message);return;}
+  toast(!cur?'📌 ปักหมุดแล้ว — ขึ้นบนสุดของกลุ่ม':'เอาหมุดออกแล้ว');
+  loadBills();
+}
+async function editOpNote(orderId){
+  let cur='';
+  const b=(bills||[]).find(x=>x.order_id===orderId);
+  if(b&&b.orders&&b.orders.op_note)cur=b.orders.op_note;
+  const o=(acPendingOrders||[]).find(x=>x.id===orderId);
+  if(o&&o.op_note)cur=o.op_note;
+  const v=prompt('📝 โน้ตออเดอร์ (กันลืม) — เว้นว่างแล้วกดตกลง = ลบโน้ต',cur);
+  if(v===null)return;
+  const {error}=await db.from('orders').update({op_note:v.trim()||null}).eq('id',orderId);
+  if(error){toast('บันทึกโน้ตไม่สำเร็จ: '+error.message);return;}
+  toast(v.trim()?'📝 บันทึกโน้ตแล้ว':'ลบโน้ตแล้ว');
+  loadBills();
+}
+function crmDot(col){return col==='red'?'🔴':col==='yellow'?'🟡':col==='green'?'🟢':'⚪';}
+function crmNext(col){const seq=[null,'red','yellow','green'];return seq[(seq.indexOf(col||null)+1)%4];}
+async function cycleCrmColor(id){
+  const c=customers.find(x=>x.id===id);if(!c)return;
+  const next=crmNext(c.crm_color);
+  const {error}=await db.from('customers').update({crm_color:next}).eq('id',id);
+  if(error){toast('เปลี่ยนสีไม่สำเร็จ: '+error.message);return;}
+  c.crm_color=next;renderCustomers();
+}
+async function editCrmNote(id){
+  const c=customers.find(x=>x.id===id);if(!c)return;
+  const v=prompt('📝 โน้ตลูกค้า '+c.code+' — เว้นว่างแล้วกดตกลง = ลบโน้ต',c.crm_note||'');
+  if(v===null)return;
+  const {error}=await db.from('customers').update({crm_note:v.trim()||null}).eq('id',id);
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  c.crm_note=v.trim()||null;renderCustomers();
+  toast(v.trim()?'📝 บันทึกโน้ตลูกค้าแล้ว':'ลบโน้ตแล้ว');
+}
 async function loadBills(){
   const [{data,error},{data:po}]=await Promise.all([
     db.from('bills')
-      .select('*, customers(code,name,branch_name,line_group_id,delivery_method,sale_name,sale_id), orders(order_no)')
+      .select('*, customers(code,name,branch_name,line_group_id,delivery_method,sale_name,sale_id), orders(order_no,pinned,op_note)')
       .order('created_at',{ascending:false}).limit(500),
     db.from('orders')
-      .select('id,order_no,total,created_at, customers(code,name,delivery_method,sale_name,sale_id)')
+      .select('id,order_no,total,created_at,pinned,op_note, customers(code,name,delivery_method,sale_name,sale_id)')
       .eq('status','new').order('created_at',{ascending:false})
   ]);
   if(error){toast('โหลดบิลไม่ได้: '+error.message);return;}
@@ -3333,19 +3382,22 @@ function renderAccount(){
     if(to&&new Date(o.created_at)>new Date(to+'T23:59:59'))return false;
     if(q&&!(o.order_no||'').toLowerCase().includes(q)&&!(o.customers?.name||'').toLowerCase().includes(q))return false;
     return true;
-  }).map(o=>{
+  }).sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0)).map(o=>{
     const d=new Date(o.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
-    return `<tr>
-      <td><span class="tag tag-low">ยังไม่ออกบิล</span><div style="font-size:12px;color:var(--muted)">${esc(o.order_no)}</div></td>
+    return `<tr${o.pinned?' style="background:#fffbe8"':''}>
+      <td>${o.pinned?'📌 ':''}<span class="tag tag-low">ยังไม่ออกบิล</span><div style="font-size:12px;color:var(--muted)">${esc(o.order_no)}</div>${o.op_note?'<div style="font-size:12px;color:#a06b00;background:#fff3d6;border-radius:6px;padding:2px 6px;margin-top:3px;max-width:200px">📝 '+esc(o.op_note)+'</div>':''}</td>
       <td>${esc(o.customers?.code)} · ${esc(o.customers?.name)}</td>
       <td class="num"><b>${fmt(o.total)}</b></td>
       <td style="font-size:13px;color:var(--muted)">${d}</td>
       <td>—</td><td>—</td><td>—</td><td>—</td>
       <td style="white-space:nowrap">
+        <button class="btn-g mini" onclick="togglePin(${o.id},${o.pinned?'true':'false'})" title="ปักหมุดขึ้นบนสุด">📌</button>
+        <button class="btn-g mini" onclick="editOpNote(${o.id})" title="โน้ตกันลืม">📝</button>
         <button class="btn-p mini" onclick="acIssueBill(${o.id},this)">🧾 ออกบิลเลย</button>
         <button class="btn-g mini" onclick="showPage('orders')" title="ไปหน้าทำบิล (ใส่ค่าส่ง/ส่วนลด/ประเภทบิลได้)">หน้าทำบิล</button>
       </td></tr>`;
   });
+  list.sort((a,b)=>((b.orders&&b.orders.pinned)?1:0)-((a.orders&&a.orders.pinned)?1:0));
   window.acLastList=list;
   if(!list.length&&!pendRows.length){el.innerHTML='<tr><td colspan="9" class="empty">ไม่มีบิลในหมวดนี้</td></tr>';return;}
   el.innerHTML=pendRows.join('')+list.map(b=>{
@@ -3353,8 +3405,9 @@ function renderAccount(){
     const paid=b.payment_status==='paid';
     const ss=b.ship_status||'pending';
     const pd=b.paid_at?new Date(b.paid_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
-    return `<tr>
-      <td><b>${esc(b.bill_no)}</b>${(b.revision||1)>1?' <span class="tag tag-low">v.'+b.revision+'</span>':''}${b.orders?.order_no?'<div style="font-size:12px;color:var(--muted)">'+esc(b.orders.order_no)+'</div>':''}</td>
+    const opin=b.orders&&b.orders.pinned, onote=b.orders&&b.orders.op_note;
+    return `<tr${opin?' style="background:#fffbe8"':''}>
+      <td>${opin?'📌 ':''}<b>${esc(b.bill_no)}</b>${(b.revision||1)>1?' <span class="tag tag-low">v.'+b.revision+'</span>':''}${b.orders?.order_no?'<div style="font-size:12px;color:var(--muted)">'+esc(b.orders.order_no)+'</div>':''}${onote?'<div style="font-size:12px;color:#a06b00;background:#fff3d6;border-radius:6px;padding:2px 6px;margin-top:3px;max-width:200px">📝 '+esc(onote)+'</div>':''}</td>
       <td>${esc(b.customers?.code)} · ${esc(b.customers?.name)}</td>
       <td class="num"><b>${fmt(b.total)}</b></td>
       <td style="font-size:13px;color:var(--muted)">${d}</td>
@@ -3366,6 +3419,8 @@ function renderAccount(){
           :'<span class="tag tag-out">ค้างจ่าย</span>')}</td>
       <td style="font-size:13px;color:var(--muted)">${paid?esc(b.paid_by||'')+'<br>'+pd:'—'}</td>
       <td style="white-space:nowrap">
+        <button class="btn-g mini" onclick="togglePin(${b.order_id},${(b.orders&&b.orders.pinned)?'true':'false'})" title="ปักหมุดขึ้นบนสุด">📌</button>
+        <button class="btn-g mini" onclick="editOpNote(${b.order_id})" title="โน้ตกันลืม">📝</button>
         <button class="btn-g mini" onclick="window.open('${b.image_url}','_blank')">ดูบิล</button>
         <button class="btn-g mini" onclick="downloadBillPDF(${b.id},this)">PDF</button>
         <button class="btn-g mini" onclick="makeLabel(${b.id},this)" title="ใบปะหน้า 100×150 มม.">🏷️ ปะหน้า</button>
@@ -3992,6 +4047,13 @@ async function saveConvert(btn){
   const wn=whList.find(w=>w.id===wh)?.name||wh;
   let msg='แปลงสินค้า ที่ '+wn+'\n'+from.name+' −'+fq+' '+(from.unit||'')+'\n→ '+to.name+' +'+tq+' '+(to.unit||'');
   if(fq>cur)msg+='\n\n⚠️ ต้นทางมีแค่ '+cur+' — จะติดลบ';
+  const cvSig=[from.id,to.id,fq,tq,wh].join('|');
+  try{
+    const lastCv=JSON.parse(localStorage.getItem('mf_last_cv')||'{}');
+    if(lastCv.sig===cvSig&&Date.now()-lastCv.at<3*60000){
+      if(!confirm('⚠️ เพิ่งแปลงรายการเดียวกันนี้ไปเมื่อไม่ถึง 3 นาที\nกดยืนยัน = แปลงซ้ำอีกรอบ สต๊อกจะถูกตัดเพิ่มอีกเท่าตัว\n\nแน่ใจว่าต้องการแปลงซ้ำจริงๆ?'))return;
+    }
+  }catch(e){}
   if(!confirm(msg))return;
   btn.disabled=true;
   const ymd=new Date(Date.now()+7*3600*1000).toISOString().slice(2,10).replace(/-/g,'');
@@ -4002,6 +4064,7 @@ async function saveConvert(btn){
     p_by:currentUser?.display_name||currentUser?.username||'-'});
   btn.disabled=false;
   if(error){toast('แปลงไม่สำเร็จ: '+error.message);return;}
+  try{localStorage.setItem('mf_last_cv',JSON.stringify({sig:cvSig,at:Date.now()}));}catch(e){}
   toast('แปลง '+from.sku+' → '+to.sku+' เรียบร้อย ✓');
   document.getElementById('convert-modal').style.display='none';
   loadProducts(); loadConvLog();
