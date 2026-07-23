@@ -3230,15 +3230,19 @@ async function billToPDF(cvResult,billNo){
   const pw=pdf.internal.pageSize.getWidth();   // 595.28
   const ph=pdf.internal.pageSize.getHeight();  // 841.89
   const cv=cvResult.cv;
-  const pxPerPt=cv.width/pw;                   // อัตราส่วนพิกเซล→จุด (กางเต็มความกว้าง A4)
-  const pageH=Math.floor(ph*pxPerPt);          // ความสูง 1 หน้า วัดเป็นพิกเซลบนแคนวาส
-  const total=cv.height;
-
-  // พอดีหน้าเดียว → ทำแบบเดิม
-  if(total<=pageH+2){
-    pdf.addImage(cv.toDataURL('image/jpeg',0.92),'JPEG',0,0,pw,total/pxPerPt);
+  // บิลสั้นพอหน้าเดียว → กางเต็มหน้าแบบเดิม (บิลมีขอบในตัวอยู่แล้ว)
+  const fitPx=Math.floor(ph*(cv.width/pw));
+  if(cv.height<=fitPx+2){
+    pdf.addImage(cv.toDataURL('image/jpeg',0.92),'JPEG',0,0,pw,cv.height/(cv.width/pw));
     return pdf;
   }
+
+  // บิลยาวหลายหน้า → เว้นขอบ 2.5 ซม. ทุกด้าน ทุกหน้า
+  const M=70.87;                               // 2.5 cm = 70.87 pt
+  const contentW=pw-2*M, contentHpt=ph-2*M;
+  const pxPerPt=cv.width/contentW;
+  const pageH=Math.floor(contentHpt*pxPerPt);  // ความสูงเนื้อหาต่อหน้า (พิกเซลบนแคนวาส)
+  const total=cv.height;
 
   const S2=cv.width/794;                       // สเกลจริงของแคนวาส
   const footPx=Math.round(30*S2);              // แถบเลขหน้าท้ายหน้า
@@ -3270,7 +3274,7 @@ async function billToPDF(cvResult,billNo){
     tc.fillStyle='#999';tc.textAlign='right';
     tc.fillText(billNo+'   หน้า '+(i+1)+'/'+pages.length,cv.width-Math.round(40*S2),hpx+Math.round(20*S2));
     if(i)pdf.addPage();
-    pdf.addImage(tmp.toDataURL('image/jpeg',0.92),'JPEG',0,0,pw,tmp.height/pxPerPt);
+    pdf.addImage(tmp.toDataURL('image/jpeg',0.92),'JPEG',M,M,contentW,tmp.height/pxPerPt);
   }
   return pdf;
 }
