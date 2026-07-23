@@ -1031,6 +1031,14 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   </div>
 </div>
 <!-- ===== ปรับสต๊อก ===== -->
+<div id="payhist-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)this.style.display='none'">
+  <div class="card" style="max-width:520px;width:100%;max-height:85vh;overflow-y:auto">
+    <h3 style="margin:0 0 4px">🧾 ประวัติการชำระ</h3>
+    <div id="ph-title" style="color:var(--muted);font-size:13.5px;margin-bottom:12px"></div>
+    <div id="ph-body"></div>
+    <div style="margin-top:12px"><button class="btn-g" onclick="document.getElementById('payhist-modal').style.display='none'">ปิด</button></div>
+  </div>
+</div>
 <div id="billopt-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)boClose(false)">
   <div class="card" style="max-width:420px;width:100%">
     <h3 style="margin:0 0 4px" id="bo-head">📄 รูปแบบ PDF</h3>
@@ -1162,7 +1170,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div id="sp-slip-zone">
     <label>รูปสลิปโอน <b style="color:var(--danger,#b52020)">(บังคับแนบ)</b></label>
-    <input type="file" id="sp-file" accept="image/*" style="width:100%;margin:4px 0 6px">
+    <input type="file" id="sp-file" accept="image/*" multiple style="width:100%;margin:4px 0 6px">
     <img id="sp-preview" title="กดเพื่อดูรูปเต็มจอ" style="display:none;max-width:100%;max-height:220px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in" onclick="showImgView(this.src)">
     <div id="sp-qr" style="display:none;margin-top:8px;padding:8px 10px;border-radius:10px;font-size:13px"></div>
     </div><!-- /sp-slip-zone -->
@@ -3740,7 +3748,7 @@ function renderAccount(){
         <button class="btn-g mini" onclick="downloadBillPDF(${b.id},this)">PDF</button>
         <button class="btn-g mini" onclick="makeLabel(${b.id},this)" title="ใบปะหน้า 100×150 มม.">🏷️ ปะหน้า</button>
         ${ss!=='cancelled'?`<button class="btn-s mini" onclick="openEditBill(${b.id})">✏️ แก้บิล</button>`:''}
-        ${b.slip_url?`<button class="btn-g mini" onclick="showImgView('${esc(b.slip_url)}')">🧾 สลิป</button>`:''}
+        ${(b.slip_url||Number(b.paid_amount||0)>0||b.payment_status==='paid')?`<button class="btn-g mini" onclick="showPayHistory(${b.id})" title="ประวัติการชำระ + สลิปทุกใบ">🧾 สลิป</button>`:''}
         ${ss!=='cancelled'?`<button class="btn-s mini" onclick="resendBill(${b.id},this)">📲 ส่ง LINE${b.line_sent?'':' ❗'}</button>`:''}
         ${ss==='pending'?`<button class="btn-ok mini" onclick="shipBillUI(${b.id})">🚚 ส่งแล้ว</button><button class="btn-d mini" onclick="cancelBillUI(${b.id})">ยกเลิกบิล</button>`:''}
         ${ss!=='cancelled'?(paid
@@ -5591,6 +5599,48 @@ function spAmtCheck(){
   }
 }
 function closeSlipModal(){document.getElementById('slip-modal').style.display='none';spBillId=null;}
+/** บันทึกประวัติการชำระ 1 ครั้ง (เก็บสลิปได้หลายใบ) */
+async function logPayment(billId,amount,method,slips,ref,by,note){
+  try{
+    const {error}=await db.from('payments').insert({
+      bill_id:billId,amount:Number(amount)||0,method:method||null,
+      slips:slips&&slips.length?slips:[],trans_ref:ref||null,
+      paid_by:by||currentUser?.display_name||currentUser?.username||null,note:note||null});
+    if(error)console.warn('logPayment:',error.message);
+  }catch(e){console.warn('logPayment:',e);}
+}
+async function showPayHistory(billId){
+  const b=bills.find(x=>x.id===billId)||{};
+  document.getElementById('ph-title').textContent=(b.bill_no||'')+' · '+((b.customers&&b.customers.name)||'');
+  const box=document.getElementById('ph-body');
+  box.innerHTML='<div class="empty">กำลังโหลด…</div>';
+  document.getElementById('payhist-modal').style.display='flex';
+  const {data,error}=await db.from('payments').select('*').eq('bill_id',billId).order('created_at',{ascending:true});
+  if(error){box.innerHTML='<div class="empty">โหลดไม่ได้: '+esc(error.message)+' (รัน payments.sql หรือยัง?)</div>';return;}
+  const rows=data||[];
+  const paid=rows.reduce((s,r)=>s+Number(r.amount||0),0);
+  const left=Number(b.total||0)-paid;
+  let h='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    +'<div style="flex:1;min-width:110px;border:1px solid var(--line,#eee);border-left:4px solid #7a5a00;border-radius:10px;padding:8px 10px"><div style="font-size:11.5px;color:var(--muted)">ยอดบิล</div><div style="font-size:16px;font-weight:700">'+fmt(b.total||0)+'</div></div>'
+    +'<div style="flex:1;min-width:110px;border:1px solid var(--line,#eee);border-left:4px solid #159b78;border-radius:10px;padding:8px 10px"><div style="font-size:11.5px;color:var(--muted)">รับแล้ว</div><div style="font-size:16px;font-weight:700;color:#159b78">'+fmt(paid)+'</div></div>'
+    +'<div style="flex:1;min-width:110px;border:1px solid var(--line,#eee);border-left:4px solid '+(left>0.009?'#b52020':'#159b78')+';border-radius:10px;padding:8px 10px"><div style="font-size:11.5px;color:var(--muted)">คงค้าง</div><div style="font-size:16px;font-weight:700;color:'+(left>0.009?'#b52020':'#159b78')+'">'+fmt(Math.max(0,left))+'</div></div></div>';
+  if(!rows.length)h+='<div class="empty">ยังไม่มีประวัติการชำระ</div>';
+  else h+=rows.map((r,i)=>{
+    const d=new Date(r.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+    const sl=Array.isArray(r.slips)?r.slips:[];
+    return '<div style="border:1px solid var(--line,#eee);border-radius:10px;padding:10px 12px;margin-bottom:8px">'
+      +'<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">'
+      +'<div><b>ครั้งที่ '+(i+1)+'</b> · '+esc(d)+(r.method==='cash'?' · 💵 เงินสด':' · 📱 โอน')+'</div>'
+      +'<div style="font-weight:700;color:#159b78">+'+fmt(r.amount)+'</div></div>'
+      +(r.paid_by?'<div style="font-size:12px;color:var(--muted)">รับโดย '+esc(r.paid_by)+(r.trans_ref?' · ref '+esc(r.trans_ref):'')+'</div>':'')
+      +(r.note?'<div style="font-size:12px;color:#a06b00">'+esc(r.note)+'</div>':'')
+      +(sl.length?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">'+sl.map(u=>
+        '<img src="'+esc(u)+'" onclick="showImgView(this.src)" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:zoom-in">').join('')+'</div>'
+        :'<div style="font-size:12px;color:var(--muted);margin-top:4px">— ไม่มีสลิปแนบ —</div>')
+      +'</div>';
+  }).join('');
+  box.innerHTML=h;
+}
 async function confirmPaid(btn){
   const b=bills.find(x=>x.id===spBillId);if(!b)return;
   const method=spMethod();
@@ -5602,15 +5652,16 @@ async function confirmPaid(btn){
   const staff=document.getElementById('ac-staff').value.trim();
   btn.disabled=true;btn.textContent='กำลังบันทึก…';
   try{
-    let slipUrl=null;
+    let slipUrl=null; const slipUrls=[];
     const f=document.getElementById('sp-file');
-    if(f.files[0]){
-      const ext=(f.files[0].name.split('.').pop()||'jpg').toLowerCase();
+    for(const file of [...(f.files||[])]){
+      const ext=(file.name.split('.').pop()||'jpg').toLowerCase();
       const path='slip_'+b.bill_no+'_'+Date.now()+'-'+rndTag(10)+'.'+ext;
-      const {error:se}=await db.storage.from('slips').upload(path,f.files[0],{upsert:true});
+      const {error:se}=await db.storage.from('slips').upload(path,file,{upsert:true});
       if(se)throw new Error('อัพสลิปไม่สำเร็จ: '+se.message+' (เช็คว่าสร้าง bucket slips แล้ว)');
-      slipUrl=db.storage.from('slips').getPublicUrl(path).data.publicUrl;
+      slipUrls.push(db.storage.from('slips').getPublicUrl(path).data.publicUrl);
     }
+    slipUrl=slipUrls[0]||null;
     // บิลทั้งหมดที่สลิปนี้ปิด (บิลหลัก + ที่ติ๊กเพิ่ม)
     const targets=[b];
     document.querySelectorAll('.sp-other:checked').forEach(cb=>{
@@ -5644,6 +5695,7 @@ async function confirmPaid(btn){
         await db.functions.invoke('line-push',{body:{to:b.customers.line_group_id,
           messages:[{type:'text',text:shopTag(b.customers)+'💰 รับยอดบางส่วน บิล '+b.bill_no+'\nรับแล้ว ฿'+fmt(newPaid)+' / ฿'+fmt(b.total)+'\nคงเหลือ ฿'+fmt(Number(b.total)-newPaid)+'\nขอบคุณ'+polite+' 🙏'}]}});
       }
+      await logPayment(b.id,amt,method,slipUrls,spSlipRef,staff,'จ่ายบางส่วน');
       toast('บันทึกจ่ายบางส่วน '+b.bill_no+' — เหลือค้าง ฿'+fmt(Number(b.total)-newPaid));
       closeSlipModal(); loadBills();
       btn.disabled=false;btn.textContent='✓ ยืนยันรับยอด';
@@ -5653,9 +5705,13 @@ async function confirmPaid(btn){
     if(slipUrl)upd.slip_url=slipUrl;
     if(spSlipRef)upd.slip_ref=spSlipRef;
     for(const tb of targets){
-      const u={...upd,paid_amount:targets.length===1&&amt!=null?Number(b.paid_amount||0)+amt:Number(tb.total)};
+      const paidNow=targets.length===1&&amt!=null?Number(b.paid_amount||0)+amt:Number(tb.total);
+      const u={...upd,paid_amount:paidNow};
       const {error}=await db.from('bills').update(u).eq('id',tb.id);
       if(error)throw new Error('บันทึก '+tb.bill_no+' ไม่สำเร็จ: '+error.message);
+      const thisAmt=targets.length===1&&amt!=null?amt:Number(tb.total)-Number(tb.paid_amount||0);
+      await logPayment(tb.id,thisAmt,method,slipUrls,spSlipRef,staff,
+        targets.length>1?'ปิดพร้อมกัน '+targets.length+' บิล':null);
     }
     const sumAll=targets.reduce((s,x)=>s+Number(x.total),0);
     if(b.customers?.line_group_id){
