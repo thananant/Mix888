@@ -873,6 +873,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <input type="date" id="ac-from" onchange="renderAccount()" title="ตั้งแต่วันที่">
       <input type="date" id="ac-to" onchange="renderAccount()" title="ถึงวันที่">
       <input id="ac-q" placeholder="ค้นหาเลขบิล / ลูกค้า…" style="flex:1;min-width:150px" oninput="renderAccount()">
+      <button class="btn-p mini" id="ac-issue-sel" onclick="acIssueSelected(this)" style="display:none">🧾 ออกบิลที่เลือก</button>
       <label>ผู้ตรวจ</label><input id="ac-staff" style="width:100px" placeholder="ชื่อ">
       <input type="month" id="ac-month" style="width:140px" title="เดือนสำหรับ Export Excel">
       <button class="btn-g" onclick="exportMonthExcel(this)">📊 Excel รายเดือน</button>
@@ -1042,6 +1043,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div style="display:flex;gap:14px;margin-top:14px;flex-wrap:wrap;align-items:flex-end">
       <div><label>ค่าขนส่ง (฿)</label><input id="eb-ship" type="number" step="0.01" min="0" class="num" style="width:110px" oninput="ebTotals()"></div>
       <div><label>ส่วนลด (฿)</label><input id="eb-disc" type="number" step="0.01" min="0" class="num" style="width:110px" oninput="ebTotals()"></div>
+      <div style="flex:1;min-width:220px"><label>เหตุผลที่แก้บิล <span style="color:#c0201f">*</span></label><input id="eb-note" placeholder="เช่น ลูกค้าเพิ่มของ / คีย์จำนวนผิด / เปลี่ยนราคา" style="width:100%"></div>
       <div style="margin-left:auto;text-align:right">
         <div style="font-size:13px;color:var(--muted)">รวมสินค้า ฿<span id="eb-sub">0</span></div>
         <div style="font-weight:700;font-size:18px">ยอดเรียกเก็บ ฿<span id="eb-grand">0</span></div>
@@ -2849,6 +2851,11 @@ async function drawBill(o,billNo,extra){
   // เวอร์ชันบิล (ไว้เช็คว่าใช้ไฟล์ใหม่หรือเก่า)
   x.font='400 9px "IBM Plex Sans Thai"';x.fillStyle='#bbb';x.textAlign='right';
   x.fillText('Bill v.'+_rev+' · '+new Date().toLocaleDateString('th-TH',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+new Date().toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'}),R,y+118);
+  if(extra.editNote){
+    x.fillStyle='#c0201f';x.font='700 20px "IBM Plex Sans Thai"';
+    x.fillText('🔴 แก้ไข: '+String(extra.editNote).slice(0,60),R,y+146);
+    x.fillStyle='#555';x.font='400 18px "IBM Plex Sans Thai"';
+  }
   x.textAlign='left';
 
   return {cv, contentH:(y+120)};
@@ -3043,7 +3050,7 @@ async function sendSummaryRange(btn,rStart,rEnd,mode){
     .select(`order_no,created_at,total,status,
       customers(code,name,sale_name,contact_name,phone,billing_address,map_link,receive_time,note,delivery_method,ship_shop_name,ship_receiver,ship_phone,ship_address),
       order_items(qty,products(name,unit)),
-      bills(bill_no,ship_status)`)
+      bills(bill_no,ship_status,edit_note,revision)`)
     .gte('created_at',rStart.toISOString()).lt('created_at',rEnd.toISOString()).neq('status','cancelled')
     .order('delivery_method',{foreignTable:'customers',ascending:true});
   // ตัดออเดอร์ที่ "ส่งแล้ว" หรือบิลถูก "ยกเลิก" — สรุปเฉพาะที่รอจัดส่งจริง
@@ -3076,7 +3083,8 @@ async function sendSummaryRange(btn,rStart,rEnd,mode){
       const c=o.customers||{};
       let t='(ออเดอร์ '+(seqMap[o.order_no]||(i+1))+'/'+dayTotal+')';
       const bill=(o.bills||[]).find(b=>b.ship_status!=='cancelled');
-      if(bill) t+='\nเลขที่บิล : '+bill.bill_no;
+      if(bill) t+='\nเลขที่บิล : '+bill.bill_no+((bill.revision||1)>1?' (v.'+bill.revision+')':'');
+      if(bill&&bill.edit_note) t+='\n🔴 แก้บิล: '+bill.edit_note;
       if(c.sale_name) t+='\nSale : '+c.sale_name;
       t+='\nผู้รับ : '+(c.ship_receiver||c.contact_name||c.name||'-');
       const ph=c.ship_phone||c.phone; if(ph) t+='\nเบอร์ติดต่อ : '+ph;
@@ -3385,7 +3393,7 @@ function renderAccount(){
   }).sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0)).map(o=>{
     const d=new Date(o.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
     return `<tr${o.pinned?' style="background:#fffbe8"':''}>
-      <td>${o.pinned?'📌 ':''}<span class="tag tag-low">ยังไม่ออกบิล</span><div style="font-size:12px;color:var(--muted)">${esc(o.order_no)}</div>${o.op_note?'<div style="font-size:12px;color:#a06b00;background:#fff3d6;border-radius:6px;padding:2px 6px;margin-top:3px;max-width:200px">📝 '+esc(o.op_note)+'</div>':''}</td>
+      <td><input type="checkbox" class="ac-sel" value="${o.id}" onchange="acSelCount()" style="width:17px;height:17px;vertical-align:-3px;margin-right:4px">${o.pinned?'📌 ':''}<span class="tag tag-low">ยังไม่ออกบิล</span><div style="font-size:12px;color:var(--muted)">${esc(o.order_no)}</div>${o.op_note?'<div style="font-size:12px;color:#a06b00;background:#fff3d6;border-radius:6px;padding:2px 6px;margin-top:3px;max-width:200px">📝 '+esc(o.op_note)+'</div>':''}</td>
       <td>${esc(o.customers?.code)} · ${esc(o.customers?.name)}</td>
       <td class="num"><b>${fmt(o.total)}</b></td>
       <td style="font-size:13px;color:var(--muted)">${d}</td>
@@ -3930,14 +3938,14 @@ function qtReuse(id){
 }
 
 /* ---- ออกบิลจากหน้าบัญชี (บิลเงินสด ไม่มีค่าส่ง/ส่วนลด — ถ้าต้องใส่ ใช้หน้าทำบิล) ---- */
-async function acIssueBill(orderId,btn){
+async function acIssueBill(orderId,btn,silent){
   const {data:o,error}=await db.from('orders')
     .select(`*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,ship_shop_name,ship_receiver,ship_phone,ship_address),
              order_items(qty,price,amount,product_id,products(name,unit))`)
     .eq('id',orderId).single();
   if(error||!o){toast('โหลดออเดอร์ไม่ได้: '+(error?.message||''));return;}
-  if(o.status!=='new'){toast('ออเดอร์นี้ถูกออกบิล/ยกเลิกไปแล้ว');loadBills();return;}
-  if(!confirm('ออกบิล '+o.order_no+' ('+(o.customers?.doc_type||'บิลเงินสด')+')\nยอด ฿'+fmt(o.total)+'\n\n✓ ระบบจะดาวน์โหลด PDF ให้ทันที\n✗ ยังไม่ส่งเข้ากลุ่ม LINE — กดปุ่ม "ส่ง LINE" ที่แถวบิลทีหลังได้'))return;
+  if(o.status!=='new'){if(silent)throw new Error(o.order_no+' ถูกออกบิล/ยกเลิกไปแล้ว');toast('ออเดอร์นี้ถูกออกบิล/ยกเลิกไปแล้ว');loadBills();return;}
+  if(!silent&&!confirm('ออกบิล '+o.order_no+' ('+(o.customers?.doc_type||'บิลเงินสด')+')\nยอด ฿'+fmt(o.total)+'\n\n✓ ระบบจะดาวน์โหลด PDF ให้ทันที\n✗ ยังไม่ส่งเข้ากลุ่ม LINE — กดปุ่ม "ส่ง LINE" ที่แถวบิลทีหลังได้'))return;
   if(!orders.some(x=>x.id===o.id))orders.push(o);
   await makeBill(o.id,btn,false);   // ออกบิลอย่างเดียว ไม่ยิง LINE
   // ดาวน์โหลด PDF ของบิลที่เพิ่งออก
@@ -3947,6 +3955,30 @@ async function acIssueBill(orderId,btn){
       .order('created_at',{ascending:false}).limit(1);
     if(nb&&nb.length)await downloadBillPDF(nb[0].id,btn);
   }catch(e){console.warn('auto pdf',e);}
+  if(!silent)loadBills();
+}
+function acSelCount(){
+  const n=document.querySelectorAll('.ac-sel:checked').length;
+  const b=document.getElementById('ac-issue-sel');
+  b.style.display=n?'':'none';
+  b.textContent='🧾 ออกบิลที่เลือก ('+n+')';
+}
+async function acIssueSelected(btn){
+  const ids=[...document.querySelectorAll('.ac-sel:checked')].map(x=>Number(x.value));
+  if(!ids.length){toast('ติ๊กเลือกออเดอร์ก่อน');return;}
+  const sel=acPendingOrders.filter(o=>ids.includes(o.id));
+  const sum=sel.reduce((s,o)=>s+Number(o.total||0),0);
+  if(!confirm('ออกบิล '+ids.length+' ออเดอร์รวดเดียว รวม ฿'+fmt(sum)+'\n\n✓ ได้ PDF แยกทีละไฟล์ครบทุกบิล (เบราว์เซอร์อาจถามอนุญาตดาวน์โหลดหลายไฟล์ — กดอนุญาต)\n✗ ยังไม่ส่ง LINE'))return;
+  btn.disabled=true;
+  let ok=0;const fails=[];
+  for(let i=0;i<ids.length;i++){
+    btn.textContent='กำลังออกบิล '+(i+1)+'/'+ids.length+'…';
+    try{await acIssueBill(ids[i],btn,true);ok++;}
+    catch(e){fails.push(String(e.message||e));}
+    await new Promise(r=>setTimeout(r,400));
+  }
+  btn.disabled=false;acSelCount();
+  toast('ออกบิลแล้ว '+ok+'/'+ids.length+' ใบ พร้อม PDF'+(fails.length?' · พลาด: '+fails.join(' / '):' ✓'));
   loadBills();
 }
 
@@ -4886,6 +4918,8 @@ function ebTotals(){
 async function saveEditBill(btn){
   if(!ebState)return;
   if(!ebState.items.length){toast('บิลต้องมีอย่างน้อย 1 รายการ');return;}
+  const editNote=document.getElementById('eb-note').value.trim();
+  if(!editNote){toast('กรอกเหตุผลที่แก้บิลก่อน — จะขึ้นในบิลและสรุปออเดอร์');document.getElementById('eb-note').focus();return;}
   btn.disabled=true;btn.textContent='กำลังบันทึก…';
   try{
     const b=ebState.bill,o=ebState.order;
@@ -4936,7 +4970,7 @@ async function saveEditBill(btn){
     const {data:o2}=await db.from('orders')
       .select('*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(qty,price,amount,product_id,products(name,unit))')
       .eq('id',o.id).single();
-    const result=await drawBill(o2,b.bill_no,{shipFee:ship,discount:disc,grand,revision:newRev,docType:b.doc_type||'บิลเงินสด'});
+    const result=await drawBill(o2,b.bill_no,{shipFee:ship,discount:disc,grand,revision:newRev,docType:b.doc_type||'บิลเงินสด',editNote});
     const blob=await new Promise(res=>result.cv.toBlob(res,'image/png'));
     const path=b.bill_no+'_v'+newRev+'-'+rndTag(10)+'.png';
     const {error:upErr}=await db.storage.from('bills').upload(path,blob,{contentType:'image/png',upsert:true});
@@ -4945,7 +4979,7 @@ async function saveEditBill(btn){
 
     // 5) อัปเดตบิล
     const {error:be}=await db.from('bills').update({
-      total:grand,shipping_fee:ship,discount:disc,revision:newRev,image_url:imageUrl
+      total:grand,shipping_fee:ship,discount:disc,revision:newRev,image_url:imageUrl,edit_note:editNote
     }).eq('id',b.id);
     if(be)throw new Error('อัปเดตบิลไม่สำเร็จ: '+be.message);
 
@@ -4953,7 +4987,7 @@ async function saveEditBill(btn){
     if(o2.customers?.line_group_id&&confirm('ส่งบิลฉบับแก้ไข (v.'+newRev+') เข้ากลุ่ม LINE ลูกค้าเลยไหม?')){
       await db.functions.invoke('line-push',{body:{to:o2.customers.line_group_id,messages:[
         {type:'image',originalContentUrl:imageUrl,previewImageUrl:imageUrl},
-        {type:'text',text:shopTag(o2.customers)+'🧾 บิลเลขที่ '+b.bill_no+' (แก้ไขครั้งที่ '+newRev+')'
+        {type:'text',text:shopTag(o2.customers)+'🧾 บิลเลขที่ '+b.bill_no+' (แก้ไขครั้งที่ '+newRev+')\n🔴 เหตุผล: '+editNote
           +(ship?'\nค่าขนส่ง ฿'+fmt(ship):'')+(disc?'\nส่วนลด -฿'+fmt(disc):'')
           +'\nยอดรวม ฿'+fmt(grand)+'\nขออภัยในความไม่สะดวกครับ 🙏'}]}});
     }
