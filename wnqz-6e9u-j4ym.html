@@ -1575,10 +1575,16 @@ async function delSkuCat(id){
 
 /* ==================== สินค้า ==================== */
 let stockByProd={};
+/* เรียงชื่อสินค้าตามหลักพจนานุกรมไทย (สระนำ เ/แ/โ/ใ/ไ นับที่พยัญชนะจริง)
+   + ตัวเลขในชื่อเทียบแบบตัวเลข เช่น x6 มาก่อน x12 */
+function byThaiName(a,b){
+  return String(a&&a.name||'').localeCompare(String(b&&b.name||''),'th',{numeric:true,sensitivity:'base'})
+      || String(a&&a.sku||'').localeCompare(String(b&&b.sku||''));   // ชื่อซ้ำเป๊ะ → ตัดสินด้วย SKU
+}
 async function loadProducts(){
   const {data,error} = await db.from('products').select('*').order('sku');
   if(error){toast('โหลดสินค้าไม่ได้: '+error.message);return;}
-  products = data||[];
+  products = (data||[]).sort(byThaiName);
   qtInit(); shcInit();
   try{
     const {data:st}=await db.from('stock').select('product_id,warehouse_id,qty');
@@ -3817,7 +3823,7 @@ function renderCost(){
     if(p.active===false)return false;
     if(pf!=='all'&&!String(p.sku||'').startsWith(pf))return false;
     return !q||p.name.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q);
-  }).sort((a,b)=>String(a.sku).localeCompare(String(b.sku)));
+  }).sort(byThaiName);
   document.getElementById('cost-count').textContent=list.length+' รายการ';
   document.getElementById('cost-body').innerHTML=list.map(p=>{
     const cost=costChanges[p.id]!==undefined?costChanges[p.id]:Number(p.last_cost||0);
@@ -4463,7 +4469,7 @@ function scStart(){
     .map(p=>({product_id:p.id,sku:p.sku,name:p.name,unit:p.unit||'',
       system_qty:(stockByProd[p.id]||{})[wh]||0,counted:null,good:null,damaged:null}))
     .filter(it=>!only||it.system_qty>0)
-    .sort((a,b)=>a.sku.localeCompare(b.sku));
+    .sort(byThaiName);
   const restored=scRestoreDraft();
   scRender();
   if(restored&&!window.scDraftToasted){window.scDraftToasted=true;toast('📝 กู้ค่าที่นับค้างไว้ '+restored+' รายการให้แล้ว (ระบบเซฟให้อัตโนมัติทุกครั้งที่กรอก)');}
