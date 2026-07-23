@@ -882,7 +882,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th>เลขบิล / SO</th><th>ลูกค้า</th><th class="num">ยอด</th><th>ออกเมื่อ</th><th>LINE</th><th>ส่ง</th><th>ชำระ</th><th>รับยอดโดย</th><th></th></tr></thead>
+      <thead><tr><th>เลขบิล / SO</th><th>ลูกค้า</th><th class="num">ยอด</th><th>ออกเมื่อ</th><th>LINE</th><th>ส่ง</th><th>ชำระ</th><th>รับยอดโดย</th><th>ขนส่ง/ค่าใช้จ่าย</th><th></th></tr></thead>
       <tbody id="ac-body"></tbody>
     </table>
     </div>
@@ -3261,6 +3261,35 @@ document.addEventListener('click',e=>{
 
 /* ==================== บัญชี ==================== */
 let acPendingOrders=[];
+function extraCell(src,orderId){
+  const o=src||{};
+  let h='';
+  if(o.carrier)h+='<span class="tag tag-low">🚚 '+esc(o.carrier)+'</span>';
+  if(Number(o.extra_cost))h+='<div style="color:#a04a00">฿'+fmt(o.extra_cost)+(o.extra_note?' · '+esc(o.extra_note):'')+'</div>';
+  else if(o.extra_note)h+='<div style="color:#a04a00">'+esc(o.extra_note)+'</div>';
+  return h+'<a href="javascript:void(0)" onclick="editOrderExtra('+orderId+')" style="font-size:11.5px;color:var(--muted)">✏️ แก้ไข</a>';
+}
+function findOrderRow(orderId){
+  const b=(bills||[]).find(x=>x.order_id===orderId);
+  if(b&&b.orders)return b.orders;
+  return (acPendingOrders||[]).find(x=>x.id===orderId)||{};
+}
+async function editOrderExtra(orderId){
+  const cur=findOrderRow(orderId);
+  const carrier=prompt('🚚 ขนส่งที่ใช้ (เช่น ส่งเอง / Lalamove / ไปรษณีย์ / นิ่มเอ็กซ์เพรส) — เว้นว่าง = ไม่ระบุ',cur.carrier||'');
+  if(carrier===null)return;
+  const cost=prompt('💸 ค่าใช้จ่ายเพิ่มของออเดอร์นี้ (บาท) — เว้นว่างหรือ 0 = ไม่มี',cur.extra_cost||'');
+  if(cost===null)return;
+  const note=prompt('📝 รายละเอียดค่าใช้จ่าย (เช่น ค่าขนส่งพิเศษ)',cur.extra_note||'');
+  if(note===null)return;
+  const {error}=await db.from('orders').update({
+    carrier:carrier.trim()||null,
+    extra_cost:Number(cost)||null,
+    extra_note:note.trim()||null}).eq('id',orderId);
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  toast('บันทึกขนส่ง/ค่าใช้จ่ายแล้ว ✓');
+  loadBills();
+}
 async function togglePin(orderId,cur){
   const {error}=await db.from('orders').update({pinned:!cur}).eq('id',orderId);
   if(error){toast('ปักหมุดไม่สำเร็จ: '+error.message);return;}
@@ -3301,10 +3330,10 @@ async function editCrmNote(id){
 async function loadBills(){
   const [{data,error},{data:po}]=await Promise.all([
     db.from('bills')
-      .select('*, customers(code,name,branch_name,line_group_id,delivery_method,sale_name,sale_id), orders(order_no,pinned,op_note)')
+      .select('*, customers(code,name,branch_name,line_group_id,delivery_method,sale_name,sale_id), orders(order_no,pinned,op_note,carrier,extra_cost,extra_note)')
       .order('created_at',{ascending:false}).limit(500),
     db.from('orders')
-      .select('id,order_no,total,created_at,pinned,op_note, customers(code,name,delivery_method,sale_name,sale_id)')
+      .select('id,order_no,total,created_at,pinned,op_note,carrier,extra_cost,extra_note, customers(code,name,delivery_method,sale_name,sale_id)')
       .eq('status','new').order('created_at',{ascending:false})
   ]);
   if(error){toast('โหลดบิลไม่ได้: '+error.message);return;}
@@ -3398,6 +3427,7 @@ function renderAccount(){
       <td class="num"><b>${fmt(o.total)}</b></td>
       <td style="font-size:13px;color:var(--muted)">${d}</td>
       <td>—</td><td>—</td><td>—</td><td>—</td>
+      <td style="font-size:12.5px">${extraCell(o,o.id)}</td>
       <td style="white-space:nowrap">
         <button class="btn-g mini" onclick="togglePin(${o.id},${o.pinned?'true':'false'})" title="ปักหมุดขึ้นบนสุด">📌</button>
         <button class="btn-g mini" onclick="editOpNote(${o.id})" title="โน้ตกันลืม">📝</button>
@@ -3407,7 +3437,7 @@ function renderAccount(){
   });
   list.sort((a,b)=>((b.orders&&b.orders.pinned)?1:0)-((a.orders&&a.orders.pinned)?1:0));
   window.acLastList=list;
-  if(!list.length&&!pendRows.length){el.innerHTML='<tr><td colspan="9" class="empty">ไม่มีบิลในหมวดนี้</td></tr>';return;}
+  if(!list.length&&!pendRows.length){el.innerHTML='<tr><td colspan="10" class="empty">ไม่มีบิลในหมวดนี้</td></tr>';return;}
   el.innerHTML=pendRows.join('')+list.map(b=>{
     const d=new Date(b.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
     const paid=b.payment_status==='paid';
@@ -3426,6 +3456,7 @@ function renderAccount(){
           ?'<span class="tag tag-low">บางส่วน ฿'+fmt(b.paid_amount)+'</span><div style="font-size:11.5px;color:var(--danger,#b52020)">ค้าง ฿'+fmt(Number(b.total)-Number(b.paid_amount))+'</div>'
           :'<span class="tag tag-out">ค้างจ่าย</span>')}</td>
       <td style="font-size:13px;color:var(--muted)">${paid?esc(b.paid_by||'')+'<br>'+pd:'—'}</td>
+      <td style="font-size:12.5px">${extraCell(b.orders,b.order_id)}</td>
       <td style="white-space:nowrap">
         <button class="btn-g mini" onclick="togglePin(${b.order_id},${(b.orders&&b.orders.pinned)?'true':'false'})" title="ปักหมุดขึ้นบนสุด">📌</button>
         <button class="btn-g mini" onclick="editOpNote(${b.order_id})" title="โน้ตกันลืม">📝</button>
