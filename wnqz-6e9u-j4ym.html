@@ -883,7 +883,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th>เลขบิล / SO</th><th>ลูกค้า</th><th class="num">ยอด</th><th>ออกเมื่อ</th><th>LINE</th><th>ส่ง</th><th>ชำระ</th><th>รับยอดโดย</th><th>ขนส่ง/ค่าใช้จ่าย</th><th></th></tr></thead>
+      <thead><tr><th>เลขบิล / SO</th><th>ลูกค้า</th><th class="num">ยอด</th><th>ออกเมื่อ</th><th>LINE</th><th>ส่ง</th><th>ชำระ</th><th>รับยอดโดย</th><th>ขนส่ง</th><th class="num">ค่าใช้จ่าย</th><th></th></tr></thead>
       <tbody id="ac-body"></tbody>
     </table>
     </div>
@@ -998,6 +998,24 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   </div>
 </div>
 <!-- ===== ปรับสต๊อก ===== -->
+<div id="extra-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)this.style.display='none'">
+  <div class="card" style="max-width:400px;width:100%">
+    <h3 style="margin:0 0 4px">💸 ค่าใช้จ่ายเพิ่มของออเดอร์</h3>
+    <div id="ex-title" style="color:var(--muted);font-size:13.5px;margin-bottom:12px"></div>
+    <label>สาเหตุ</label>
+    <input id="ex-note" style="width:100%" placeholder="เช่น ค่าขนส่งพิเศษ / ค่ายกของ / ค่าห่อพิเศษ" list="ex-presets">
+    <datalist id="ex-presets">
+      <option value="ค่าขนส่งพิเศษ"><option value="ค่ายกของ"><option value="ค่าห่อ/แพ็คพิเศษ"><option value="ค่าน้ำแข็ง"><option value="ค่าล่วงเวลา">
+    </datalist>
+    <label style="margin-top:10px;display:block">จำนวนเงิน (บาท)</label>
+    <input id="ex-cost" type="number" step="0.01" min="0" class="num" style="width:100%" placeholder="0.00" onkeydown="if(event.key==='Enter')document.getElementById('ex-save').click()">
+    <p class="hint" style="margin-top:8px">ใส่ 0 หรือเว้นว่างแล้วบันทึก = ลบค่าใช้จ่ายออก · ขนส่งใช้ค่าที่ตั้งไว้ที่ลูกค้าอยู่แล้ว ไม่ต้องกรอกซ้ำ</p>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn-p" id="ex-save" onclick="saveExtraCost(this)" style="flex:1">💾 บันทึก</button>
+      <button class="btn-g" onclick="document.getElementById('extra-modal').style.display='none'">ปิด</button>
+    </div>
+  </div>
+</div>
 <div id="adjust-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)this.style.display='none'">
   <div class="card" style="max-width:420px;width:100%">
     <h3 style="margin:0 0 4px">🔧 ปรับสต๊อก</h3>
@@ -3346,33 +3364,50 @@ document.addEventListener('click',e=>{
 
 /* ==================== บัญชี ==================== */
 let acPendingOrders=[];
+function dlvCell(cust,ord){
+  const v=(ord&&ord.carrier)||(cust&&cust.delivery_method)||'';
+  return v?'<span class="tag tag-low">🚚 '+esc(v)+'</span>':'<span style="color:var(--muted)">—</span>';
+}
 function extraCell(src,orderId){
   const o=src||{};
-  let h='';
-  if(o.carrier)h+='<span class="tag tag-low">🚚 '+esc(o.carrier)+'</span>';
-  if(Number(o.extra_cost))h+='<div style="color:#a04a00">฿'+fmt(o.extra_cost)+(o.extra_note?' · '+esc(o.extra_note):'')+'</div>';
-  else if(o.extra_note)h+='<div style="color:#a04a00">'+esc(o.extra_note)+'</div>';
-  return h+'<a href="javascript:void(0)" onclick="editOrderExtra('+orderId+')" style="font-size:11.5px;color:var(--muted)">✏️ แก้ไข</a>';
+  const cost=Number(o.extra_cost)||0;
+  if(!cost&&!o.extra_note)
+    return '<a href="javascript:void(0)" onclick="openExtraModal('+orderId+')" style="font-size:11.5px;color:var(--muted)">+ เพิ่ม</a>';
+  return '<div style="color:#a04a00;font-weight:600">฿'+fmt(cost)+'</div>'
+    +(o.extra_note?'<div style="font-size:11.5px;color:#a06b00">'+esc(o.extra_note)+'</div>':'')
+    +'<a href="javascript:void(0)" onclick="openExtraModal('+orderId+')" style="font-size:11.5px;color:var(--muted)">✏️ แก้ไข</a>';
 }
 function findOrderRow(orderId){
   const b=(bills||[]).find(x=>x.order_id===orderId);
   if(b&&b.orders)return b.orders;
   return (acPendingOrders||[]).find(x=>x.id===orderId)||{};
 }
-async function editOrderExtra(orderId){
+let exOrderId=null;
+function openExtraModal(orderId){
+  exOrderId=orderId;
   const cur=findOrderRow(orderId);
-  const carrier=prompt('🚚 ขนส่งที่ใช้ (เช่น ส่งเอง / Lalamove / ไปรษณีย์ / นิ่มเอ็กซ์เพรส) — เว้นว่าง = ไม่ระบุ',cur.carrier||'');
-  if(carrier===null)return;
-  const cost=prompt('💸 ค่าใช้จ่ายเพิ่มของออเดอร์นี้ (บาท) — เว้นว่างหรือ 0 = ไม่มี',cur.extra_cost||'');
-  if(cost===null)return;
-  const note=prompt('📝 รายละเอียดค่าใช้จ่าย (เช่น ค่าขนส่งพิเศษ)',cur.extra_note||'');
-  if(note===null)return;
+  const b=(bills||[]).find(x=>x.order_id===orderId);
+  const o=(acPendingOrders||[]).find(x=>x.id===orderId);
+  const label=b?(b.bill_no+' · '+((b.customers&&b.customers.name)||'')):(o?(o.order_no+' · '+((o.customers&&o.customers.name)||'')):'');
+  document.getElementById('ex-title').textContent=label;
+  document.getElementById('ex-note').value=cur.extra_note||'';
+  document.getElementById('ex-cost').value=Number(cur.extra_cost)||'';
+  document.getElementById('extra-modal').style.display='flex';
+  setTimeout(()=>document.getElementById('ex-note').focus(),80);
+}
+async function saveExtraCost(btn){
+  if(!exOrderId)return;
+  const note=document.getElementById('ex-note').value.trim();
+  const cost=Number(document.getElementById('ex-cost').value)||0;
+  if(cost>0&&!note){toast('ใส่สาเหตุด้วยครับ');document.getElementById('ex-note').focus();return;}
+  btn.disabled=true;
   const {error}=await db.from('orders').update({
-    carrier:carrier.trim()||null,
-    extra_cost:Number(cost)||null,
-    extra_note:note.trim()||null}).eq('id',orderId);
+    extra_cost:cost>0?cost:null,
+    extra_note:cost>0?note:null}).eq('id',exOrderId);
+  btn.disabled=false;
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
-  toast('บันทึกขนส่ง/ค่าใช้จ่ายแล้ว ✓');
+  document.getElementById('extra-modal').style.display='none';
+  toast(cost>0?'บันทึกค่าใช้จ่าย ฿'+fmt(cost)+' แล้ว ✓':'ลบค่าใช้จ่ายแล้ว');
   loadBills();
 }
 async function togglePin(orderId,cur){
@@ -3512,6 +3547,7 @@ function renderAccount(){
       <td class="num"><b>${fmt(o.total)}</b></td>
       <td style="font-size:13px;color:var(--muted)">${d}</td>
       <td>—</td><td>—</td><td>—</td><td>—</td>
+      <td style="font-size:12.5px">${dlvCell(o.customers,o)}</td>
       <td style="font-size:12.5px">${extraCell(o,o.id)}</td>
       <td style="white-space:nowrap">
         <button class="btn-g mini" onclick="togglePin(${o.id},${o.pinned?'true':'false'})" title="ปักหมุดขึ้นบนสุด">📌</button>
@@ -3522,7 +3558,7 @@ function renderAccount(){
   });
   list.sort((a,b)=>((b.orders&&b.orders.pinned)?1:0)-((a.orders&&a.orders.pinned)?1:0));
   window.acLastList=list;
-  if(!list.length&&!pendRows.length){el.innerHTML='<tr><td colspan="10" class="empty">ไม่มีบิลในหมวดนี้</td></tr>';return;}
+  if(!list.length&&!pendRows.length){el.innerHTML='<tr><td colspan="11" class="empty">ไม่มีบิลในหมวดนี้</td></tr>';return;}
   el.innerHTML=pendRows.join('')+list.map(b=>{
     const d=new Date(b.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
     const paid=b.payment_status==='paid';
@@ -3541,6 +3577,7 @@ function renderAccount(){
           ?'<span class="tag tag-low">บางส่วน ฿'+fmt(b.paid_amount)+'</span><div style="font-size:11.5px;color:var(--danger,#b52020)">ค้าง ฿'+fmt(Number(b.total)-Number(b.paid_amount))+'</div>'
           :'<span class="tag tag-out">ค้างจ่าย</span>')}</td>
       <td style="font-size:13px;color:var(--muted)">${paid?esc(b.paid_by||'')+'<br>'+pd:'—'}</td>
+      <td style="font-size:12.5px">${dlvCell(b.customers,b.orders)}</td>
       <td style="font-size:12.5px">${extraCell(b.orders,b.order_id)}</td>
       <td style="white-space:nowrap">
         <button class="btn-g mini" onclick="togglePin(${b.order_id},${(b.orders&&b.orders.pinned)?'true':'false'})" title="ปักหมุดขึ้นบนสุด">📌</button>
