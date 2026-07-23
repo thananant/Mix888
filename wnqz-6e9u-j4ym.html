@@ -1025,9 +1025,32 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
       <button class="btn-p" id="lk-send" onclick="lkSend(this)">📲 ส่งเข้ากลุ่ม LINE</button>
       <button class="btn-g" onclick="window.open(document.getElementById('lk-url').value,'_blank')">👁️ เปิดดู</button>
+      <button class="btn-g" onclick="openResetLink()" title="สร้างลิงก์ใหม่ — ลิงก์เดิมใช้ไม่ได้ทันที">🔄 เปลี่ยนลิงก์ใหม่</button>
       <button class="btn-g" style="margin-left:auto" onclick="document.getElementById('link-modal').style.display='none'">ปิด</button>
     </div>
     <p class="hint" id="lk-hint" style="margin-top:8px"></p>
+  </div>
+</div>
+<!-- ===== ยืนยันเปลี่ยนลิงก์ ===== -->
+<div id="relink-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:130;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)closeRelink()">
+  <div class="card" style="max-width:460px;width:100%">
+    <h3 style="margin:0 0 4px;color:#b52020">🔄 เปลี่ยนลิงก์สั่งซื้อใหม่</h3>
+    <div id="rl-cust" style="color:var(--muted);font-size:13.5px;margin-bottom:12px"></div>
+    <div style="background:#fdecec;border:1px solid #f3c9c9;border-radius:10px;padding:10px 12px;font-size:13.5px;line-height:1.7">
+      เมื่อเปลี่ยนแล้ว:<br>
+      • <b>ลิงก์เดิมใช้สั่งของไม่ได้ทันที</b> ใครถือลิงก์เก่าอยู่จะเปิดไม่ได้<br>
+      • ต้องส่งลิงก์ใหม่ให้ร้านอีกครั้ง<br>
+      • ออเดอร์/บิลเก่าทั้งหมด <b>ไม่ได้รับผลกระทบ</b> ยังอยู่ครบ<br>
+      • ใช้เมื่อลิงก์หลุด / พนักงานร้านลาออก / สงสัยมีคนแอบสั่ง
+    </div>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;cursor:pointer;user-select:none;font-size:13.5px">
+      <input type="checkbox" id="rl-agree" onchange="document.getElementById('rl-go').disabled=!this.checked" style="width:18px;height:18px;flex:none;margin-top:1px">
+      <span>ฉันเข้าใจว่า <b>ลิงก์เดิมจะใช้ไม่ได้ทันที</b> และจะส่งลิงก์ใหม่ให้ร้านเอง</span>
+    </label>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn-p" id="rl-go" onclick="doResetLink(this)" disabled style="flex:1">🔄 ยืนยันเปลี่ยนลิงก์</button>
+      <button class="btn-g" onclick="closeRelink()">ยกเลิก</button>
+    </div>
   </div>
 </div>
 <!-- ===== ปรับสต๊อก ===== -->
@@ -2385,6 +2408,34 @@ async function copyLink(id){
     ?'ลูกค้าผูกกลุ่ม LINE แล้ว — กดส่งเข้ากลุ่มได้เลย หรือคัดลอกไปใช้เอง'
     :'ลูกค้ายังไม่ผูกกลุ่ม LINE — คัดลอกลิงก์ส่งเองได้เลย (พิมพ์ "ผูกกลุ่ม '+c.code+'" ในกลุ่มที่มีบอทเพื่อผูก)');
   document.getElementById('link-modal').style.display='flex';
+}
+function newOrderToken(){
+  return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(9))))
+    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+function openResetLink(){
+  const c=customers.find(x=>x.id===lkCustomerId);if(!c)return;
+  document.getElementById('rl-cust').textContent=c.code+' · '+c.name;
+  const cb=document.getElementById('rl-agree');
+  cb.checked=false;
+  document.getElementById('rl-go').disabled=true;
+  document.getElementById('relink-modal').style.display='flex';
+}
+function closeRelink(){document.getElementById('relink-modal').style.display='none';}
+async function doResetLink(btn){
+  if(!document.getElementById('rl-agree').checked){toast('ติ๊กยืนยันก่อนครับ');return;}
+  const c=customers.find(x=>x.id===lkCustomerId);if(!c)return;
+  btn.disabled=true;btn.textContent='กำลังเปลี่ยน…';
+  const tk=newOrderToken();
+  const {error}=await db.from('customers').update({order_token:tk}).eq('id',c.id);
+  btn.disabled=false;btn.textContent='🔄 ยืนยันเปลี่ยนลิงก์';
+  if(error){toast('เปลี่ยนลิงก์ไม่สำเร็จ: '+error.message);return;}
+  c.order_token=tk;
+  closeRelink();
+  document.getElementById('lk-url').value=orderUrlFor(c);
+  toast('เปลี่ยนลิงก์ใหม่แล้ว ✓ ลิงก์เดิมใช้ไม่ได้แล้ว — อย่าลืมส่งลิงก์ใหม่ให้ร้าน');
+  if(c.slug)toast('⚠️ ร้านนี้ตั้ง "ลิงก์ร้าน" (/'+c.slug+') ไว้ — ลิงก์สวยยังใช้ได้เหมือนเดิม ถ้าต้องการตัดขาดจริง ให้ลบหรือเปลี่ยนลิงก์ร้านในหน้าแก้ไขลูกค้าด้วย');
+  loadCustomers();
 }
 async function lkCopy(){
   const url=document.getElementById('lk-url').value;
