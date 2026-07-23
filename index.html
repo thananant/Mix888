@@ -249,7 +249,10 @@ async function init(){
 async function loadCatalog(){
   const {data,error}=await db.rpc('get_customer_catalog',{p_token:token});
   if(error){toast('โหลดสินค้าไม่ได้: '+error.message);return;}
-  items=data||[];
+  // เรียงชื่อตามหลักพจนานุกรมไทย + ตัวเลขในชื่อเทียบแบบตัวเลข
+  items=(data||[]).sort((a,b)=>
+    String(a.name||'').localeCompare(String(b.name||''),'th',{numeric:true,sensitivity:'base'})
+    || String(a.sku||'').localeCompare(String(b.sku||'')));
   for(const it of items){
     if(cart[it.product_id]>it.stock_qty) cart[it.product_id]=Math.max(0,Math.floor(it.stock_qty));
   }
