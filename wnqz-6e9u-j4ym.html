@@ -2907,6 +2907,8 @@ function renderOrders(){
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
         <button class="btn-p" onclick="makeBill(${o.id},this,true)">🧾 ออกบิล + ส่ง LINE</button>
         <button class="btn-g" onclick="makeBill(${o.id},this,false)">ออกบิลเฉย ๆ</button>
+        <button class="btn-g" onclick="openEditOrder(${o.id})" title="เพิ่ม/ลบ/แก้จำนวนสินค้า ก่อนออกบิล — ไม่กินเลขบิล">✏️ แก้ออเดอร์</button>
+        <button class="btn-g" onclick="cancelOrder(${o.id},this)" style="color:var(--danger,#b52020)" title="ยกเลิกและคืนยอดจองสต๊อก">❌ ยกเลิก</button>
         ${hasLine?'':'<span class="tag tag-low">ลูกค้ายังไม่ผูกกลุ่ม LINE — บิลจะออกเป็นรูปให้เปิดดูแทน</span>'}
       </div>
     </div>`;
@@ -5336,6 +5338,128 @@ let ebState=null; // {bill, order, items:[{id?,product_id,name,unit,qty,price,or
 function showImgView(u){document.getElementById('imgview-img').src=u;document.getElementById('imgview').style.display='flex';}
 
 let ebFeesOnly=false;
+let ebOrderMode=false; // true = แก้ออเดอร์ก่อนออกบิล (ใช้ modal เดียวกับแก้บิล)
+
+/* ปรับหน้าตา modal ตามโหมด: แก้บิล / แก้ออเดอร์ */
+function ebModeUI(orderMode,o){
+  const h3=document.querySelector('#editbill-modal h3');
+  if(h3&&h3.firstChild)h3.firstChild.nodeValue=orderMode?'✏️ แก้ไขออเดอร์ ':'✏️ แก้ไขบิล ';
+  const shipWrap=document.getElementById('eb-ship')?.closest('div');
+  const discWrap=document.getElementById('eb-disc')?.closest('div');
+  const noteWrap=document.getElementById('eb-note')?.closest('div');
+  [shipWrap,discWrap,noteWrap].forEach(el=>{if(el)el.style.display=orderMode?'none':'';});
+  const save=document.getElementById('eb-save');
+  if(save)save.textContent=orderMode?'💾 บันทึกออเดอร์':'💾 บันทึก + ออกบิลใหม่ (v.ถัดไป)';
+}
+
+/* แก้ออเดอร์ก่อนออกบิล — ไม่กินเลขบิล ไม่มีป้าย v.2 */
+async function openEditOrder(orderId){
+  const {data:o,error}=await db.from('orders')
+    .select('*, customers(id,code,name,line_group_id,price_group), order_items(id,product_id,qty,price,amount,products(name,unit))')
+    .eq('id',orderId).single();
+  if(error||!o){toast('โหลดออเดอร์ไม่ได้: '+(error?.message||''));return;}
+  if(o.status!=='new'){toast('ออเดอร์นี้ถูกออกบิล/ยกเลิกไปแล้ว');loadOrders();return;}
+  ebOrderMode=true;ebFeesOnly=false;
+  ebState={bill:null,order:o,removed:[],
+    items:o.order_items.map(it=>({id:it.id,product_id:it.product_id,
+      name:it.products?.name||'?',unit:it.products?.unit||'',
+      qty:Number(it.qty),price:Number(it.price),orig_qty:Number(it.qty)}))};
+  document.getElementById('eb-no').textContent=o.order_no;
+  document.getElementById('eb-rev').textContent='ยังไม่ออกบิล';
+  document.getElementById('eb-cust').textContent=(o.customers?.code||'')+' · '+(o.customers?.name||'');
+  document.getElementById('eb-prodlist').innerHTML=products.filter(p=>p.active!==false)
+    .map(p=>`<option value="${esc(p.sku)} · ${esc(p.name)}"></option>`).join('');
+  const addRow=document.getElementById('eb-add-search')?.closest('div')?.parentElement;
+  if(addRow)addRow.style.display='flex';
+  const hintEl=document.querySelector('#editbill-modal .hint');
+  if(hintEl)hintEl.textContent='แก้ก่อนออกบิล — สะอาดสุด ไม่กินเลขบิล ไม่มีป้ายแก้ไข · ระบบปรับยอดจองสต๊อกให้อัตโนมัติ';
+  ebModeUI(true,o);
+  ebRender();
+  document.getElementById('editbill-modal').style.display='flex';
+}
+
+async function saveEditOrder(btn){
+  const o=ebState.order;
+  const sub=ebState.items.reduce((s,it)=>s+it.qty*it.price,0);
+  btn.disabled=true;btn.textContent='กำลังบันทึก…';
+  try{
+    // กันชนกัน: ถ้าเพิ่งถูกออกบิล/ยกเลิกไประหว่างแก้
+    const {data:chk}=await db.from('orders').select('status').eq('id',o.id).single();
+    if(!chk||chk.status!=='new')throw new Error('ออเดอร์ถูกออกบิล/ยกเลิกไประหว่างแก้ — รีเฟรชหน้าก่อน');
+
+    // 1) ปรับยอดจองตามส่วนต่าง + ลงเดินรายการ
+    const delta={};
+    ebState.items.forEach(it=>{delta[it.product_id]=(delta[it.product_id]||0)+(it.qty-it.orig_qty);});
+    for(const rid of ebState.removed){
+      const orig=o.order_items.find(x=>x.id===rid);
+      if(orig)delta[orig.product_id]=(delta[orig.product_id]||0)-Number(orig.qty);
+    }
+    for(const [pid,d] of Object.entries(delta)){
+      if(!d)continue;
+      const {data:pr}=await db.from('products').select('reserved_qty').eq('id',pid).single();
+      const nv=Math.max(0,Number(pr?.reserved_qty||0)+d);
+      const {error:re}=await db.from('products').update({reserved_qty:nv}).eq('id',pid);
+      if(re)throw new Error('ปรับจองสต๊อกไม่สำเร็จ: '+re.message);
+      await db.from('stock_movements').insert({product_id:Number(pid),
+        type:d>0?'reserve':'unreserve',qty:d>0?-d:Math.abs(d),ref_id:o.id,
+        note:'แก้ออเดอร์'});
+    }
+
+    // 2) รายการ: ลบ / อัปเดต / เพิ่ม (amount เป็น generated — ห้ามส่ง)
+    if(ebState.removed.length){
+      const {error:de}=await db.from('order_items').delete().in('id',ebState.removed);
+      if(de)throw new Error('ลบรายการไม่สำเร็จ: '+de.message);
+    }
+    for(const it of ebState.items){
+      const rec={qty:it.qty,price:it.price};
+      if(it.id){
+        const {error:ue}=await db.from('order_items').update(rec).eq('id',it.id);
+        if(ue)throw new Error('อัปเดตรายการไม่สำเร็จ: '+ue.message);
+      }else{
+        const {error:ie}=await db.from('order_items').insert({order_id:o.id,product_id:it.product_id,...rec});
+        if(ie)throw new Error('เพิ่มรายการไม่สำเร็จ: '+ie.message);
+      }
+    }
+    // 3) ยอดออเดอร์
+    const {error:te}=await db.from('orders').update({total:sub}).eq('id',o.id);
+    if(te)throw new Error('อัปเดตยอดไม่สำเร็จ: '+te.message);
+
+    toast('บันทึกออเดอร์ '+o.order_no+' แล้ว ✓ ยอดใหม่ ฿'+fmt(sub));
+    closeEditBill(); loadOrders(); loadBills();
+  }catch(e){toast(String(e.message||e));}
+  btn.disabled=false;btn.textContent='💾 บันทึกออเดอร์';
+}
+
+/* ยกเลิกออเดอร์ก่อนออกบิล — คืนจองทั้งหมด */
+async function cancelOrder(orderId,btn){
+  const o=orders.find(x=>x.id===orderId);if(!o)return;
+  const reason=prompt('❌ ยกเลิกออเดอร์ '+o.order_no+' — '+(o.customers?.name||'')+'\nยอด ฿'+fmt(o.total)
+    +'\n\nกรอกเหตุผล (บังคับ):','');
+  if(reason===null)return;
+  if(!reason.trim()){toast('ต้องกรอกเหตุผลก่อนยกเลิก');return;}
+  if(!confirm('ยืนยันยกเลิก '+o.order_no+'?\n• คืนยอดจองสต๊อกทั้งหมด\n• ออเดอร์หายจากคิวทำบิล (ประวัติยังอยู่)'))return;
+  btn.disabled=true;
+  try{
+    const {data:chk}=await db.from('orders').select('status').eq('id',orderId).single();
+    if(!chk||chk.status!=='new')throw new Error('ออเดอร์นี้ถูกออกบิล/ยกเลิกไปแล้ว');
+    const {data:its}=await db.from('order_items').select('product_id,qty').eq('order_id',orderId);
+    for(const it of (its||[])){
+      const {data:pr}=await db.from('products').select('reserved_qty').eq('id',it.product_id).single();
+      await db.from('products').update({reserved_qty:Math.max(0,Number(pr?.reserved_qty||0)-Number(it.qty))}).eq('id',it.product_id);
+      await db.from('stock_movements').insert({product_id:it.product_id,type:'unreserve',qty:Number(it.qty),ref_id:orderId,note:'ยกเลิกออเดอร์'});
+    }
+    const newNote=(o.op_note?o.op_note+' | ':'')+'ยกเลิก: '+reason.trim();
+    const {error}=await db.from('orders').update({status:'cancelled',op_note:newNote}).eq('id',orderId);
+    if(error)throw new Error(error.message);
+    if(o.customers?.line_group_id&&confirm('แจ้งยกเลิกเข้ากลุ่ม LINE ลูกค้าด้วยไหม?')){
+      await db.functions.invoke('line-push',{body:{to:o.customers.line_group_id,messages:[
+        {type:'text',text:shopTag(o.customers)+'❌ ยกเลิกออเดอร์ '+o.order_no+'\nเหตุผล: '+reason.trim()+'\nขออภัยในความไม่สะดวกครับ 🙏'}]}});
+    }
+    toast('ยกเลิก '+o.order_no+' แล้ว — คืนจองสต๊อกเรียบร้อย');
+    loadOrders(); loadBills();
+  }catch(e){toast(String(e.message||e));}
+  btn.disabled=false;
+}
 async function openEditBill(billId){
   const b=bills.find(x=>x.id===billId);if(!b)return;
   if((b.ship_status||'pending')==='cancelled'){toast('บิลถูกยกเลิกแล้ว แก้ไม่ได้');return;}
@@ -5363,6 +5487,7 @@ async function openEditBill(billId){
   if(hintEl)hintEl.textContent=ebFeesOnly
     ?'บิลนี้จัดส่งแล้ว — แก้ได้เฉพาะค่าขนส่ง/ส่วนลด เพื่อคำนวณยอดบิลใหม่ (จำนวนและรายการสินค้าแก้ไม่ได้เพราะสต๊อกถูกตัดไปแล้ว)'
     :'แก้ได้ทุกรายการ · ระบบจะปรับยอดจองสต๊อกให้อัตโนมัติ และสร้างรูปบิลเวอร์ชันใหม่';
+  ebOrderMode=false;ebModeUI(false);
   document.getElementById('editbill-modal').style.display='flex';
 }
 function closeEditBill(){document.getElementById('editbill-modal').style.display='none';ebState=null;}
@@ -5420,7 +5545,8 @@ function ebTotals(){
 }
 async function saveEditBill(btn){
   if(!ebState)return;
-  if(!ebState.items.length){toast('บิลต้องมีอย่างน้อย 1 รายการ');return;}
+  if(!ebState.items.length){toast(ebOrderMode?'ออเดอร์ต้องมีอย่างน้อย 1 รายการ':'บิลต้องมีอย่างน้อย 1 รายการ');return;}
+  if(ebOrderMode)return saveEditOrder(btn);
   const editNote=document.getElementById('eb-note').value.trim();
   if(!editNote){toast('กรอกเหตุผลที่แก้บิลก่อน — จะขึ้นในบิลและสรุปออเดอร์');document.getElementById('eb-note').focus();return;}
   btn.disabled=true;btn.textContent='กำลังบันทึก…';
