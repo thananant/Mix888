@@ -1002,7 +1002,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 <!-- ===== ปรับสต๊อก ===== -->
 <div id="billopt-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)boClose(false)">
   <div class="card" style="max-width:420px;width:100%">
-    <h3 style="margin:0 0 4px">🧾 ออกบิล</h3>
+    <h3 style="margin:0 0 4px" id="bo-head">📄 รูปแบบ PDF</h3>
     <div id="bo-title" style="color:var(--muted);font-size:13.5px;margin-bottom:12px"></div>
     <label>หัวบิล (มุมขวาบน)</label>
     <select id="bo-doctype" style="width:100%">
@@ -1014,9 +1014,9 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <option value="brief">ชื่อร้าน + เบอร์ติดต่อ</option>
       <option value="full">ที่อยู่เต็ม + เลขผู้เสียภาษี + ช่องเซ็น 4 จุด</option>
     </select>
-    <p class="hint" style="margin-top:8px">ค่าเริ่มต้นมาจากที่ตั้งไว้ในข้อมูลลูกค้า · ที่อยู่ลูกค้า/ที่อยู่จัดส่ง/ผู้รับสินค้า ขึ้นให้เสมออยู่แล้ว</p>
+    <p class="hint" style="margin-top:8px">เลือกเฉพาะไฟล์ PDF ใบนี้ — ไม่กระทบบิลที่ส่งเข้าไลน์ไปแล้ว · ข้อมูลออกบิล/จัดส่ง ขึ้นให้เสมออยู่แล้ว</p>
     <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn-p" id="bo-ok" onclick="boClose(true)" style="flex:1">✓ ออกบิลเลย</button>
+      <button class="btn-p" id="bo-ok" onclick="boClose(true)" style="flex:1">📄 สร้าง PDF</button>
       <button class="btn-g" onclick="boClose(false)">ยกเลิก</button>
     </div>
   </div>
@@ -3054,9 +3054,11 @@ function updGrand(oid,total){
 }
 let _boResolve=null;
 /** ถามหัวบิล + ข้อมูลร้านเรา — คืน {docType,sellerMode} หรือ null ถ้ายกเลิก */
-function askBillOptions(cust,label){
+function askBillOptions(cust,label,ui){
   return new Promise(res=>{
     _boResolve=res;
+    document.getElementById('bo-head').textContent=(ui&&ui.head)||'📄 รูปแบบ PDF';
+    document.getElementById('bo-ok').textContent=(ui&&ui.ok)||'📄 สร้าง PDF';
     document.getElementById('bo-title').textContent=label||'';
     const dt=document.getElementById('bo-doctype');
     dt.value=(cust&&cust.doc_type)||'บิลเงินสด';
@@ -3075,12 +3077,9 @@ async function makeBill(orderId,btn,sendLine,opts){
   const o=orders.find(x=>x.id===orderId);if(!o)return;
   const shipFee=Number(document.getElementById('bs-ship-'+orderId)?.value)||0;
   const discount=Number(document.getElementById('bs-disc-'+orderId)?.value)||0;
-  if(!opts){
-    opts=await askBillOptions(o.customers,(o.order_no||'')+' · '+((o.customers&&o.customers.name)||'')+' · ฿'+fmt(o.total));
-    if(!opts)return;
-  }
+  opts=opts||{};   // ไม่ถามตอนออกบิล — ใช้ค่าที่ตั้งไว้ในข้อมูลลูกค้า (เลือกรูปแบบได้ตอนกดปุ่ม PDF)
   const docType=opts.docType||o.customers?.doc_type||'บิลเงินสด';
-  const sellerMode=opts.sellerMode||'none';
+  const sellerMode=opts.sellerMode||o.customers?.bill_seller_mode||'none';
   const grand=Math.max(0,Number(o.total)+shipFee-discount);
   btn.disabled=true;btn.textContent='กำลังออกบิล…';
   try{
@@ -3532,7 +3531,7 @@ function setFilter(f){
   document.querySelectorAll('.fbtn').forEach(b=>b.classList.toggle('active',b.dataset.f===f));
   renderAccount();
 }
-async function downloadBillPDF(billId,btn,silent){
+async function downloadBillPDF(billId,btn,silent,opts){
   const _t0=btn?btn.textContent:'';
   if(btn&&!silent){btn.disabled=true;btn.textContent='…';}
   try{
@@ -3541,13 +3540,20 @@ async function downloadBillPDF(billId,btn,silent){
       .select('order_id,bill_no,shipping_fee,discount,total,revision,doc_type,seller_mode')
       .eq('id',billId).single();
     if(!bill)throw new Error('ไม่พบบิล');
+    if(!silent&&!opts){
+      opts=await askBillOptions({doc_type:bill.doc_type,bill_seller_mode:bill.seller_mode},
+        bill.bill_no+' · เลือกรูปแบบก่อนสร้าง PDF');
+      if(!opts)return;
+    }
+    opts=opts||{};
     const {data:o,error}=await db.from('orders')
       .select(`*, customers(*), order_items(qty,price,amount,product_id,products(name,unit))`)
       .eq('id',bill.order_id).single();
     if(error||!o)throw new Error('โหลดข้อมูลบิลไม่ได้');
     const result=await drawBill(o,bill.bill_no,{
       shipFee:Number(bill.shipping_fee)||0,discount:Number(bill.discount)||0,
-      grand:Number(bill.total),revision:bill.revision||1,docType:bill.doc_type||'บิลเงินสด',sellerMode:bill.seller_mode||'none'});
+      grand:Number(bill.total),revision:bill.revision||1,
+      docType:opts.docType||bill.doc_type||'บิลเงินสด',sellerMode:opts.sellerMode||bill.seller_mode||'none'});
     const pdf=await billToPDF(result,bill.bill_no);
     pdf.save(bill.bill_no+'.pdf');
     if(!silent)toast('ดาวน์โหลด PDF '+bill.bill_no+' แล้ว');
@@ -4154,18 +4160,15 @@ async function acIssueBill(orderId,btn,silent,opts){
     .eq('id',orderId).single();
   if(error||!o){toast('โหลดออเดอร์ไม่ได้: '+(error?.message||''));return;}
   if(o.status!=='new'){if(silent)throw new Error(o.order_no+' ถูกออกบิล/ยกเลิกไปแล้ว');toast('ออเดอร์นี้ถูกออกบิล/ยกเลิกไปแล้ว');loadBills();return;}
-  if(!silent&&!opts){
-    opts=await askBillOptions(o.customers,o.order_no+' · '+(o.customers?.name||'')+' · ฿'+fmt(o.total)+'  (ได้ PDF ทันที · ยังไม่ส่ง LINE)');
-    if(!opts)return;
-  }
+  if(!silent&&!confirm('ออกบิล '+o.order_no+' ('+(o.customers?.doc_type||'บิลเงินสด')+')\nยอด ฿'+fmt(o.total)+'\n\n✓ ระบบจะดาวน์โหลด PDF ให้ทันที\n✗ ยังไม่ส่งเข้ากลุ่ม LINE — กดปุ่ม "ส่ง LINE" ที่แถวบิลทีหลังได้'))return;
   if(!orders.some(x=>x.id===o.id))orders.push(o);
-  await makeBill(o.id,btn,false,opts||{docType:o.customers?.doc_type||'บิลเงินสด',sellerMode:o.customers?.bill_seller_mode||'none'});
+  await makeBill(o.id,btn,false,opts);
   // ดาวน์โหลด PDF ของบิลที่เพิ่งออก
   try{
     const {data:nb}=await db.from('bills').select('id')
       .eq('order_id',orderId).neq('ship_status','cancelled')
       .order('created_at',{ascending:false}).limit(1);
-    if(nb&&nb.length)await downloadBillPDF(nb[0].id,btn);
+    if(nb&&nb.length)await downloadBillPDF(nb[0].id,btn,true);   // ใช้รูปแบบตามค่าลูกค้า ไม่เด้งถาม
   }catch(e){console.warn('auto pdf',e);}
   if(!silent)loadBills();
 }
@@ -4187,11 +4190,15 @@ async function acPdfSelected(btn){
   const ids=[...document.querySelectorAll('.ac-selb:checked')].map(x=>Number(x.value));
   if(!ids.length){toast('ติ๊กเลือกบิลก่อน');return;}
   if(!confirm('ดาวน์โหลด PDF '+ids.length+' ใบ (แยกไฟล์ ชื่อไฟล์ = เลขบิล)\n\nเบราว์เซอร์อาจถามอนุญาตดาวน์โหลดหลายไฟล์ — กดอนุญาต'))return;
+  const first=(bills||[]).find(b=>b.id===ids[0])||{};
+  const bOpts=await askBillOptions({doc_type:first.doc_type,bill_seller_mode:first.seller_mode},
+    'ใช้รูปแบบนี้กับทั้ง '+ids.length+' ใบที่เลือก',{head:'📄 รูปแบบ PDF ('+ids.length+' ใบ)',ok:'📄 สร้างทั้งหมด'});
+  if(!bOpts)return;
   const t0=btn.textContent;btn.disabled=true;
   let ok=0;const fails=[];
   for(let i=0;i<ids.length;i++){
     btn.textContent='กำลังสร้าง '+(i+1)+'/'+ids.length+'…';
-    try{await downloadBillPDF(ids[i],null,true);ok++;}
+    try{await downloadBillPDF(ids[i],null,true,bOpts);ok++;}
     catch(e){fails.push(String(e.message||e));}
     await new Promise(r=>setTimeout(r,350));
   }
@@ -4204,13 +4211,11 @@ async function acIssueSelected(btn){
   const sel=acPendingOrders.filter(o=>ids.includes(o.id));
   const sum=sel.reduce((s,o)=>s+Number(o.total||0),0);
   if(!confirm('ออกบิล '+ids.length+' ออเดอร์รวดเดียว รวม ฿'+fmt(sum)+'\n\n✓ ได้ PDF แยกทีละไฟล์ครบทุกบิล (เบราว์เซอร์อาจถามอนุญาตดาวน์โหลดหลายไฟล์ — กดอนุญาต)\n✗ ยังไม่ส่ง LINE'))return;
-  const batchOpts=await askBillOptions(sel[0]&&sel[0].customers,'ใช้กับทั้ง '+ids.length+' บิลที่เลือก');
-  if(!batchOpts)return;
   btn.disabled=true;
   let ok=0;const fails=[];
   for(let i=0;i<ids.length;i++){
     btn.textContent='กำลังออกบิล '+(i+1)+'/'+ids.length+'…';
-    try{await acIssueBill(ids[i],btn,true,batchOpts);ok++;}
+    try{await acIssueBill(ids[i],btn,true);ok++;}
     catch(e){fails.push(String(e.message||e));}
     await new Promise(r=>setTimeout(r,400));
   }
