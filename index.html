@@ -220,6 +220,7 @@ const SUPABASE_KEY = 'sb_publishable_HqLNQDwR4omYcb7BNUEKIw_vyHCo4N-';
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const fmt = n => '฿'+Number(n).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+const hidePrice = () => !!(customer && customer.hide_prices);
 const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
 
@@ -277,7 +278,7 @@ function render(){
       <div class="info">
         <div class="name">${esc(it.name)}</div>
         ${it.pack_info?`<div class="pack">${esc(it.pack_info)}</div>`:''}
-        <div class="price">${fmt(it.price)} <small>/ ${esc(it.unit)}</small></div>
+        ${hidePrice()?'':`<div class="price">${fmt(it.price)} <small>/ ${esc(it.unit)}</small></div>`}
         ${stockHtml}
       </div>
       <div class="qtybox">
@@ -320,7 +321,7 @@ function updateCartBar(){
   const total=ci.reduce((s,x)=>s+x.amount,0);
   const n=ci.reduce((s,x)=>s+x.qty,0);
   document.getElementById('cart-n').textContent=ci.length?ci.length+' รายการ · '+n+' ชิ้น':'ยังไม่ได้เลือกสินค้า';
-  document.getElementById('cart-t').textContent=fmt(total);
+  document.getElementById('cart-t').textContent=hidePrice()?'':fmt(total);
   document.getElementById('order-btn').disabled=!ci.length;
 }
 
@@ -332,10 +333,10 @@ function openConfirm(){
     <div class="cline" style="align-items:center">
       ${img?'<img src="'+img+'" onerror="this.style.display=\'none\'" style="width:44px;height:44px;object-fit:cover;border-radius:10px;flex:none;margin-right:8px;background:#f6efe9">':''}
       <span class="cn">${esc(x.name)}</span>
-      <span class="cq">${x.qty} ${esc(x.unit)} × ${fmt(x.price)}</span>
-      <span class="ca">${fmt(x.amount)}</span>
+      <span class="cq">${x.qty} ${esc(x.unit)}${hidePrice()?'':' × '+fmt(x.price)}</span>
+      <span class="ca">${hidePrice()?'':fmt(x.amount)}</span>
     </div>`;}).join('');
-  document.getElementById('confirm-total').textContent=fmt(ci.reduce((s,x)=>s+x.amount,0));
+  document.getElementById('confirm-total').textContent=hidePrice()?'—':fmt(ci.reduce((s,x)=>s+x.amount,0));
   document.getElementById('overlay').classList.add('show');
   document.body.style.overflow='hidden'; // กันหน้าหลังเลื่อนทะลุตอนเปิดชีตบน iOS
 }
@@ -372,7 +373,7 @@ async function placeOrder(){
   closeConfirm();
   cart={};
   document.getElementById('s-no').textContent='เลขที่ออเดอร์ '+data.order_no;
-  document.getElementById('s-total').textContent=fmt(data.total);
+  document.getElementById('s-total').textContent=hidePrice()?'ส่งคำสั่งซื้อแล้ว':fmt(data.total);
   document.getElementById('success').classList.add('show');
   notifyCentral(data,ci);
   notifyCustomerOrder(data,ci);
@@ -405,7 +406,7 @@ async function notifyCentral(data,ci){
     const addr=c.ship_address||c.billing_address;if(addr)t+='\nที่อยู่ : '+addr;
     t+='\n──────────\nรายการ :';
     ci.forEach(x=>{t+='\n'+x.name+' '+x.qty+' '+(x.unit||'');});
-    t+='\nรวม '+fmt(data.total);
+    if(!hidePrice()) t+='\nรวม '+fmt(data.total);
     if(c.note)t+='\nหมายเหตุ : '+c.note;
     await db.functions.invoke('line-push',{body:{to:gid,messages:[{type:'text',text:t}]}});
   }catch(e){/* เงียบไว้ ไม่รบกวนลูกค้า */}
@@ -464,7 +465,7 @@ function renderHistory(){
     return true;
   });
   const total=list.reduce((s,o)=>s+Number(o.total),0);
-  document.getElementById('hist-summary').textContent=list.length+' ออเดอร์ · รวม '+fmt(total);
+  document.getElementById('hist-summary').textContent=list.length+' ออเดอร์'+(hidePrice()?'':' · รวม '+fmt(total));
   const body=document.getElementById('hist-body');
   if(!list.length){body.innerHTML='<div class="empty">ไม่มีออเดอร์ในช่วงนี้</div>';return;}
   body.innerHTML=list.map(o=>{
@@ -474,7 +475,7 @@ function renderHistory(){
     if(s.cancelled){
       return `<div class="ocard" style="opacity:.65">
         <div class="oh"><div><div class="ono">${esc(o.order_no)}</div><div class="od">${d}</div></div>
-          <div class="oa">${fmt(o.total)}<br><span class="tag tag-new" style="background:var(--danger-soft);color:var(--danger)">ยกเลิกแล้ว</span></div></div></div>`;
+          <div class="oa">${hidePrice()?'':fmt(o.total)}<br><span class="tag tag-new" style="background:var(--danger-soft);color:var(--danger)">ยกเลิกแล้ว</span></div></div></div>`;
     }
     const step=(label,done,icon)=>`<div class="step ${done?'done':'wait'}"><div class="dot">${done?'✓':icon}</div>${label}</div>`;
     // ป้ายสถานะล่าสุด (เป็นคำ)
@@ -490,7 +491,7 @@ function renderHistory(){
     return `<div class="ocard">
       <div class="oh">
         <div><div class="ono">${esc(o.order_no)}</div><div class="od">${d}${bill?' · บิล '+esc(bill.bill_no):''}</div></div>
-        <div class="oa">${fmt(o.total)}</div>
+        <div class="oa">${hidePrice()?'':fmt(o.total)}</div>
       </div>
       <div class="statusrow"><span class="statusbadge" style="background:${statusColor}">${statusLabel}</span>${payTag}</div>
       <div class="steps">
