@@ -3141,6 +3141,8 @@ async function drawBill(o,billNo,extra){
   });
   y+=bodyH;
   for(let k=1;k<=items.length;k++)cutYs.push((tableTop+k*rowH)*S);
+  const headBand=[(tableTop-tableHeadH)*S,(tableTop)*S];   // แถบหัวตาราง (px บนแคนวาส)
+  const tableEndPx=(tableTop+items.length*rowH)*S;          // จุดจบตารางสินค้า
 
   // แถวรวม
   const totQty=items.reduce((s,it)=>s+Number(it.qty),0);
@@ -3205,7 +3207,7 @@ async function drawBill(o,billNo,extra){
   }
   x.textAlign='left';
 
-  return {cv, contentH:(y+120), cutYs};
+  return {cv, contentH:(y+120), cutYs, headBand, tableEndPx};
 }
 function prodSku(pid){const p=products.find(x=>x.id===pid);return p?p.sku:'';}
 function wrapText2(ctx,text,maxW,font){
@@ -3248,17 +3250,21 @@ async function billToPDF(cvResult,billNo){
   const footPx=Math.round(30*S2);              // แถบเลขหน้าท้ายหน้า
   const roomPx=pageH-footPx;                   // เนื้อหาสูงสุดต่อหน้า
   const cuts=(cvResult.cutYs||[]).slice().sort((a,b)=>a-b);
+  const band=cvResult.headBand||null;          // แถบหัวตาราง ไว้วาดซ้ำหน้า 2+
+  const hb=band?Math.max(0,Math.round(band[1]-band[0])):0;
+  const tableEnd=Number(cvResult.tableEndPx)||0;
 
-  // แบ่งหน้า: เลือกจุดตัดที่ใกล้ปลายหน้าที่สุด
+  // แบ่งหน้า: หน้าแรกเต็มพื้นที่ หน้าถัดไปกันที่ไว้ให้หัวตาราง
   const pages=[];
   let yTop=0, guard=0;
   while(yTop<total-1&&guard++<200){
-    let end=Math.min(yTop+roomPx,total);
+    const room=pages.length===0?roomPx:roomPx-hb;
+    let end=Math.min(yTop+room,total);
     if(end<total){
-      const safe=cuts.filter(c=>c>yTop+roomPx*0.3&&c<=end);
+      const safe=cuts.filter(c=>c>yTop+room*0.3&&c<=end);
       if(safe.length)end=safe[safe.length-1];
     }
-    if(end<=yTop)end=Math.min(yTop+roomPx,total);   // กันวนไม่รู้จบ
+    if(end<=yTop)end=Math.min(yTop+room,total);   // กันวนไม่รู้จบ
     pages.push([yTop,end]);
     yTop=end;
   }
@@ -3267,12 +3273,15 @@ async function billToPDF(cvResult,billNo){
   const tc=tmp.getContext('2d');
   for(let i=0;i<pages.length;i++){
     const [a,b]=pages[i], hpx=b-a;
-    tmp.width=cv.width; tmp.height=hpx+footPx;
+    const withHead=i>0&&hb>0&&a<tableEnd;      // หน้า 2+ ที่ยังอยู่ในตารางสินค้า → วาดหัวตารางซ้ำ
+    const off=withHead?hb:0;
+    tmp.width=cv.width; tmp.height=off+hpx+footPx;
     tc.fillStyle='#fff';tc.fillRect(0,0,tmp.width,tmp.height);
-    tc.drawImage(cv,0,a,cv.width,hpx,0,0,cv.width,hpx);
+    if(withHead)tc.drawImage(cv,0,band[0],cv.width,hb,0,0,cv.width,hb);
+    tc.drawImage(cv,0,a,cv.width,hpx,0,off,cv.width,hpx);
     tc.font='400 '+Math.round(11*S2)+'px "IBM Plex Sans Thai"';
     tc.fillStyle='#999';tc.textAlign='right';
-    tc.fillText(billNo+'   หน้า '+(i+1)+'/'+pages.length,cv.width-Math.round(40*S2),hpx+Math.round(20*S2));
+    tc.fillText(billNo+'   หน้า '+(i+1)+'/'+pages.length,cv.width-Math.round(40*S2),off+hpx+Math.round(20*S2));
     if(i)pdf.addPage();
     pdf.addImage(tmp.toDataURL('image/jpeg',0.92),'JPEG',M,M,contentW,tmp.height/pxPerPt);
   }
