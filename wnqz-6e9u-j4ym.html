@@ -911,6 +911,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-p mini" id="ac-issue-sel" onclick="acIssueSelected(this)" style="display:none">🧾 ออกบิลที่เลือก</button>
       <button class="btn-p mini" id="ac-pdf-sel" onclick="acPdfSelected(this)" style="display:none">📄 โหลด PDF ที่เลือก</button>
       <button class="btn-g mini" id="ac-view-sel" onclick="acViewSelected(this)" style="display:none">👁️ ดูบิลที่เลือก (ไฟล์เดียว)</button>
+      <button class="btn-g mini" id="ac-a4-sel" onclick="acMakeA4(this)" style="display:none" title="สร้างรูปหน้า A4 สำหรับส่งเข้าไลน์ (บิลเก่าที่ยังไม่มี)">📐 สร้างหน้า A4</button>
       <label>ผู้ตรวจ</label><input id="ac-staff" style="width:100px" placeholder="ชื่อ">
       <input type="month" id="ac-month" style="width:140px" title="เดือนสำหรับ Export Excel">
       <button class="btn-g" onclick="exportMonthExcel(this)">📊 Excel รายเดือน</button>
@@ -4573,6 +4574,9 @@ function acSelCount(){
   const v=document.getElementById('ac-view-sel');
   v.style.display=m?'':'none';
   v.textContent='👁️ ดูบิลที่เลือก ('+m+') ไฟล์เดียว';
+  const a4=document.getElementById('ac-a4-sel');
+  a4.style.display=m?'':'none';
+  a4.textContent='📐 สร้างหน้า A4 ('+m+')';
 }
 function acSelAllBills(cb){
   document.querySelectorAll('.ac-selb').forEach(x=>x.checked=cb.checked);
@@ -4614,6 +4618,38 @@ async function acViewSelected(btn){
     toast('รวม '+added+' บิลเป็นไฟล์เดียวแล้ว ✓');
   }catch(e){toast('รวมบิลไม่สำเร็จ: '+(e.message||e));}
   btn.disabled=false;btn.textContent=t0;acSelCount();
+}
+/** สร้างรูปหน้า A4 ย้อนหลังให้บิลที่เลือก (วาดบิลใหม่จากข้อมูลจริง แล้วอัปเก็บ) */
+async function acMakeA4(btn){
+  const ids=[...document.querySelectorAll('.ac-selb:checked')].map(x=>Number(x.value));
+  if(!ids.length){toast('ติ๊กเลือกบิลก่อน');return;}
+  if(!confirm('สร้างรูปหน้า A4 ให้ '+ids.length+' บิล\n\nใช้สำหรับส่งเข้าไลน์ตอนสรุปตี 2 — บิลเดิมและ PDF ไม่เปลี่ยนแปลง'))return;
+  const t0=btn.textContent;btn.disabled=true;
+  let ok=0;const fails=[];
+  for(let i=0;i<ids.length;i++){
+    btn.textContent='กำลังสร้าง '+(i+1)+'/'+ids.length+'…';
+    try{
+      const {data:bill,error}=await db.from('bills')
+        .select('bill_no,order_id,shipping_fee,discount,total,revision,doc_type,seller_mode,edit_note').eq('id',ids[i]).single();
+      if(error||!bill)throw new Error('โหลดบิลไม่ได้');
+      const {data:o}=await db.from('orders')
+        .select('*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,bill_seller_mode,ship_shop_name,ship_receiver,ship_phone,ship_address), order_items(qty,price,amount,product_id,products(name,unit,sku,image_url))')
+        .eq('id',bill.order_id).single();
+      if(!o)throw new Error('ไม่พบออเดอร์');
+      const result=await drawBill(o,bill.bill_no,{shipFee:Number(bill.shipping_fee)||0,discount:Number(bill.discount)||0,
+        grand:Number(bill.total),revision:bill.revision||1,docType:bill.doc_type||'บิลเงินสด',
+        sellerMode:bill.seller_mode||'none',editNote:bill.edit_note||''});
+      const urls=await uploadA4Pages(result,bill.bill_no);
+      if(!urls.length)throw new Error('อัปรูปไม่สำเร็จ');
+      const {error:ue}=await db.from('bills').update({page_urls:urls}).eq('id',ids[i]);
+      if(ue)throw new Error(ue.message);
+      ok++;
+    }catch(e){fails.push(String(e.message||e));}
+    await new Promise(r=>setTimeout(r,250));
+  }
+  btn.disabled=false;btn.textContent=t0;
+  toast('สร้างหน้า A4 แล้ว '+ok+'/'+ids.length+' บิล'+(fails.length?' · พลาด: '+fails[0]:' ✓'));
+  loadBills();
 }
 async function acPdfSelected(btn){
   const ids=[...document.querySelectorAll('.ac-selb:checked')].map(x=>Number(x.value));
