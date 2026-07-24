@@ -4876,7 +4876,7 @@ async function exportCountPDF(btn){
   const list=products.filter(p=>p.active!==false&&scMatch(p,mode))
     .map(p=>({p,qty:(stockByProd[p.id]||{})[wh]||0}))
     .filter(x=>!only||x.qty>0)
-    .sort((a,b)=>a.p.sku.localeCompare(b.p.sku));
+    .sort((a,b)=>byThaiName(a.p,b.p));   // เรียงชื่อหลักพจนานุกรมไทย ให้ตรงกับหน้าจอ
   if(!list.length){toast('ไม่มีสินค้าในชุดนี้');return;}
   btn.disabled=true;btn.textContent='กำลังสร้าง PDF…';
   try{
