@@ -334,6 +334,8 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div><label>เข้าโกดัง</label><select id="p-stock-wh" style="min-width:110px"></select></div>
       <div><label>เตือนใกล้หมด</label><input id="p-alert" type="number" step="1" style="width:90px" class="num" value="10"></div>
       <div><label>Safety Stock</label><input id="p-safety" type="number" step="1" min="0" style="width:90px" class="num" value="0" title="ขั้นต่ำที่ต้องมีในโกดังขาย — ใช้คำนวณเรียกของจากโกดัง"></div>
+      <div style="align-self:flex-end"><label style="cursor:pointer"><input type="checkbox" id="p-thai" style="width:15px;height:15px;vertical-align:-2px"> สั่งในไทยได้</label></div>
+      <div><label>ซัพพลายเออร์</label><input id="p-supplier" style="width:150px" placeholder="เช่น กิจศิริ" title="ใช้จัดกลุ่มข้อความสั่งซื้อเมื่อของหมด"></div>
       <div><label>Max Stock</label><input id="p-max" type="number" step="1" min="0" style="width:90px" class="num" value="0" title="เป้าเติมเต็มตอนเรียกของ (0 = ใช้ Safety)"></div>
       <div class="chk" style="padding-top:18px"><input type="checkbox" id="p-big"><span>ชิ้นใหญ่ (ค่าส่ง BI 20/ลัง)</span></div>
       <div><label>เรท 20 ลัง</label><input id="p-r20" type="number" step="0.01" style="width:100px" class="num" placeholder="ว่าง=กลาง"></div>
@@ -1741,6 +1743,8 @@ function editProduct(id){
   document.getElementById('p-pack').value=p.pack_info||'';
   document.getElementById('p-price').value=p.base_price;
   document.getElementById('p-safety').value=p.safety_stock||0;
+  document.getElementById('p-thai').checked=!!p.thai_orderable;
+  document.getElementById('p-supplier').value=p.supplier||'';
   document.getElementById('p-max').value=p.max_stock||0;
   document.getElementById('p-big').checked=!!p.is_big;
   document.getElementById('p-r20').value=p.price_r20??'';
@@ -1764,6 +1768,7 @@ function resetProductForm(){
   document.getElementById('p-stock').value='0';
   document.getElementById('p-alert').value='10';
   document.getElementById('p-safety').value=0;document.getElementById('p-max').value=0;document.getElementById('p-big').checked=false;
+  document.getElementById('p-thai').checked=false;document.getElementById('p-supplier').value='';
   productImageFile=null; productImageUrl='';
   showProductPreview('');
 }
@@ -1797,6 +1802,8 @@ async function saveProduct(){
     price_upc:document.getElementById('p-upc').value?parseFloat(document.getElementById('p-upc').value):null,
     low_stock_alert:parseFloat(document.getElementById('p-alert').value)||10,
     safety_stock:parseFloat(document.getElementById('p-safety').value)||0,
+    thai_orderable:document.getElementById('p-thai').checked,
+    supplier:document.getElementById('p-supplier').value.trim()||null,
     max_stock:parseFloat(document.getElementById('p-max').value)||0,
     is_big:document.getElementById('p-big').checked
   };
@@ -3398,13 +3405,16 @@ async function makeBill(orderId,btn,sendLine,opts){
         ]}});
       if(fnErr||!res||res.status!==200){
         toast('ออกบิล '+billNo+' แล้ว แต่ส่ง LINE ไม่สำเร็จ — ไปกดส่งซ้ำได้ในหน้าบัญชี');
+      queueSalesSummary(o,billNo,grand);
       }else{
         await db.from('bills').update({line_sent:true}).eq('bill_no',billNo);
         toast('ออกบิล '+billNo+' และส่งเข้ากลุ่ม LINE แล้ว ✓');
+      queueSalesSummary(o,billNo,grand);
       }
     }else{
       window.open(imageUrl,'_blank');
       toast('ออกบิล '+billNo+' แล้ว'+(sendLine?' (ลูกค้าไม่ได้ผูก LINE เปิดรูปให้แทน)':' (ยังไม่ส่ง LINE)'));
+    queueSalesSummary(o,billNo,grand);
     }
     await loadOrders(); await loadBills();
   }catch(e){
@@ -3743,6 +3753,26 @@ async function saveExtraCost(btn){
   document.getElementById('extra-modal').style.display='none';
   toast(cost>0?'บันทึกค่าใช้จ่าย ฿'+fmt(cost)+' แล้ว ✓':'ลบค่าใช้จ่ายแล้ว');
   loadBills();
+}
+/* คิวสรุปบิลเข้ากลุ่มเซลล์ (พิมพ์ "ตั้งกลุ่มสรุป" ในกลุ่มที่ต้องการรับ) */
+window._salesQ=[];
+function queueSalesSummary(o,billNo,grand,tag){
+  window._salesQ.push({billNo,tag:tag||'',code:o.customers?.code||'',name:o.customers?.name||'',
+    method:o.customers?.delivery_method||'อื่นๆ',grand,
+    items:(o.order_items||[]).map(it=>(it.products?.name||'?')+' '+it.qty+' '+(it.products?.unit||''))});
+}
+async function flushSalesSummary(){
+  const q=window._salesQ.splice(0);
+  if(!q.length)return;
+  const gid=appSettings.line_summary_group;
+  if(!gid)return;   // ยังไม่ตั้งกลุ่ม = ข้ามเงียบ ๆ
+  const head=q.length>1?('🧾 ออกบิล '+q.length+' ใบ'):'🧾 ออกบิลใหม่';
+  const body=q.map(b=>'━━━━━━━━━━\n'+b.billNo+(b.tag?' '+b.tag:'')+' · '+b.code+' '+b.name
+    +'\nขนส่ง: '+b.method+' · ยอด ฿'+fmt(b.grand)
+    +'\nรายการ:\n'+b.items.map(x=>'\u2022 '+x).join('\n')).join('\n');
+  try{
+    await db.functions.invoke('line-push',{body:{to:gid,messages:[{type:'text',text:(head+'\n'+body).slice(0,4900)}]}});
+  }catch(e){console.warn('sales summary',e);}
 }
 async function togglePin(orderId,cur){
   const {error}=await db.from('orders').update({pinned:!cur}).eq('id',orderId);
@@ -4448,6 +4478,7 @@ async function acIssueBill(orderId,btn,silent,opts){
   if(!silent&&!confirm('ออกบิล '+o.order_no+' ('+(o.customers?.doc_type||'บิลเงินสด')+')\nยอด ฿'+fmt(o.total)+'\n\n✓ ระบบจะดาวน์โหลด PDF ให้ทันที\n✗ ยังไม่ส่งเข้ากลุ่ม LINE — กดปุ่ม "ส่ง LINE" ที่แถวบิลทีหลังได้'))return;
   if(!orders.some(x=>x.id===o.id))orders.push(o);
   await makeBill(o.id,btn,false,opts);
+  if(!silent)flushSalesSummary();
   // ดาวน์โหลด PDF ของบิลที่เพิ่งออก
   try{
     const {data:nb}=await db.from('bills').select('id')
@@ -4545,6 +4576,7 @@ async function acIssueSelected(btn){
     await new Promise(r=>setTimeout(r,400));
   }
   btn.disabled=false;acSelCount();
+  flushSalesSummary();   // สรุปเข้ากลุ่มเซลล์ครั้งเดียวทั้งชุด
   toast('ออกบิลแล้ว '+ok+'/'+ids.length+' ใบ พร้อม PDF'+(fails.length?' · พลาด: '+fails.join(' / '):' ✓'));
   loadBills();
 }
