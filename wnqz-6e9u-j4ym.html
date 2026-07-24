@@ -3240,6 +3240,78 @@ function wrapText2(ctx,text,maxW,font){
   return lines;
 }
 // สร้าง PDF จาก canvas บิล
+/* แปลงรูปบิลเป็น "หน้า A4" (สัดส่วน 210×297) — ใช้ส่งเข้าไลน์ให้อ่านง่ายเหมือนกระดาษจริง
+   บิลสั้น = 1 หน้า เติมพื้นขาวให้เต็ม A4 · บิลยาว = แบ่งหลายหน้า ขอบ 2.5 ซม. + หัวตารางซ้ำ + เลขหน้า
+   คืน array ของ Blob (PNG) */
+async function billToA4Pages(cvResult,billNo){
+  const cv=cvResult.cv;
+  const A4=297/210;                             // อัตราส่วนความสูง/กว้าง
+  const S2=cv.width/794;
+  const out=[];
+  const mk=(w,h)=>{const c=document.createElement('canvas');c.width=Math.round(w);c.height=Math.round(h);
+    const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);return c;};
+  const toBlob=c=>new Promise(r=>c.toBlob(r,'image/png'));
+
+  const fitH=Math.round(cv.width*A4);            // ความสูง 1 หน้าเต็มความกว้าง
+  if(cv.height<=fitH+2){                         // พอดีหน้าเดียว → วางบนกระดาษ A4 เติมขาวด้านล่าง
+    const c=mk(cv.width,fitH);
+    c.getContext('2d').drawImage(cv,0,0);
+    out.push(await toBlob(c));
+    return out;
+  }
+
+  // หลายหน้า: เว้นขอบ 2.5 ซม. ทุกด้าน (A4 กว้าง 210mm → ขอบ = 25/210 ของความกว้าง)
+  const M=Math.round(cv.width*(25/210));
+  const contentW=cv.width, pageW=contentW+2*M, pageH=Math.round(pageW*A4);
+  const roomPx=pageH-2*M;
+  const footPx=Math.round(34*S2);
+  const band=cvResult.headBand||null;
+  const hb=band?Math.max(0,Math.round(band[1]-band[0])):0;
+  const tableEnd=Number(cvResult.tableEndPx)||0;
+  const cuts=(cvResult.cutYs||[]).slice().sort((a,b)=>a-b);
+
+  const pages=[];let yTop=0,guard=0;
+  while(yTop<cv.height-1&&guard++<200){
+    const room=(pages.length===0?roomPx:roomPx-hb)-footPx;
+    let end=Math.min(yTop+room,cv.height);
+    if(end<cv.height){
+      const safe=cuts.filter(c=>c>yTop+room*0.3&&c<=end);
+      if(safe.length)end=safe[safe.length-1];
+    }
+    if(end<=yTop)end=Math.min(yTop+room,cv.height);
+    pages.push([yTop,end]);yTop=end;
+  }
+  for(let i=0;i<pages.length;i++){
+    const [a,b]=pages[i],hpx=b-a;
+    const withHead=i>0&&hb>0&&a<tableEnd;
+    const off=withHead?hb:0;
+    const c=mk(pageW,pageH);
+    const x=c.getContext('2d');
+    if(withHead)x.drawImage(cv,0,band[0],cv.width,hb,M,M,contentW,hb);
+    x.drawImage(cv,0,a,cv.width,hpx,M,M+off,contentW,hpx);
+    x.font='400 '+Math.round(12*S2)+'px "IBM Plex Sans Thai"';
+    x.fillStyle='#999';x.textAlign='right';
+    x.fillText(billNo+'   หน้า '+(i+1)+'/'+pages.length,pageW-M,M+off+hpx+Math.round(22*S2));
+    out.push(await toBlob(c));
+  }
+  return out;
+}
+
+/** อัปหน้า A4 ขึ้นสตอเรจ คืน array ของ URL */
+async function uploadA4Pages(cvResult,billNo){
+  try{
+    const blobs=await billToA4Pages(cvResult,billNo);
+    const urls=[];
+    for(let i=0;i<blobs.length;i++){
+      const path=billNo+'-p'+(i+1)+'-'+rndTag(8)+'.png';
+      const {error}=await db.storage.from('bills').upload(path,blobs[i],{contentType:'image/png',upsert:true});
+      if(error)throw new Error(error.message);
+      urls.push(db.storage.from('bills').getPublicUrl(path).data.publicUrl);
+    }
+    return urls;
+  }catch(e){console.warn('A4 pages:',e);return [];}
+}
+
 /* สร้าง PDF ขนาด A4 — บิลยาวเกิน 1 หน้าจะตัดขึ้นหน้าใหม่อัตโนมัติ (ตัวหนังสือขนาดเต็มทุกหน้า)
    ตัดตรงขอบแถวสินค้าเสมอ ไม่ผ่ากลางแถว */
 async function billToPDF(cvResult,billNo){
@@ -3379,6 +3451,7 @@ async function makeBill(orderId,btn,sendLine,opts){
     if(upErr)throw new Error('อัพรูปไม่สำเร็จ: '+upErr.message);
     const {data:pub}=db.storage.from('bills').getPublicUrl(path);
     const imageUrl=pub.publicUrl;
+    const pageUrls=await uploadA4Pages(result,billNo);   // หน้า A4 สำหรับส่งเข้าไลน์ตอนสรุป
 
     // สร้าง PDF แล้วดาวน์โหลดให้ทันที
     try{
@@ -3387,7 +3460,7 @@ async function makeBill(orderId,btn,sendLine,opts){
     }catch(e){console.warn('PDF error',e);}
 
     const {error:insErr}=await db.from('bills').insert({
-      bill_no:billNo,order_id:o.id,customer_id:o.customers.id,
+      bill_no:billNo,order_id:o.id,customer_id:o.customers.id,page_urls:pageUrls,
       total:grand,shipping_fee:shipFee,discount:discount,revision:1,doc_type:docType,seller_mode:sellerMode,
       image_url:imageUrl,line_sent:false});
     if(insErr)throw new Error('บันทึกบิลไม่สำเร็จ: '+insErr.message);
@@ -5717,7 +5790,7 @@ async function saveEditBill(btn){
 
     // 5) อัปเดตบิล
     const {error:be}=await db.from('bills').update({
-      total:grand,shipping_fee:ship,discount:disc,revision:newRev,image_url:imageUrl,edit_note:(feesOnlyEdit&&!editNote)?null:editNote
+      total:grand,shipping_fee:ship,discount:disc,revision:newRev,image_url:imageUrl,page_urls:await uploadA4Pages(result,b.bill_no),edit_note:(feesOnlyEdit&&!editNote)?null:editNote
     }).eq('id',b.id);
     if(be)throw new Error('อัปเดตบิลไม่สำเร็จ: '+be.message);
 
