@@ -2391,6 +2391,15 @@ function orderUrlFor(c){
 let lkCustomerId=null;
 async function copyLink(id){
   let c=customers.find(x=>x.id===id);if(!c)return;
+  // เช็คสถานะกลุ่มไลน์สดจากฐานข้อมูล — กันข้อมูลค้าง (เพิ่งผูกกลุ่มหลังเปิดหน้านี้)
+  try{
+    const {data:fresh}=await db.from('customers').select('line_group_id,order_token,slug').eq('id',id).single();
+    if(fresh){
+      c.line_group_id=fresh.line_group_id;
+      c.order_token=fresh.order_token||c.order_token;
+      c.slug=fresh.slug;
+    }
+  }catch(e){}
   if(!c.order_token){
     const tk=btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(9)))).replace(/\+/g,'-').replace(/\//g,'_');
     const {error}=await db.from('customers').update({order_token:tk}).eq('id',id);
