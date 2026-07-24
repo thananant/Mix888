@@ -908,6 +908,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <input id="ac-q" placeholder="ค้นหาเลขบิล / ลูกค้า…" style="flex:1;min-width:150px" oninput="renderAccount()">
       <button class="btn-p mini" id="ac-issue-sel" onclick="acIssueSelected(this)" style="display:none">🧾 ออกบิลที่เลือก</button>
       <button class="btn-p mini" id="ac-pdf-sel" onclick="acPdfSelected(this)" style="display:none">📄 โหลด PDF ที่เลือก</button>
+      <button class="btn-g mini" id="ac-view-sel" onclick="acViewSelected(this)" style="display:none">👁️ ดูบิลที่เลือก (ไฟล์เดียว)</button>
       <label>ผู้ตรวจ</label><input id="ac-staff" style="width:100px" placeholder="ชื่อ">
       <input type="month" id="ac-month" style="width:140px" title="เดือนสำหรับ Export Excel">
       <button class="btn-g" onclick="exportMonthExcel(this)">📊 Excel รายเดือน</button>
@@ -4465,10 +4466,50 @@ function acSelCount(){
   const p=document.getElementById('ac-pdf-sel');
   p.style.display=m?'':'none';
   p.textContent='📄 โหลด PDF ที่เลือก ('+m+')';
+  const v=document.getElementById('ac-view-sel');
+  v.style.display=m?'':'none';
+  v.textContent='👁️ ดูบิลที่เลือก ('+m+') ไฟล์เดียว';
 }
 function acSelAllBills(cb){
   document.querySelectorAll('.ac-selb').forEach(x=>x.checked=cb.checked);
   acSelCount();
+}
+/** รวมบิลที่ติ๊กเป็น PDF ไฟล์เดียว (บิลละหน้า เรียงตามลำดับในตาราง) แล้วเปิดดูทันที */
+async function acViewSelected(btn){
+  const ids=[...document.querySelectorAll('.ac-selb:checked')].map(x=>Number(x.value));
+  if(!ids.length){toast('ติ๊กเลือกบิลก่อน');return;}
+  const sel=(window.acLastList||bills||[]).filter(b=>ids.includes(b.id));
+  const list=sel.length?sel:bills.filter(b=>ids.includes(b.id));
+  if(!list.length){toast('ไม่พบบิลที่เลือก');return;}
+  const t0=btn.textContent;btn.disabled=true;
+  try{
+    const {jsPDF}=window.jspdf;
+    const pdf=new jsPDF({unit:'pt',format:'a4'});
+    const pw=pdf.internal.pageSize.getWidth(), ph=pdf.internal.pageSize.getHeight();
+    let added=0;
+    for(let i=0;i<list.length;i++){
+      btn.textContent='กำลังรวม '+(i+1)+'/'+list.length+'…';
+      const b=list[i];
+      if(!b.image_url)continue;
+      const img=await new Promise(res=>{
+        const im=new Image();im.crossOrigin='anonymous';
+        im.onload=()=>res(im);im.onerror=()=>res(null);
+        im.src=b.image_url+(b.image_url.includes('?')?'&':'?')+'v='+Date.now();
+      });
+      if(!img)continue;
+      let w=pw,h=pw*img.height/img.width;
+      if(h>ph){h=ph;w=ph*img.width/img.height;}
+      const cv2=document.createElement('canvas');cv2.width=img.width;cv2.height=img.height;
+      const c2=cv2.getContext('2d');c2.fillStyle='#fff';c2.fillRect(0,0,cv2.width,cv2.height);c2.drawImage(img,0,0);
+      if(added)pdf.addPage();
+      pdf.addImage(cv2.toDataURL('image/jpeg',0.9),'JPEG',(pw-w)/2,0,w,h);
+      added++;
+    }
+    if(!added)throw new Error('โหลดรูปบิลไม่ได้สักใบ');
+    window.open(URL.createObjectURL(pdf.output('blob')),'_blank');
+    toast('รวม '+added+' บิลเป็นไฟล์เดียวแล้ว ✓');
+  }catch(e){toast('รวมบิลไม่สำเร็จ: '+(e.message||e));}
+  btn.disabled=false;btn.textContent=t0;acSelCount();
 }
 async function acPdfSelected(btn){
   const ids=[...document.querySelectorAll('.ac-selb:checked')].map(x=>Number(x.value));
@@ -5395,7 +5436,7 @@ async function openEditOrder(orderId){
   ebState={bill:null,order:o,removed:[],
     items:o.order_items.map(it=>({id:it.id,product_id:it.product_id,
       name:it.products?.name||'?',unit:it.products?.unit||'',
-      qty:Number(it.qty),price:Number(it.price),orig_qty:Number(it.qty)}))};
+      qty:Number(it.qty),price:Number(it.price),orig_qty:Number(it.qty),orig_price:Number(it.price)}))};
   document.getElementById('eb-no').textContent=o.order_no;
   document.getElementById('eb-rev').textContent='ยังไม่ออกบิล';
   document.getElementById('eb-cust').textContent=(o.customers?.code||'')+' · '+(o.customers?.name||'');
@@ -5503,7 +5544,7 @@ async function openEditBill(billId){
   ebState={bill:b,order:o,removed:[],
     items:o.order_items.map(it=>({id:it.id,product_id:it.product_id,
       name:it.products?.name||'?',unit:it.products?.unit||'',
-      qty:Number(it.qty),price:Number(it.price),orig_qty:Number(it.qty)}))};
+      qty:Number(it.qty),price:Number(it.price),orig_qty:Number(it.qty),orig_price:Number(it.price)}))};
   document.getElementById('eb-no').textContent=b.bill_no;
   document.getElementById('eb-rev').textContent='ตอนนี้ v.'+(b.revision||1);
   document.getElementById('eb-cust').textContent=(o.customers?.code||'')+' · '+(o.customers?.name||'');
@@ -5580,7 +5621,11 @@ async function saveEditBill(btn){
   if(!ebState.items.length){toast(ebOrderMode?'ออเดอร์ต้องมีอย่างน้อย 1 รายการ':'บิลต้องมีอย่างน้อย 1 รายการ');return;}
   if(ebOrderMode)return saveEditOrder(btn);
   const editNote=document.getElementById('eb-note').value.trim();
-  if(!editNote){toast('กรอกเหตุผลที่แก้บิลก่อน — จะขึ้นในบิลและสรุปออเดอร์');document.getElementById('eb-note').focus();return;}
+  // แก้เฉพาะค่าส่ง/ส่วนลด (รายการสินค้าไม่ขยับ) = ไม่ใช่การแก้เนื้อบิล → ไม่บังคับเหตุผล ไม่ขึ้น 🔴
+  const itemsChanged=ebState.removed.length>0
+    ||ebState.items.some(it=>!it.id||it.qty!==it.orig_qty||it.price!==(it.orig_price??it.price));
+  const feesOnlyEdit=!itemsChanged;
+  if(!editNote&&!feesOnlyEdit){toast('กรอกเหตุผลที่แก้บิลก่อน — จะขึ้นในบิลและสรุปออเดอร์');document.getElementById('eb-note').focus();return;}
   btn.disabled=true;btn.textContent='กำลังบันทึก…';
   try{
     const b=ebState.bill,o=ebState.order;
@@ -5631,7 +5676,7 @@ async function saveEditBill(btn){
     const {data:o2}=await db.from('orders')
       .select('*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(qty,price,amount,product_id,products(name,unit))')
       .eq('id',o.id).single();
-    const result=await drawBill(o2,b.bill_no,{shipFee:ship,discount:disc,grand,revision:newRev,docType:b.doc_type||'บิลเงินสด',sellerMode:b.seller_mode||'none',editNote});
+    const result=await drawBill(o2,b.bill_no,{shipFee:ship,discount:disc,grand,revision:newRev,docType:b.doc_type||'บิลเงินสด',sellerMode:b.seller_mode||'none',editNote:(feesOnlyEdit&&!editNote)?'':editNote});
     const blob=await new Promise(res=>result.cv.toBlob(res,'image/png'));
     const path=b.bill_no+'_v'+newRev+'-'+rndTag(10)+'.png';
     const {error:upErr}=await db.storage.from('bills').upload(path,blob,{contentType:'image/png',upsert:true});
@@ -5640,7 +5685,7 @@ async function saveEditBill(btn){
 
     // 5) อัปเดตบิล
     const {error:be}=await db.from('bills').update({
-      total:grand,shipping_fee:ship,discount:disc,revision:newRev,image_url:imageUrl,edit_note:editNote
+      total:grand,shipping_fee:ship,discount:disc,revision:newRev,image_url:imageUrl,edit_note:(feesOnlyEdit&&!editNote)?null:editNote
     }).eq('id',b.id);
     if(be)throw new Error('อัปเดตบิลไม่สำเร็จ: '+be.message);
 
@@ -5648,7 +5693,7 @@ async function saveEditBill(btn){
     if(o2.customers?.line_group_id&&confirm('ส่งบิลฉบับแก้ไข (v.'+newRev+') เข้ากลุ่ม LINE ลูกค้าเลยไหม?')){
       await db.functions.invoke('line-push',{body:{to:o2.customers.line_group_id,messages:[
         {type:'image',originalContentUrl:imageUrl,previewImageUrl:imageUrl},
-        {type:'text',text:shopTag(o2.customers)+'🧾 บิลเลขที่ '+b.bill_no+' (แก้ไขครั้งที่ '+newRev+')\n🔴 เหตุผล: '+editNote
+        {type:'text',text:shopTag(o2.customers)+'🧾 บิลเลขที่ '+b.bill_no+' (แก้ไขครั้งที่ '+newRev+')'+(editNote?'\n🔴 เหตุผล: '+editNote:'')
           +(ship?'\nค่าขนส่ง ฿'+fmt(ship):'')+(disc?'\nส่วนลด -฿'+fmt(disc):'')
           +'\nยอดรวม ฿'+fmt(grand)+'\nขออภัยในความไม่สะดวกครับ 🙏'}]}});
     }
