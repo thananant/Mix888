@@ -4769,13 +4769,13 @@ function scRender(){
     const rowStyle=bad?' style="background:#fdeaea"':'';
     if(mode==='retail')return `<tr${rowStyle}>
       <td>${esc(it.sku)}</td><td>${esc(it.name)}</td><td class="num">${it.system_qty}</td>
-      <td class="num"><input type="number" min="0" class="num" style="width:80px" value="${it.good??''}" onchange="scSet(${i},'good',this.value)"></td>
-      <td class="num"><input type="number" min="0" class="num" style="width:80px" value="${it.damaged??''}" onchange="scSet(${i},'damaged',this.value)"></td>
+      <td class="num"><input type="number" min="0" class="num" style="width:80px" value="${it.good??''}" data-sc="good-${i}" onkeydown="scEnter(event,${i},'good')" onchange="scSet(${i},'good',this.value)"></td>
+      <td class="num"><input type="number" min="0" class="num" style="width:80px" value="${it.damaged??''}" data-sc="damaged-${i}" onkeydown="scEnter(event,${i},'damaged')" onchange="scSet(${i},'damaged',this.value)"></td>
       <td class="num">${has?counted:'—'}</td>
       <td class="num" style="font-weight:700;color:${bad?'var(--danger,#b52020)':'var(--ok,#159b78)'}">${has?(diff>0?'+':'')+diff:''}</td></tr>`;
     return `<tr${rowStyle}>
       <td>${esc(it.sku)}</td><td>${esc(it.name)}</td><td class="num">${it.system_qty}</td>
-      <td class="num"><input type="number" min="0" class="num" style="width:90px" value="${it.counted??''}" onchange="scSet(${i},'counted',this.value)"></td>
+      <td class="num"><input type="number" min="0" class="num" style="width:90px" value="${it.counted??''}" data-sc="counted-${i}" onkeydown="scEnter(event,${i},'counted')" onchange="scSet(${i},'counted',this.value)"></td>
       <td class="num" style="font-weight:700;color:${bad?'var(--danger,#b52020)':'var(--ok,#159b78)'}">${has?(diff>0?'+':'')+diff:''}</td></tr>`;
   }).join('');
 }
@@ -4803,6 +4803,17 @@ function scRestoreDraft(){
   }catch(e){return 0;}
 }
 function scSet(i,f,v){scItems[i][f]=v===''?null:Math.max(0,Number(v)||0);scSaveDraft();scRender();}
+/* กด Enter = บันทึกช่องนี้ แล้วกระโดดลงช่องเดียวกันของแถวถัดไป */
+function scEnter(e,i,f){
+  if(e.key!=='Enter')return;
+  e.preventDefault();
+  scSet(i,f,e.target.value);           // บันทึก (ตารางวาดใหม่)
+  const nxt=document.querySelector('input[data-sc="'+f+'-'+(i+1)+'"]');
+  if(nxt){
+    nxt.focus();nxt.select();
+    nxt.scrollIntoView({block:'center',behavior:'smooth'});
+  }
+}
 async function confirmCount(btn){
   const mode=document.getElementById('sc-mode').value;
   const wh=Number(document.getElementById('sc-wh').value);
