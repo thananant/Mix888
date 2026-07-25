@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 26/07-B</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 26/07-C</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -3963,6 +3963,26 @@ function queueSalesSummary(o,billNo,grand,tag){
 }
 /* ส่งเข้ากลุ่มสรุปทันทีทุกครั้งที่ออกบิล (ข้อความมีบิลทั้งรอบของขนส่งนั้น สะสมเพิ่มเรื่อย ๆ) */
 window._salesPend=window._salesPend||[]; window._salesTimer=null; window._salesFirstAt=0;
+/** แจ้งกลุ่มสรุปเมื่อยกเลิกบิล + ทวนรายการที่เหลือของขนส่งนั้น */
+async function notifySalesCancel(b){
+  const gid=appSettings.line_summary_group;
+  if(!gid||!b)return;
+  try{
+    const method=(b.customers&&b.customers.delivery_method)||'อื่นๆ';
+    const r=cutoffRange(new Date());
+    const {data:all}=await db.from('bills')
+      .select('bill_no,ship_status, orders(status, customers(code,name,delivery_method))')
+      .gte('created_at',r.start.toISOString()).lt('created_at',r.end.toISOString())
+      .order('created_at',{ascending:true});
+    const left=(all||[]).filter(x=>x.ship_status!=='cancelled'&&x.orders&&x.orders.status!=='cancelled'
+      &&(((x.orders.customers||{}).delivery_method)||'อื่นๆ')===method);
+    let t='❌ ยกเลิกบิล '+b.bill_no+'\n'+((b.customers&&b.customers.code)||'')+' '+((b.customers&&b.customers.name)||'')
+      +'\nขนส่ง: '+method+' · ยอด ฿'+fmt(b.total||0)
+      +'\n\n📋 '+method+' คงเหลือ '+left.length+' บิล';
+    if(left.length)t+='\n'+left.map((x,i)=>(i+1)+'/'+left.length+' '+x.bill_no+' · '+((x.orders.customers||{}).name||'')).join('\n');
+    await db.functions.invoke('line-push',{body:{to:gid,messages:[{type:'text',text:t.slice(0,4900)}]}});
+  }catch(e){console.warn('cancel notify',e);}
+}
 function flushSalesSummary(){
   const q=window._salesQ.splice(0);
   if(!q.length)return;
@@ -4293,6 +4313,7 @@ async function cancelBillUI(id){
   if(error){toast('ยกเลิกไม่สำเร็จ: '+error.message);return;}
   try{await db.rpc('fifo_return_order',{p_order:b.order_id});}catch(e){console.warn('fifo return',e);}
   toast('ยกเลิกบิล '+b.bill_no+' และคืนของจองแล้ว');
+  notifySalesCancel(b);   // แจ้งกลุ่มสรุปออเดอร์ว่าบิลนี้ถูกยกเลิก
   if(b.customers?.line_group_id && confirm('แจ้งลูกค้าในกลุ่ม LINE ว่าบิลนี้ถูกยกเลิกไหม?')){
     await notifyCustomer(b.customers.line_group_id,shopTag(b.customers)+'❌ บิลเลขที่ '+b.bill_no+' ถูกยกเลิกแล้ว\nหากมีข้อสงสัยติดต่อร้านได้เลยครับ');
   }
