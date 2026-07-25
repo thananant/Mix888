@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 26/07-D</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 26/07-E</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -5490,7 +5490,8 @@ function tfSuggest(){
   const toW=Number(document.getElementById('tf-to').value);
   if(fromW===toW){toast('ต้นทางกับปลายทางต้องคนละโกดัง');return;}
   tfItems=[];
-  products.filter(p=>p.active!==false).forEach(p=>{
+  let noStock=0, partial=0;
+  products.filter(p=>p.active!==false&&!/S$/.test(String(p.sku||''))).forEach(p=>{   // ปลีกไม่เรียกโอน
     const reserved=Number(p.reserved_qty)||0;
     const stockTo=tfStockOf(p.id,toW);
     const safety=Number(p.safety_stock)||0;
@@ -5498,13 +5499,23 @@ function tfSuggest(){
     const avail=stockTo-reserved;      // คงเหลือจริงหลังหักจองรอส่ง
     if(avail>=safety)return;           // ยังไม่ต่ำกว่า Safety = ยังไม่ต้องเรียก
     const target=(maxS>0?maxS:safety);
-    let need=Math.ceil(target-avail);  // เรียกเติมกลับให้ถึง Max (= Max - (คงเหลือ-จอง))
+    const need=roundUp5(target-avail); // ปัดขึ้นเป็นลงท้าย 5 หรือ 0
     if(need<=0)return;
-    const stockFrom=tfStockOf(p.id,fromW);
+    const stockFrom=Math.max(0,tfStockOf(p.id,fromW));
+    if(stockFrom<=0){noStock++;return;}          // โกดังไม่มีของ → ไปหน้าจัดซื้ออย่างเดียว
+    const qty=Math.min(need,stockFrom);          // มีไม่พอ = เอาเท่าที่มี ส่วนที่ขาดไปหน้าจัดซื้อ
+    if(qty<need)partial++;
     tfItems.push({product_id:p.id,name:p.name,sku:p.sku,unit:p.unit||'',
-      reserved,stockTo,stockFrom,safety,max:maxS,qty:Math.max(1,Math.min(need,Math.max(stockFrom,0))||need)});
+      reserved,stockTo,stockFrom,safety,max:maxS,qty,shortBy:need-qty});
   });
-  if(!tfItems.length)toast('ไม่มีสินค้าที่ต้องเรียกเพิ่ม — สต๊อกปลายทางพอทุกตัว ✓');
+  tfItems.sort(byThaiName);
+  if(!tfItems.length&&!noStock)toast('ไม่มีสินค้าที่ต้องเรียกเพิ่ม — สต๊อกปลายทางพอทุกตัว ✓');
+  else{
+    let m='เรียกได้ '+tfItems.length+' รายการ';
+    if(partial)m+=' · มีไม่พอ '+partial+' รายการ (เอาเท่าที่มี)';
+    if(noStock)m+=' · โกดังไม่มีของ '+noStock+' รายการ → ดูที่หน้าจัดซื้อ';
+    toast(m);
+  }
   tfRender();
 }
 function tfRecalc(){
