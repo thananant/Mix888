@@ -3583,6 +3583,7 @@ async function makeBill(orderId,btn,sendLine,opts){
     toast(String(e.message||e));
     btn.disabled=false;btn.textContent='🧾 ออกบิล';
   }
+  if(!window._salesBatch)flushSalesSummary();   // แจ้งกลุ่มสรุปออเดอร์ทันทีที่ออกบิล
 }
 
 /* ==================== สรุปออเดอร์วันนี้เข้าไลน์กลาง ==================== */
@@ -4677,7 +4678,6 @@ async function acIssueBill(orderId,btn,silent,opts){
   if(!silent&&!confirm('ออกบิล '+o.order_no+' ('+(o.customers?.doc_type||'บิลเงินสด')+')\nยอด ฿'+fmt(o.total)+'\n\n✓ ระบบจะดาวน์โหลด PDF ให้ทันที\n✗ ยังไม่ส่งเข้ากลุ่ม LINE — กดปุ่ม "ส่ง LINE" ที่แถวบิลทีหลังได้'))return;
   if(!orders.some(x=>x.id===o.id))orders.push(o);
   await makeBill(o.id,btn,false,opts);
-  if(!silent)flushSalesSummary();
   // ดาวน์โหลด PDF ของบิลที่เพิ่งออก
   try{
     const {data:nb}=await db.from('bills').select('id')
@@ -4801,7 +4801,7 @@ async function acIssueSelected(btn){
   const sel=acPendingOrders.filter(o=>ids.includes(o.id));
   const sum=sel.reduce((s,o)=>s+Number(o.total||0),0);
   if(!confirm('ออกบิล '+ids.length+' ออเดอร์รวดเดียว รวม ฿'+fmt(sum)+'\n\n✓ ได้ PDF แยกทีละไฟล์ครบทุกบิล (เบราว์เซอร์อาจถามอนุญาตดาวน์โหลดหลายไฟล์ — กดอนุญาต)\n✗ ยังไม่ส่ง LINE'))return;
-  btn.disabled=true;
+  btn.disabled=true;window._salesBatch=true;
   let ok=0;const fails=[];
   for(let i=0;i<ids.length;i++){
     btn.textContent='กำลังออกบิล '+(i+1)+'/'+ids.length+'…';
@@ -4809,7 +4809,7 @@ async function acIssueSelected(btn){
     catch(e){fails.push(String(e.message||e));}
     await new Promise(r=>setTimeout(r,400));
   }
-  btn.disabled=false;acSelCount();
+  btn.disabled=false;acSelCount();window._salesBatch=false;
   flushSalesSummary();   // สรุปเข้ากลุ่มเซลล์ครั้งเดียวทั้งชุด
   toast('ออกบิลแล้ว '+ok+'/'+ids.length+' ใบ พร้อม PDF'+(fails.length?' · พลาด: '+fails.join(' / '):' ✓'));
   loadBills();
