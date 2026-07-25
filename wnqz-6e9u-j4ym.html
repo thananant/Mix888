@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 26/07-E</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 26/07-F</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -164,6 +164,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div class="mhead" onclick="toggleGroup('acct')"><span class="ic">💰</span>บัญชี<span class="chev">▾</span></div>
       <div class="msub">
         <div class="mi" data-page="account" onclick="showPage('account')"><span class="ic">💰</span>บัญชี</div>
+        <div class="mi" data-page="expense" onclick="showPage('expense')"><span class="ic">🧾</span>รายจ่าย (Petty Cash)</div>
       </div>
     </div>
 
@@ -799,6 +800,52 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   </div>
 </div>
 
+<div class="page" id="page-expense">
+  <div class="pagehead"><h2>🧾 รายจ่าย (Petty Cash)</h2></div>
+  <div class="card">
+    <h3 class="ct" id="ex-form-title">บันทึกรายจ่าย</h3>
+    <input type="hidden" id="ex-id">
+    <div class="row" style="flex-wrap:wrap;align-items:flex-end">
+      <div><label>วันที่จ่าย</label><input type="date" id="ex-date" style="width:150px"></div>
+      <div><label>หมวดค่าใช้จ่าย</label><select id="ex-cat" style="min-width:190px"></select></div>
+      <div style="flex:1;min-width:220px"><label>รายละเอียด *</label><input id="ex-desc" style="width:100%" placeholder="เช่น ค่าส่ง Lalamove ให้ร้านเสี่ยวหยาง"></div>
+      <div><label>จำนวนเงิน (฿) *</label><input id="ex-amt" type="number" step="0.01" min="0" class="num" style="width:120px"></div>
+    </div>
+    <div class="row" style="flex-wrap:wrap;align-items:flex-end;margin-top:8px">
+      <div><label>วิธีจ่าย</label><select id="ex-pay" style="width:120px">
+        <option value="cash">💵 เงินสด</option><option value="transfer">📱 โอน</option><option value="card">💳 บัตร</option></select></div>
+      <div><label>ผู้จ่าย/สำรองจ่าย</label><input id="ex-by" style="width:130px" placeholder="ชื่อ"></div>
+      <div><label>จ่ายให้ใคร</label><input id="ex-vendor" style="width:150px" list="ex-vendors" placeholder="ร้าน/ซัพ"><datalist id="ex-vendors"></datalist></div>
+      <div><label>อ้างอิงเลขบิล/ออเดอร์</label><input id="ex-ref" style="width:150px" placeholder="IV… / SO…"></div>
+      <div><label>โกดัง/สาขา</label><select id="ex-wh" style="width:140px"><option value="">— ไม่ระบุ —</option></select></div>
+    </div>
+    <div class="row" style="flex-wrap:wrap;align-items:flex-end;margin-top:8px">
+      <div style="flex:1;min-width:200px"><label>หมายเหตุ</label><input id="ex-note" style="width:100%"></div>
+      <div><label>ใบเสร็จ (รูป)</label><input type="file" id="ex-file" accept="image/*" style="width:200px"></div>
+      <button class="btn-p" onclick="saveExpense(this)">💾 บันทึกรายจ่าย</button>
+      <button class="btn-g" onclick="resetExpenseForm()">ล้างฟอร์ม</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="align-items:flex-end;flex-wrap:wrap;gap:10px">
+      <div><label>ตั้งแต่</label><input type="date" id="exf-from" onchange="loadExpenses()"></div>
+      <div><label>ถึง</label><input type="date" id="exf-to" onchange="loadExpenses()"></div>
+      <div><label>หมวด</label><select id="exf-cat" onchange="renderExpenses()"><option value="">ทั้งหมด</option></select></div>
+      <div><label>ค้นหา</label><input id="exf-q" placeholder="รายละเอียด/ผู้จ่าย/เลขอ้างอิง" style="min-width:200px" oninput="renderExpenses()"></div>
+      <button class="btn-g" onclick="exQuick(0)">เดือนนี้</button>
+      <button class="btn-g" onclick="exQuick(1)">เดือนก่อน</button>
+      <button class="btn-g" onclick="exExport()">⬇️ CSV</button>
+      <span class="count" id="ex-count"></span>
+    </div>
+    <div id="ex-sum" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px"></div>
+    <div id="ex-bycat" style="margin-top:10px"></div>
+    <div style="overflow-x:auto;margin-top:10px"><table>
+      <thead><tr><th>วันที่</th><th>หมวด</th><th>รายละเอียด</th><th>จ่ายให้</th><th>วิธี</th><th>ผู้จ่าย</th><th>อ้างอิง</th><th class="num">จำนวน</th><th></th></tr></thead>
+      <tbody id="ex-body"><tr><td colspan="9" class="empty">กำลังโหลด…</td></tr></tbody></table></div>
+  </div>
+</div>
+
 <div class="page" id="page-purchase">
   <div class="pagehead"><h2>🛒 จัดซื้อ</h2></div>
   <div class="card">
@@ -1368,6 +1415,7 @@ function showPage(p){
   if(p==='moves'){mvInit();loadMoves();}
   if(p==='purchase'){pcInit();pcCalc();}
   if(p==='suppliers')loadSuppliers();
+  if(p==='expense')loadExpenses();
   if(p==='users')loadHolidays();
   if(p==='skucat') loadSkuCatPage();
   if(p==='users') loadUsers();
@@ -6937,6 +6985,165 @@ async function alertOps(where,detail){
 }
 window.addEventListener('error',e=>{alertOps('โค้ดหน้าจอผิดพลาด',(e.message||'')+' @'+String(e.filename||'').split('/').pop()+':'+e.lineno);});
 window.addEventListener('unhandledrejection',e=>{const r=e.reason;alertOps('งานเบื้องหลังล้มเหลว',(r&&(r.message||r.error_description))||String(r||''));});
+
+/* ==================== รายจ่าย (Petty Cash) ==================== */
+let expCats=[], expRows=[];
+const PAYLBL={cash:'💵 เงินสด',transfer:'📱 โอน',card:'💳 บัตร'};
+function exToday(){return new Date(Date.now()+7*3600000).toISOString().slice(0,10);}
+async function expInit(){
+  if(!expCats.length){
+    const {data}=await db.from('expense_categories').select('*').eq('active',true).order('sort_order');
+    expCats=data||[];
+  }
+  const opt=expCats.map(c=>'<option value="'+c.id+'">'+esc(c.name)+'</option>').join('');
+  const cs=document.getElementById('ex-cat');if(cs&&!cs.options.length)cs.innerHTML=opt;
+  const cf=document.getElementById('exf-cat');
+  if(cf&&cf.options.length<=1)cf.innerHTML='<option value="">ทั้งหมด</option>'+opt;
+  const w=document.getElementById('ex-wh');
+  if(w&&w.options.length<=1)whList.forEach(x=>w.insertAdjacentHTML('beforeend','<option value="'+x.id+'">'+esc(x.name)+'</option>'));
+  const dl=document.getElementById('ex-vendors');
+  if(dl)dl.innerHTML=(suppliers||[]).map(x=>'<option value="'+esc(x.name)+'">').join('');
+  if(!document.getElementById('ex-date').value)document.getElementById('ex-date').value=exToday();
+  if(!document.getElementById('ex-by').value)document.getElementById('ex-by').value=currentUser?.display_name||currentUser?.username||'';
+  if(!document.getElementById('exf-from').value)exQuick(0,true);
+}
+function exQuick(back,silent){
+  const d=new Date(Date.now()+7*3600000);
+  d.setUTCMonth(d.getUTCMonth()-back);
+  const y=d.getUTCFullYear(),m=d.getUTCMonth();
+  const f=new Date(Date.UTC(y,m,1)).toISOString().slice(0,10);
+  const t=new Date(Date.UTC(y,m+1,0)).toISOString().slice(0,10);
+  document.getElementById('exf-from').value=f;document.getElementById('exf-to').value=t;
+  if(!silent)loadExpenses();
+}
+async function loadExpenses(){
+  await expInit();
+  const f=document.getElementById('exf-from').value, t=document.getElementById('exf-to').value;
+  let q=db.from('petty_cash').select('*').order('spent_at',{ascending:false}).order('id',{ascending:false}).limit(2000);
+  if(f)q=q.gte('spent_at',f);
+  if(t)q=q.lte('spent_at',t);
+  const {data,error}=await q;
+  if(error){document.getElementById('ex-body').innerHTML='<tr><td colspan="9" class="empty">โหลดไม่ได้: '+esc(error.message)+' (รัน petty_cash.sql หรือยัง?)</td></tr>';return;}
+  expRows=data||[];renderExpenses();
+}
+function exFiltered(){
+  const cat=document.getElementById('exf-cat').value, q=(document.getElementById('exf-q').value||'').toLowerCase();
+  return expRows.filter(r=>(!cat||String(r.category_id)===cat)
+    &&(!q||[r.description,r.paid_by,r.vendor,r.ref_no,r.note].some(v=>String(v||'').toLowerCase().includes(q))));
+}
+function catName(id){return (expCats.find(c=>c.id===id)||{}).name||'— ไม่ระบุ —';}
+function renderExpenses(){
+  const list=exFiltered(), el=document.getElementById('ex-body');
+  const total=list.reduce((a,b)=>a+Number(b.amount||0),0);
+  const cash=list.filter(r=>r.pay_method==='cash').reduce((a,b)=>a+Number(b.amount||0),0);
+  document.getElementById('ex-count').textContent=list.length?list.length+' รายการ':'';
+  const card=(t,v,c)=>'<div style="flex:1;min-width:140px;border:1px solid var(--line,#eee);border-left:4px solid '+c+';border-radius:10px;padding:8px 12px"><div style="font-size:11.5px;color:var(--muted)">'+t+'</div><div style="font-size:18px;font-weight:700;color:'+c+'">'+v+'</div></div>';
+  document.getElementById('ex-sum').innerHTML=
+    card('รวมทั้งหมด','฿'+fmt(total),'#b52020')+card('เงินสด','฿'+fmt(cash),'#7a5a00')
+    +card('โอน/บัตร','฿'+fmt(total-cash),'#159b78')+card('จำนวนรายการ',String(list.length),'#555');
+  // แยกตามหมวด
+  const by={};list.forEach(r=>{const k=catName(r.category_id);by[k]=(by[k]||0)+Number(r.amount||0);});
+  const sorted=Object.entries(by).sort((a,b)=>b[1]-a[1]);
+  document.getElementById('ex-bycat').innerHTML=sorted.length
+    ?'<div style="display:flex;gap:6px;flex-wrap:wrap">'+sorted.map(([k,v])=>
+      '<span style="background:#f6efe9;border-radius:999px;padding:5px 12px;font-size:13px">'+esc(k)+' <b>฿'+fmt(v)+'</b>'
+      +' <span style="color:var(--muted)">'+(total?Math.round(v/total*100):0)+'%</span></span>').join('')+'</div>':'';
+  if(!list.length){el.innerHTML='<tr><td colspan="9" class="empty">ยังไม่มีรายจ่ายในช่วงนี้</td></tr>';return;}
+  el.innerHTML=list.map(r=>`<tr>
+    <td style="white-space:nowrap;font-size:12.5px">${new Date(r.spent_at+'T00:00:00').toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit'})}</td>
+    <td style="font-size:12.5px">${esc(catName(r.category_id))}</td>
+    <td>${esc(r.description)}${r.note?'<div style="font-size:11.5px;color:var(--muted)">'+esc(r.note)+'</div>':''}</td>
+    <td style="font-size:12.5px">${esc(r.vendor||'—')}</td>
+    <td style="font-size:12.5px;white-space:nowrap">${PAYLBL[r.pay_method]||r.pay_method}</td>
+    <td style="font-size:12.5px">${esc(r.paid_by||'—')}</td>
+    <td style="font-size:12.5px">${esc(r.ref_no||'—')}</td>
+    <td class="num" style="font-weight:700;color:#b52020">${fmt(r.amount)}</td>
+    <td style="white-space:nowrap">
+      ${r.receipt_url?'<button class="btn-g mini" onclick="showImgView(\''+esc(r.receipt_url)+'\')">🧾</button>':''}
+      <button class="btn-g mini" onclick="editExpense(${r.id})">✏️</button>
+      <button class="btn-g mini" onclick="delExpense(${r.id})" style="color:#b52020">ลบ</button>
+    </td></tr>`).join('');
+}
+function resetExpenseForm(){
+  ['ex-id','ex-desc','ex-amt','ex-vendor','ex-ref','ex-note'].forEach(i=>document.getElementById(i).value='');
+  document.getElementById('ex-file').value='';
+  document.getElementById('ex-date').value=exToday();
+  document.getElementById('ex-form-title').textContent='บันทึกรายจ่าย';
+}
+function editExpense(id){
+  const r=expRows.find(x=>x.id===id);if(!r)return;
+  document.getElementById('ex-id').value=r.id;
+  document.getElementById('ex-date').value=r.spent_at;
+  document.getElementById('ex-cat').value=r.category_id||'';
+  document.getElementById('ex-desc').value=r.description||'';
+  document.getElementById('ex-amt').value=r.amount||'';
+  document.getElementById('ex-pay').value=r.pay_method||'cash';
+  document.getElementById('ex-by').value=r.paid_by||'';
+  document.getElementById('ex-vendor').value=r.vendor||'';
+  document.getElementById('ex-ref').value=r.ref_no||'';
+  document.getElementById('ex-wh').value=r.warehouse_id||'';
+  document.getElementById('ex-note').value=r.note||'';
+  document.getElementById('ex-form-title').textContent='แก้ไขรายจ่าย #'+r.id;
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+async function saveExpense(btn){
+  const desc=document.getElementById('ex-desc').value.trim();
+  const amt=Number(document.getElementById('ex-amt').value)||0;
+  if(!desc){toast('ใส่รายละเอียดก่อน');return;}
+  if(amt<=0){toast('ใส่จำนวนเงินให้ถูกต้อง');return;}
+  btn.disabled=true;btn.textContent='กำลังบันทึก…';
+  try{
+    let receipt=null;
+    const f=document.getElementById('ex-file');
+    if(f.files&&f.files[0]){
+      const ext=(f.files[0].name.split('.').pop()||'jpg').toLowerCase();
+      const path='receipt_'+Date.now()+'-'+rndTag(8)+'.'+ext;
+      const {error:ue}=await db.storage.from('slips').upload(path,f.files[0],{upsert:true});
+      if(ue)throw new Error('อัปใบเสร็จไม่สำเร็จ: '+ue.message);
+      receipt=db.storage.from('slips').getPublicUrl(path).data.publicUrl;
+    }
+    const rec={spent_at:document.getElementById('ex-date').value||exToday(),
+      category_id:Number(document.getElementById('ex-cat').value)||null,
+      description:desc,amount:amt,
+      pay_method:document.getElementById('ex-pay').value,
+      paid_by:document.getElementById('ex-by').value.trim()||null,
+      vendor:document.getElementById('ex-vendor').value.trim()||null,
+      ref_no:document.getElementById('ex-ref').value.trim()||null,
+      warehouse_id:Number(document.getElementById('ex-wh').value)||null,
+      note:document.getElementById('ex-note').value.trim()||null,
+      created_by:currentUser?.display_name||currentUser?.username||null};
+    if(receipt)rec.receipt_url=receipt;
+    const id=document.getElementById('ex-id').value;
+    const {error}=id?await db.from('petty_cash').update(rec).eq('id',Number(id))
+                    :await db.from('petty_cash').insert(rec);
+    if(error)throw new Error(error.message);
+    toast(id?'อัปเดตรายจ่ายแล้ว ✓':'บันทึกรายจ่าย ฿'+fmt(amt)+' แล้ว ✓');
+    resetExpenseForm();loadExpenses();
+  }catch(e){toast(String(e.message||e));}
+  btn.disabled=false;btn.textContent='💾 บันทึกรายจ่าย';
+}
+async function delExpense(id){
+  const r=expRows.find(x=>x.id===id);if(!r)return;
+  if(!confirm('ลบรายจ่าย "'+r.description+'" ฿'+fmt(r.amount)+'?'))return;
+  const {error}=await db.from('petty_cash').delete().eq('id',id);
+  if(error){toast('ลบไม่สำเร็จ: '+error.message);return;}
+  toast('ลบแล้ว');loadExpenses();
+}
+function exExport(){
+  const list=exFiltered();
+  if(!list.length){toast('ไม่มีรายการ');return;}
+  const esc2=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+  const head=['วันที่','หมวด','รายละเอียด','จ่ายให้','วิธีจ่าย','ผู้จ่าย','อ้างอิง','จำนวนเงิน','หมายเหตุ'];
+  const lines=[head.map(esc2).join(',')].concat(list.map(r=>[
+    r.spent_at,catName(r.category_id),r.description,r.vendor,PAYLBL[r.pay_method]||r.pay_method,
+    r.paid_by,r.ref_no,r.amount,r.note].map(esc2).join(',')));
+  lines.push(['','','','','','','รวม',list.reduce((a,b)=>a+Number(b.amount||0),0),''].map(esc2).join(','));
+  const url=URL.createObjectURL(new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv;charset=utf-8'}));
+  const a=document.createElement('a');a.href=url;
+  a.download='รายจ่าย-'+document.getElementById('exf-from').value+'_'+document.getElementById('exf-to').value+'.csv';a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),4000);
+  toast('ส่งออก '+list.length+' รายการแล้ว ✓');
+}
 
 /* ==================== ซัพพลายเออร์ ==================== */
 let suppliers=[], prodSups=[];   // prodSups: [{product_id,supplier_id}]
