@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 26/07-H</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 26/07-I</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -812,6 +812,11 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div><label>รอของ (วัน)</label><input id="pl-lead" type="number" value="30" min="1" style="width:80px" class="num" onchange="plCalc()"></div>
       <div><label>รอบสั่งทุก (วัน)</label><input id="pl-cycle" type="number" value="15" min="1" style="width:80px" class="num" onchange="plCalc()"></div>
       <div><label>เผื่อฉุกเฉิน (วัน)</label><input id="pl-safety" type="number" value="15" min="0" style="width:80px" class="num" onchange="plCalc()"></div>
+      <div><label>คาดการณ์ยอด</label><select id="pl-mode" onchange="plCalc()" style="min-width:170px" title="รับมือยอดขายที่กำลังโต">
+        <option value="trend" selected>📈 ตามเทรนด์ (แนะนำ)</option>
+        <option value="recent">⚡ ยึดยอดล่าสุด 30 วัน</option>
+        <option value="avg">🛡️ อนุรักษ์ (เฉลี่ยยาว)</option>
+      </select></div>
       <div><label>ซัพพลายเออร์</label><select id="pl-sup" onchange="plRender()"><option value="">ทั้งหมด</option></select></div>
       <label style="font-size:13px;align-self:flex-end"><input type="checkbox" id="pl-only" checked onchange="plRender()"> เฉพาะที่ต้องสั่ง</label>
       <button class="btn-p" onclick="plCalc()">🧮 คำนวณแผน</button>
@@ -7039,13 +7044,23 @@ async function plCalc(){
   const cycle=Number(document.getElementById('pl-cycle').value)||15;
   const safe=Number(document.getElementById('pl-safety').value)||0;
   const cover=lead+cycle+safe;
-  const {data,error}=await db.rpc('sales_velocity',{p_days:days});
+  const mode=document.getElementById('pl-mode').value;
+  const [{data,error},{data:d30}]=await Promise.all([
+    db.rpc('sales_velocity',{p_days:days}),
+    db.rpc('sales_velocity',{p_days:30})     // ยอดล่าสุด ไว้จับเทรนด์
+  ]);
   if(error){document.getElementById('pl-body').innerHTML='<tr><td colspan="10" class="empty">โหลดไม่ได้: '+esc(error.message)+' (รัน purchase_plan.sql หรือยัง?)</td></tr>';return;}
   plVel={};(data||[]).forEach(r=>plVel[r.product_id]=r);
+  const vel30={};(d30||[]).forEach(r=>vel30[r.product_id]=Number(r.adu)||0);
   plRows=[];
   products.filter(p=>p.active!==false&&!/S$/.test(String(p.sku||''))).forEach(p=>{
     const v=plVel[p.id]||{adu:0,incoming:0,sold:0};
-    const adu=Number(v.adu)||0, incoming=Number(v.incoming)||0;
+    const aduBase=Number(v.adu)||0, incoming=Number(v.incoming)||0;
+    const adu30=vel30[p.id]||0;
+    // ยอดโต → ตามให้ทัน · ยอดตก → ไม่รีบลด (กันสั่งขาด) · พุ่งผิดปกติ → จำกัดไม่เกิน 2 เท่า
+    const adu=mode==='avg'?aduBase
+            :mode==='recent'?Math.max(adu30,aduBase)
+            :Math.max(aduBase,Math.min(adu30,aduBase*2||adu30));
     const stock=Object.values(stockByProd[p.id]||{}).reduce((a,b)=>a+Number(b||0),0);
     const reserved=Number(p.reserved_qty)||0;
     const usable=stock+incoming-reserved;
@@ -7057,7 +7072,7 @@ async function plCalc(){
     if(adu<=0&&target<=0)st='nodata';
     else if(daysLeft!==null&&daysLeft<lead)st='urgent';          // ของจะหมดก่อนของใหม่ถึง
     else if(needRaw>0)st='order';
-    plRows.push({p,adu,sold:Number(v.sold)||0,incoming,stock,reserved,usable,target,need,daysLeft,st,
+    plRows.push({p,adu,adu30,aduBase,sold:Number(v.sold)||0,incoming,stock,reserved,usable,target,need,daysLeft,st,
       sups:supsOf(p.id)});
   });
   plRows.sort((a,b)=>(a.daysLeft??9999)-(b.daysLeft??9999)||byThaiName(a.p,b.p));
@@ -7092,7 +7107,12 @@ function plRender(){
   el.innerHTML=list.map(r=>`<tr>
     <td style="font-size:12.5px"><b>${esc(r.p.sku)}</b></td>
     <td>${r.p.image_url?'<img src="'+esc(r.p.image_url)+'" style="width:28px;height:28px;object-fit:cover;border-radius:6px;vertical-align:-8px;margin-right:6px">':''}${esc(r.p.name)}</td>
-    <td class="num">${r.adu?r.adu.toFixed(2):'—'}</td>
+    <td class="num">${r.adu?r.adu.toFixed(2):'—'}${(()=>{
+      if(!r.aduBase||!r.adu30)return '';
+      const pct=Math.round((r.adu30/r.aduBase-1)*100);
+      if(pct>=15)return '<div style="font-size:11px;color:#159b78">📈 +'+pct+'%</div>';
+      if(pct<=-15)return '<div style="font-size:11px;color:#b52020">📉 '+pct+'%</div>';
+      return '<div style="font-size:11px;color:#999">คงที่</div>';})()}</td>
     <td class="num">${r.stock}${r.reserved?'<div style="font-size:11px;color:#a04a00">จอง ${r.reserved}</div>':''}</td>
     <td class="num" style="color:#159b78">${r.incoming||'—'}</td>
     <td class="num" style="font-weight:700;color:${r.daysLeft===null?'#999':(r.daysLeft<30?'#b52020':(r.daysLeft<45?'#a04a00':'#159b78'))}">${r.daysLeft===null?'—':r.daysLeft+' วัน'}</td>
