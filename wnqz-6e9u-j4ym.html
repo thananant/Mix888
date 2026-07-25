@@ -170,6 +170,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div class="msub">
         <div class="mi" data-page="products" onclick="showPage('products')"><span class="ic">📦</span>สินค้า</div>
         <div class="mi" data-page="moves" onclick="showPage('moves')"><span class="ic">📊</span>เดินรายการสินค้า</div>
+        <div class="mi" data-page="purchase" onclick="showPage('purchase')"><span class="ic">🛒</span>จัดซื้อ<span class="badge" id="pc-badge" style="display:none">0</span></div>
         <div class="mi" data-page="transfer" onclick="showPage('transfer')"><span class="ic">🚛</span>โอนโกดัง<span class="badge" id="tf-badge" style="display:none">0</span></div>
         <div class="mi" data-page="receive" onclick="showPage('receive')"><span class="ic">📥</span>รับสินค้า<span class="badge" id="rc-badge" style="display:none">0</span></div>
         <div class="mi" data-page="warehouse" onclick="showPage('warehouse')"><span class="ic">🏭</span>คลังสินค้า</div>
@@ -334,7 +335,11 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div><label>เข้าโกดัง</label><select id="p-stock-wh" style="min-width:110px"></select></div>
       <div><label>เตือนใกล้หมด</label><input id="p-alert" type="number" step="1" style="width:90px" class="num" value="10"></div>
       <div><label>Safety Stock</label><input id="p-safety" type="number" step="1" min="0" style="width:90px" class="num" value="0" title="ขั้นต่ำที่ต้องมีในโกดังขาย — ใช้คำนวณเรียกของจากโกดัง"></div>
-      <div style="align-self:flex-end"><label style="cursor:pointer"><input type="checkbox" id="p-thai" style="width:15px;height:15px;vertical-align:-2px"> สั่งในไทยได้</label></div>
+      <div><label>แหล่งสินค้า</label><select id="p-source" style="width:170px" title="กำหนดว่าปกติเอาของจากไหน">
+        <option value="warehouse">🏭 โกดังกัลปพฤกษ์</option>
+        <option value="thai">🛒 ซื้อในไทย (เข้าหน้าจัดซื้อ)</option>
+      </select></div>
+      <div style="align-self:flex-end"><label style="cursor:pointer" title="ถ้าโกดังหมด ให้ซื้อในไทยแทนได้"><input type="checkbox" id="p-thai" style="width:15px;height:15px;vertical-align:-2px"> โกดังหมดแล้วซื้อไทยได้</label></div>
       <div><label>ซัพพลายเออร์</label><input id="p-supplier" style="width:150px" placeholder="เช่น กิจศิริ" title="ใช้จัดกลุ่มข้อความสั่งซื้อเมื่อของหมด"></div>
       <div><label>Max Stock</label><input id="p-max" type="number" step="1" min="0" style="width:90px" class="num" value="0" title="เป้าเติมเต็มตอนเรียกของ (0 = ใช้ Safety)"></div>
       <div class="chk" style="padding-top:18px"><input type="checkbox" id="p-big"><span>ชิ้นใหญ่ (ค่าส่ง BI 20/ลัง)</span></div>
@@ -755,6 +760,27 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div id="mv-sum" style="display:none;margin-bottom:10px"></div>
       <div id="mv-body"><div class="empty">เลือกสินค้าแล้วกดดู — รวมทุกความเคลื่อนไหว: รับเข้า / ขายออก / ตีเสีย / โอนโกดัง / ปรับสต๊อก / แปลงสินค้า</div></div>
     </div>
+  </div>
+</div>
+
+<div class="page" id="page-purchase">
+  <div class="pagehead"><h2>🛒 จัดซื้อ</h2></div>
+  <div class="card">
+    <div class="row" style="align-items:flex-end;flex-wrap:wrap;gap:10px">
+      <div><label>โกดังที่ต้องเติม</label><select id="pc-wh" style="min-width:160px" onchange="pcCalc()"></select></div>
+      <div><label>ซัพพลายเออร์</label><select id="pc-sup" style="min-width:150px" onchange="pcRender()"><option value="">ทั้งหมด</option></select></div>
+      <div><label>เหตุผล</label><select id="pc-why" style="min-width:170px" onchange="pcRender()">
+        <option value="">ทั้งหมด</option><option value="thai">🛒 ตั้งไว้ให้ซื้อในไทย</option><option value="empty">🏭 โกดังหมด/ไม่พอ</option></select></div>
+      <button class="btn-p" onclick="pcCalc()">🧮 คำนวณรายการที่ต้องซื้อ</button>
+      <button class="btn-g" onclick="pcCopy()">📋 คัดลอกข้อความสั่งซื้อ</button>
+      <button class="btn-g" onclick="pcImage(this)">🖼️ รูปสรุปจัดซื้อ</button>
+      <button class="btn-s" onclick="pcSendLine(this)">📲 ส่งเข้ากลุ่มสรุป</button>
+      <span class="count" id="pc-count"></span>
+    </div>
+    <div style="overflow-x:auto;margin-top:12px"><table>
+      <thead><tr><th>SKU</th><th>สินค้า</th><th>เหตุผล</th><th class="num">คงเหลือสุทธิ</th><th class="num">Safety</th><th class="num">Max</th><th class="num">ต้องซื้อ</th><th>ซัพพลายเออร์</th></tr></thead>
+      <tbody id="pc-body"><tr><td colspan="8" class="empty">กด "คำนวณรายการที่ต้องซื้อ"</td></tr></tbody></table></div>
+    <p class="hint" style="margin-top:8px">จำนวนที่ต้องซื้อปัดขึ้นเป็นลงท้าย 5 หรือ 0 · สินค้าปลีก (SKU ลงท้าย S) ไม่นับ · ตั้งแหล่งสินค้าได้ที่หน้าสินค้า</p>
   </div>
 </div>
 
@@ -1303,6 +1329,7 @@ function showPage(p){
   if(p==='receive') loadProducts();
   if(p==='warehouse') loadWarehouse();
   if(p==='moves'){mvInit();loadMoves();}
+  if(p==='purchase'){pcInit();pcCalc();}
   if(p==='users')loadHolidays();
   if(p==='skucat') loadSkuCatPage();
   if(p==='users') loadUsers();
@@ -1764,6 +1791,7 @@ function editProduct(id){
   document.getElementById('p-price').value=p.base_price;
   document.getElementById('p-safety').value=p.safety_stock||0;
   document.getElementById('p-thai').checked=!!p.thai_orderable;
+  document.getElementById('p-source').value=p.source||'warehouse';
   document.getElementById('p-supplier').value=p.supplier||'';
   document.getElementById('p-max').value=p.max_stock||0;
   document.getElementById('p-big').checked=!!p.is_big;
@@ -1788,7 +1816,7 @@ function resetProductForm(){
   document.getElementById('p-stock').value='0';
   document.getElementById('p-alert').value='10';
   document.getElementById('p-safety').value=0;document.getElementById('p-max').value=0;document.getElementById('p-big').checked=false;
-  document.getElementById('p-thai').checked=false;document.getElementById('p-supplier').value='';
+  document.getElementById('p-thai').checked=false;document.getElementById('p-supplier').value='';document.getElementById('p-source').value='warehouse';
   productImageFile=null; productImageUrl='';
   showProductPreview('');
 }
@@ -1823,6 +1851,7 @@ async function saveProduct(){
     low_stock_alert:parseFloat(document.getElementById('p-alert').value)||10,
     safety_stock:parseFloat(document.getElementById('p-safety').value)||0,
     thai_orderable:document.getElementById('p-thai').checked,
+    source:document.getElementById('p-source').value,
     supplier:document.getElementById('p-supplier').value.trim()||null,
     max_stock:parseFloat(document.getElementById('p-max').value)||0,
     is_big:document.getElementById('p-big').checked
@@ -5389,119 +5418,104 @@ async function nextTfNo(){
   if(data&&data.length){const last=parseInt(data[0].tf_no.slice(prefix.length),10);if(!isNaN(last))n=last+1;}
   return prefix+String(n).padStart(4,'0');
 }
-/* รูปสรุปการโอนสินค้า — แบ่งหน้า A4 อัตโนมัติ มีรูปสินค้า จำนวน และสต๊อกก่อน/หลัง */
+/* ตัววาดรูปเอกสารรายการสินค้า (ใช้ร่วมกัน: ใบโอน / ใบสั่งซื้อ) — แบ่งหน้า A4 อัตโนมัติ
+   rows: [{sku,name,qty,unit,product_id,note,extra}] · opt: {title,sub,colA,colB,file} */
+async function tfDrawPages(rows,opt){
+  await document.fonts.load('700 22px "IBM Plex Sans Thai"');
+  const S=2, W=794*S, PAD=26*S, rowH=62*S;
+  const pageH=Math.round(W*297/210), headH=150*S, tblHeadH=28*S, footH=64*S;
+  const rowsPerPage=Math.max(1,Math.floor((pageH-headH-tblHeadH-footH)/rowH));
+  const pages=Math.ceil(rows.length/rowsPerPage);
+  const totalQty=rows.reduce((a,b)=>a+Number(b.qty||0),0);
+  const dateStr=new Date().toLocaleString('th-TH',{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const imgs={};
+  for(const it of rows){
+    const pr=products.find(p=>p.id===it.product_id)||{};
+    if(!pr.image_url||imgs[it.product_id])continue;
+    imgs[it.product_id]=await new Promise(r=>{const g=new Image();g.crossOrigin='anonymous';
+      g.onload=()=>r(g);g.onerror=()=>r(null);g.src=pr.image_url;});
+  }
+  const urls=[];
+  for(let pg=0;pg<pages;pg++){
+    const part=rows.slice(pg*rowsPerPage,(pg+1)*rowsPerPage);
+    const cv=document.createElement('canvas');cv.width=W;cv.height=pageH;
+    const x=cv.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,pageH);
+    const F=(w,sz)=>x.font=w+' '+Math.round(sz*S)+'px "IBM Plex Sans Thai"';
+    x.fillStyle='#111';F('700',24);x.fillText(opt.title,PAD,42*S);
+    F('400',15);x.fillStyle='#444';
+    x.fillText(opt.sub,PAD,72*S);
+    x.fillText(dateStr+'   ·   '+rows.length+' รายการ',PAD,96*S);
+    if(pages>1){F('400',13);x.fillStyle='#999';x.textAlign='right';
+      x.fillText('หน้า '+(pg+1)+'/'+pages,W-PAD,42*S);x.textAlign='left';}
+    x.strokeStyle='#111';x.lineWidth=1.5*S;x.beginPath();x.moveTo(PAD,116*S);x.lineTo(W-PAD,116*S);x.stroke();
+
+    const cNo=PAD+8*S,cImg=PAD+40*S,cSku=PAD+110*S,cName=PAD+225*S;
+    const cQty=W-PAD-250*S,cA=W-PAD-140*S,cB=W-PAD-10*S;
+    const nameMaxW=cQty-cName-90*S;
+    let y=headH-10*S;
+    F('700',13);x.fillStyle='#555';
+    x.fillText('#',cNo,y);x.fillText('รหัส',cSku,y);x.fillText('ชื่อสินค้า',cName,y);
+    x.textAlign='right';x.fillText('จำนวน',cQty,y);x.fillText(opt.colA,cA,y);x.fillText(opt.colB,cB,y);x.textAlign='left';
+    x.strokeStyle='#ccc';x.lineWidth=1;x.beginPath();x.moveTo(PAD,headH+2*S);x.lineTo(W-PAD,headH+2*S);x.stroke();
+
+    part.forEach((it,i)=>{
+      const idx=pg*rowsPerPage+i, ry=headH+tblHeadH+i*rowH, my=ry+rowH/2;
+      if(idx%2){x.fillStyle='#faf7f4';x.fillRect(PAD,ry,W-2*PAD,rowH);}
+      x.strokeStyle='#eee';x.lineWidth=1;x.beginPath();x.moveTo(PAD,ry+rowH);x.lineTo(W-PAD,ry+rowH);x.stroke();
+      x.fillStyle='#111';F('400',13);x.textAlign='left';x.fillText(String(idx+1),cNo,my+5*S);
+      const im=imgs[it.product_id];
+      if(im){const sz=44*S;try{x.drawImage(im,cImg,my-sz/2,sz,sz);}catch(e){}}
+      F('400',12.5);x.fillStyle='#333';x.fillText(String(it.sku||''),cSku,my+5*S);
+      F('400',14);x.fillStyle='#111';
+      let nm=String(it.name||'');
+      if(x.measureText(nm).width>nameMaxW){
+        while(nm.length>1&&x.measureText(nm+'…').width>nameMaxW)nm=nm.slice(0,-1);
+        nm+='…';
+      }
+      x.fillText(nm,cName,my+5*S);
+      x.textAlign='right';F('700',16);x.fillStyle='#b52020';
+      x.fillText(Number(it.qty)+' '+(it.unit||''),cQty,my+6*S);
+      F('400',12.5);x.fillStyle='#666';
+      const cut=(t,w)=>{let v=String(t||'');while(v.length>1&&x.measureText(v).width>w)v=v.slice(0,-1);return v;};
+      x.fillText(cut(it.note,120*S),cA,my+5*S);
+      x.fillText(cut(it.extra,120*S),cB,my+5*S);
+      x.textAlign='left';
+    });
+    const fy=pageH-30*S;
+    x.strokeStyle='#111';x.lineWidth=1.5*S;x.beginPath();x.moveTo(PAD,fy-26*S);x.lineTo(W-PAD,fy-26*S);x.stroke();
+    F('400',12);x.fillStyle='#999';
+    x.fillText('ผู้จัดทำ: '+(currentUser?.display_name||currentUser?.username||''),PAD,fy);
+    F('700',15);x.fillStyle='#111';x.textAlign='right';
+    x.fillText(pg===pages-1?('รวม '+rows.length+' รายการ   ·   '+totalQty+' หน่วย'):'ยังมีต่อหน้าถัดไป \u2192',W-PAD,fy);
+    x.textAlign='left';
+    urls.push(URL.createObjectURL(await new Promise(r=>cv.toBlob(r,'image/jpeg',0.9))));
+  }
+  window.open(urls[0],'_blank');
+  const base=opt.file+'-'+new Date().toISOString().slice(0,10);
+  for(let i=0;i<urls.length;i++){
+    const a=document.createElement('a');a.href=urls[i];
+    a.download=base+(urls.length>1?'-หน้า'+(i+1):'')+'.jpg';a.click();
+    await new Promise(r=>setTimeout(r,300));
+  }
+  setTimeout(()=>urls.forEach(u=>URL.revokeObjectURL(u)),15000);
+  return pages;
+}
+
+/* รูปสรุปการโอนสินค้า */
 async function tfImage(btn){
   if(!tfItems.length){toast('ยังไม่มีรายการโอน');return;}
   const t0=btn.textContent;btn.disabled=true;btn.textContent='กำลังสร้างรูป…';
   try{
-    await document.fonts.load('700 22px "IBM Plex Sans Thai"');
     const list=tfItems.filter(it=>Number(it.qty)>0).sort(byThaiName);
     if(!list.length)throw new Error('ยังไม่ได้ใส่จำนวนที่จะโอน');
     const fromN=(whList.find(w=>w.id===Number(document.getElementById('tf-from').value))||{}).name||'-';
     const toN=(whList.find(w=>w.id===Number(document.getElementById('tf-to').value))||{}).name||'-';
-
-    const S=2, W=794*S, PAD=26*S, rowH=62*S;
-    const pageH=Math.round(W*297/210);           // A4 เต็มใบ
-    const headH=150*S, tblHeadH=28*S, footH=64*S;
-    const rowsPerPage=Math.max(1,Math.floor((pageH-headH-tblHeadH-footH)/rowH));
-    const pages=Math.ceil(list.length/rowsPerPage);
-    const totalQty=list.reduce((a,b)=>a+Number(b.qty),0);
-    const dateStr=new Date().toLocaleString('th-TH',{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'});
-
-    // โหลดรูปสินค้าล่วงหน้า (ครั้งเดียว ใช้ได้ทุกหน้า)
-    const imgs={};
-    for(const it of list){
-      const pr=products.find(p=>p.id===it.product_id)||{};
-      if(!pr.image_url)continue;
-      imgs[it.product_id]=await new Promise(r=>{const g=new Image();g.crossOrigin='anonymous';
-        g.onload=()=>r(g);g.onerror=()=>r(null);g.src=pr.image_url;});
-    }
-
-    const urls=[];
-    for(let pg=0;pg<pages;pg++){
-      const rows=list.slice(pg*rowsPerPage,(pg+1)*rowsPerPage);
-      const cv=document.createElement('canvas');
-      cv.width=W; cv.height=pageH;
-      const x=cv.getContext('2d');
-      x.fillStyle='#fff';x.fillRect(0,0,W,pageH);
-      const F=(w,sz)=>x.font=w+' '+Math.round(sz*S)+'px "IBM Plex Sans Thai"';
-
-      // ---- หัวกระดาษ ----
-      x.fillStyle='#111';F('700',24);x.fillText('ใบโอนสินค้าระหว่างโกดัง',PAD,42*S);
-      F('400',15);x.fillStyle='#444';
-      x.fillText('จาก: '+fromN+'   \u2192   ไป: '+toN,PAD,72*S);
-      x.fillText(dateStr+'   ·   '+list.length+' รายการ',PAD,96*S);
-      if(pages>1){F('400',13);x.fillStyle='#999';x.textAlign='right';
-        x.fillText('หน้า '+(pg+1)+'/'+pages,W-PAD,42*S);x.textAlign='left';}
-      x.strokeStyle='#111';x.lineWidth=1.5*S;
-      x.beginPath();x.moveTo(PAD,116*S);x.lineTo(W-PAD,116*S);x.stroke();
-
-      // ---- หัวตาราง (ทุกหน้า) ----
-      const cNo=PAD+8*S, cImg=PAD+40*S, cSku=PAD+110*S, cName=PAD+225*S;
-      const cQty=W-PAD-250*S, cFrom=W-PAD-140*S, cTo=W-PAD-10*S;
-      const nameMaxW=cQty-cName-90*S;             // กันชื่อยาวทับคอลัมน์จำนวน
-      let y=headH-10*S;
-      F('700',13);x.fillStyle='#555';
-      x.fillText('#',cNo,y);x.fillText('รหัส',cSku,y);x.fillText('ชื่อสินค้า',cName,y);
-      x.textAlign='right';
-      x.fillText('จำนวนโอน',cQty,y);x.fillText('ต้นทางเหลือ',cFrom,y);x.fillText('ปลายทางเป็น',cTo,y);
-      x.textAlign='left';
-      x.strokeStyle='#ccc';x.lineWidth=1;
-      x.beginPath();x.moveTo(PAD,headH+2*S);x.lineTo(W-PAD,headH+2*S);x.stroke();
-
-      // ---- แถว ----
-      rows.forEach((it,i)=>{
-        const idx=pg*rowsPerPage+i, ry=headH+tblHeadH+i*rowH, my=ry+rowH/2;
-        if(idx%2){x.fillStyle='#faf7f4';x.fillRect(PAD,ry,W-2*PAD,rowH);}
-        x.strokeStyle='#eee';x.lineWidth=1;
-        x.beginPath();x.moveTo(PAD,ry+rowH);x.lineTo(W-PAD,ry+rowH);x.stroke();
-
-        x.fillStyle='#111';F('400',13);x.textAlign='left';
-        x.fillText(String(idx+1),cNo,my+5*S);
-        const im=imgs[it.product_id];
-        if(im){const sz=44*S;try{x.drawImage(im,cImg,my-sz/2,sz,sz);}catch(e){}}
-        F('400',12.5);x.fillStyle='#333';x.fillText(String(it.sku||''),cSku,my+5*S);
-        // ชื่อสินค้า: ตัดตามความกว้างจริง ไม่ให้ทับคอลัมน์ถัดไป
-        F('400',14);x.fillStyle='#111';
-        let nm=String(it.name||'');
-        if(x.measureText(nm).width>nameMaxW){
-          while(nm.length>1&&x.measureText(nm+'…').width>nameMaxW)nm=nm.slice(0,-1);
-          nm+='…';
-        }
-        x.fillText(nm,cName,my+5*S);
-        x.textAlign='right';
-        F('700',16);x.fillStyle='#b52020';
-        x.fillText(Number(it.qty)+' '+(it.unit||''),cQty,my+6*S);
-        F('400',13);x.fillStyle='#666';
-        x.fillText(String((Number(it.stockFrom)||0)-Number(it.qty)),cFrom,my+5*S);
-        x.fillText(String((Number(it.stockTo)||0)+Number(it.qty)),cTo,my+5*S);
-        x.textAlign='left';
-      });
-
-      // ---- ท้ายกระดาษ ----
-      const fy=pageH-30*S;
-      x.strokeStyle='#111';x.lineWidth=1.5*S;
-      x.beginPath();x.moveTo(PAD,fy-26*S);x.lineTo(W-PAD,fy-26*S);x.stroke();
-      F('400',12);x.fillStyle='#999';
-      x.fillText('ผู้จัดทำ: '+(currentUser?.display_name||currentUser?.username||''),PAD,fy);
-      F('700',15);x.fillStyle='#111';x.textAlign='right';
-      x.fillText(pg===pages-1?('รวม '+list.length+' รายการ   ·   '+totalQty+' หน่วย')
-                            :('ยังมีต่อหน้าถัดไป \u2192'),W-PAD,fy);
-      x.textAlign='left';
-
-      const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.9));
-      urls.push(URL.createObjectURL(blob));
-    }
-
-    // เปิดดูหน้าแรก + ดาวน์โหลดทุกหน้า
-    window.open(urls[0],'_blank');
-    const base='ใบโอนสินค้า-'+fromN+'-'+toN+'-'+new Date().toISOString().slice(0,10);
-    for(let i=0;i<urls.length;i++){
-      const a=document.createElement('a');a.href=urls[i];
-      a.download=base+(urls.length>1?'-หน้า'+(i+1):'')+'.jpg';a.click();
-      await new Promise(r=>setTimeout(r,300));
-    }
-    setTimeout(()=>urls.forEach(u=>URL.revokeObjectURL(u)),15000);
+    const pages=await tfDrawPages(list.map(it=>({sku:it.sku,name:it.name,qty:it.qty,unit:it.unit,
+      product_id:it.product_id,
+      note:String((Number(it.stockFrom)||0)-Number(it.qty)),
+      extra:String((Number(it.stockTo)||0)+Number(it.qty))})),
+      {title:'ใบโอนสินค้าระหว่างโกดัง',sub:'จาก: '+fromN+'   \u2192   ไป: '+toN,
+       colA:'ต้นทางเหลือ',colB:'ปลายทางเป็น',file:'ใบโอนสินค้า-'+fromN+'-'+toN});
     toast('สร้างรูปโอน '+list.length+' รายการ '+pages+' หน้า A4 แล้ว ✓');
   }catch(e){toast('สร้างรูปไม่สำเร็จ: '+(e.message||e));}
   btn.disabled=false;btn.textContent=t0;
@@ -6773,6 +6787,101 @@ async function alertOps(where,detail){
 }
 window.addEventListener('error',e=>{alertOps('โค้ดหน้าจอผิดพลาด',(e.message||'')+' @'+String(e.filename||'').split('/').pop()+':'+e.lineno);});
 window.addEventListener('unhandledrejection',e=>{const r=e.reason;alertOps('งานเบื้องหลังล้มเหลว',(r&&(r.message||r.error_description))||String(r||''));});
+
+/* ==================== หน้าจัดซื้อ ==================== */
+let pcRows=[];
+const roundUp5=n=>n<=0?0:Math.ceil(n/5)*5;
+function pcInit(){
+  const w=document.getElementById('pc-wh');
+  if(w&&w.options.length===0){
+    whList.forEach(x=>w.insertAdjacentHTML('beforeend','<option value="'+x.id+'">'+esc(x.name)+'</option>'));
+    const win=whList.find(x=>/วังหิน/.test(x.name)); if(win)w.value=win.id;
+  }
+}
+function pcCalc(){
+  pcInit();
+  const wh=Number(document.getElementById('pc-wh').value);
+  const src=whList.find(x=>/กัลป/.test(x.name));
+  const whSrc=src?src.id:null;
+  pcRows=[];
+  products.filter(p=>p.active!==false&&!/S$/.test(String(p.sku||''))).forEach(p=>{
+    const here=(stockByProd[p.id]||{})[wh]||0;
+    const avail=here-(Number(p.reserved_qty)||0);
+    const safety=Number(p.safety_stock)||0;
+    const maxS=Number(p.max_stock)||0;
+    const target=maxS>0?maxS:safety;
+    const isThai=(p.source||'warehouse')==='thai';
+    const fromWh=whSrc?((stockByProd[p.id]||{})[whSrc]||0):0;
+    let why='';
+    if(isThai){ if(avail<safety||safety===0&&avail<=0)why='thai'; }
+    else if(avail<safety){ if(fromWh<=0)why=p.thai_orderable?'empty':''; }
+    if(!why)return;
+    const need=roundUp5(target-avail);
+    if(need<=0)return;
+    pcRows.push({p,why,avail,safety,max:maxS,need,sup:p.supplier||'— ไม่ระบุ —'});
+  });
+  pcRows.sort((a,b)=>String(a.sup).localeCompare(String(b.sup),'th')||byThaiName(a.p,b.p));
+  const sel=document.getElementById('pc-sup'), keep=sel.value;
+  sel.innerHTML='<option value="">ทั้งหมด</option>'+[...new Set(pcRows.map(r=>r.sup))]
+    .map(s=>'<option value="'+esc(s)+'">'+esc(s)+'</option>').join('');
+  sel.value=keep;
+  pcRender();
+  const b=document.getElementById('pc-badge');
+  if(b){b.textContent=pcRows.length;b.style.display=pcRows.length?'':'none';}
+}
+function pcFiltered(){
+  const sup=document.getElementById('pc-sup').value, why=document.getElementById('pc-why').value;
+  return pcRows.filter(r=>(!sup||r.sup===sup)&&(!why||r.why===why));
+}
+function pcRender(){
+  const list=pcFiltered(), el=document.getElementById('pc-body');
+  document.getElementById('pc-count').textContent=list.length?list.length+' รายการ':'';
+  if(!list.length){el.innerHTML='<tr><td colspan="8" class="empty">ไม่มีรายการที่ต้องซื้อ ✓</td></tr>';return;}
+  el.innerHTML=list.map(r=>`<tr>
+    <td style="font-size:12.5px"><b>${esc(r.p.sku)}</b></td>
+    <td>${r.p.image_url?'<img src="'+esc(r.p.image_url)+'" style="width:30px;height:30px;object-fit:cover;border-radius:6px;vertical-align:-9px;margin-right:6px">':''}${esc(r.p.name)}</td>
+    <td><span class="tag ${r.why==='thai'?'tag-low':'tag-out'}">${r.why==='thai'?'🛒 ซื้อในไทย':'🏭 โกดังหมด'}</span></td>
+    <td class="num" style="color:${r.avail<0?'#b52020':'#666'}">${r.avail}</td>
+    <td class="num">${r.safety}</td><td class="num">${r.max||'—'}</td>
+    <td class="num" style="font-weight:700;color:#b52020">${r.need} ${esc(r.p.unit||'')}</td>
+    <td style="font-size:12.5px">${esc(r.sup)}</td></tr>`).join('');
+}
+function pcText(){
+  const list=pcFiltered();
+  const by={};list.forEach(r=>{(by[r.sup]=by[r.sup]||[]).push(r);});
+  return '🛒 รายการสั่งซื้อ '+new Date().toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'})
+    +'\n'+Object.entries(by).map(([sup,rs])=>'━━ '+sup+' ━━\n'
+      +rs.map((r,i)=>(i+1)+'. '+r.p.name+'  '+r.need+' '+(r.p.unit||'')).join('\n')).join('\n')
+    +'\n\nรวม '+list.length+' รายการ';
+}
+function pcCopy(){
+  if(!pcFiltered().length){toast('ไม่มีรายการ');return;}
+  navigator.clipboard.writeText(pcText()).then(()=>toast('คัดลอกข้อความสั่งซื้อแล้ว ✓'),()=>toast('คัดลอกไม่สำเร็จ'));
+}
+async function pcSendLine(btn){
+  const list=pcFiltered();
+  if(!list.length){toast('ไม่มีรายการ');return;}
+  const gid=appSettings.line_summary_group||appSettings.line_central_group;
+  if(!gid){toast('ยังไม่ได้ตั้งกลุ่มสรุป — พิมพ์ "ตั้งกลุ่มสรุป" ในกลุ่มไลน์');return;}
+  if(!confirm('ส่งรายการสั่งซื้อ '+list.length+' รายการ เข้ากลุ่มสรุปออเดอร์?'))return;
+  btn.disabled=true;
+  const {error}=await db.functions.invoke('line-push',{body:{to:gid,messages:[{type:'text',text:pcText().slice(0,4900)}]}});
+  btn.disabled=false;
+  toast(error?('ส่งไม่สำเร็จ: '+error.message):'ส่งเข้ากลุ่มแล้ว ✓');
+}
+async function pcImage(btn){
+  const list=pcFiltered();
+  if(!list.length){toast('ไม่มีรายการ');return;}
+  const t0=btn.textContent;btn.disabled=true;btn.textContent='กำลังสร้างรูป…';
+  try{
+    await tfDrawPages(list.map(r=>({sku:r.p.sku,name:r.p.name,qty:r.need,unit:r.p.unit||'',
+      product_id:r.p.id,note:r.sup,extra:r.why==='thai'?'ซื้อในไทย':'โกดังหมด'})),
+      {title:'ใบสั่งซื้อสินค้า',sub:'ซัพพลายเออร์: '+(document.getElementById('pc-sup').value||'ทั้งหมด'),
+       colA:'ซัพพลายเออร์',colB:'เหตุผล',file:'ใบสั่งซื้อ'});
+    toast('สร้างรูปสั่งซื้อแล้ว ✓');
+  }catch(e){toast('สร้างรูปไม่สำเร็จ: '+(e.message||e));}
+  btn.disabled=false;btn.textContent=t0;
+}
 
 /* ==================== หน้าเดินรายการสินค้า ==================== */
 let mvRows=[], mvLimit=500;
