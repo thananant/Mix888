@@ -3681,7 +3681,8 @@ async function previewSummary(btn){
     const box=document.getElementById('pv-body');
     let h='<div style="background:#f6efe9;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13.5px">'
       +'<b>ช่วงเวลา:</b> '+esc((d['ช่วงเวลา']||[]).join('  →  '))
-      +'<br><b>จำนวนบิล:</b> '+(d.bills||0)+' ใบ</div>';
+      +'<br><b>จำนวนบิล:</b> '+(d.bills||0)+' ใบ'
+      +(d['ตรวจสอบ']?'<div style="margin-top:6px;font-size:12.5px;color:#a04a00">🔎 '+esc(JSON.stringify(d['ตรวจสอบ'],null,0))+'</div>':'')+'</div>';
     const pl=(d.pdfs&&d.pdfs.length)?d.pdfs:(d.pdf?[d.pdf]:[]);
     if(pl.length)h+='<div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap">'+pl.map((u,i)=>
       '<a href="'+esc(u)+'" target="_blank" class="btn-p" style="text-decoration:none;display:inline-block;padding:8px 14px;border-radius:10px">📄 เปิดดู PDF'+(pl.length>1?' ชุด '+(i+1):'')+'</a>').join('')+'</div>';
