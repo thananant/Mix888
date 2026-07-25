@@ -454,8 +454,10 @@ async function notifyCustomerOrder(data,ci){
 }
 async function notifyCentral(data,ci){
   try{
-    const {data:st}=await db.from('settings').select('value').eq('key','line_central_group').maybeSingle();
-    const gid=st&&st.value;if(!gid)return;
+    // ส่งทั้งกลุ่มกลาง และกลุ่มสรุปออเดอร์ (เซลล์) — ไม่ซ้ำถ้าตั้งเป็นกลุ่มเดียวกัน
+    const {data:st}=await db.from('settings').select('key,value').in('key',['line_central_group','line_summary_group']);
+    const gids=[...new Set((st||[]).map(r=>r.value).filter(Boolean))];
+    if(!gids.length)return;
     const c=customer;
     let t='🆕 ออเดอร์ใหม่ '+data.order_no+'\n';
     if(c.sale_name)t+='Sale : '+c.sale_name+'\n';
@@ -470,7 +472,9 @@ async function notifyCentral(data,ci){
     ci.forEach(x=>{t+='\n'+x.name+' '+x.qty+' '+(x.unit||'');});
     if(!hidePrice()) t+='\nรวม '+fmt(data.total);
     if(c.note)t+='\nหมายเหตุ : '+c.note;
-    await db.functions.invoke('line-push',{body:{to:gid,messages:[{type:'text',text:t}]}});
+    for(const gid of gids){
+      await db.functions.invoke('line-push',{body:{to:gid,messages:[{type:'text',text:t}]}});
+    }
   }catch(e){/* เงียบไว้ ไม่รบกวนลูกค้า */}
 }
 function backToShop(){
