@@ -3961,18 +3961,83 @@ function queueSalesSummary(o,billNo,grand,tag){
     method:o.customers?.delivery_method||'อื่นๆ',grand,
     items:(o.order_items||[]).map(it=>(it.products?.name||'?')+' '+it.qty+' '+(it.products?.unit||''))});
 }
-async function flushSalesSummary(){
+/* รวมบิลที่ออกติด ๆ กันเป็นข้อความเดียว — หน่วง 30 วิ ออกบิลเพิ่มระหว่างนี้จะรวมให้เอง
+   (กันหน่วงนานเกิน: ถ้าใบแรกรอเกิน 2 นาที ส่งทันที) */
+const SALES_DELAY=30000, SALES_MAX=120000;
+window._salesPend=window._salesPend||[]; window._salesTimer=null; window._salesFirstAt=0;
+function flushSalesSummary(){
   const q=window._salesQ.splice(0);
   if(!q.length)return;
+  if(!appSettings.line_summary_group)return;         // ยังไม่ตั้งกลุ่ม = ข้ามเงียบ ๆ
+  window._salesPend.push(...q);
+  if(!window._salesFirstAt)window._salesFirstAt=Date.now();
+  clearTimeout(window._salesTimer);
+  const waited=Date.now()-window._salesFirstAt;
+  if(waited>=SALES_MAX){salesSend();return;}
+  const wait=Math.min(SALES_DELAY,SALES_MAX-waited);
+  window._salesTimer=setTimeout(salesSend,wait);
+  toast('📲 รวมส่งเข้ากลุ่มสรุปใน '+Math.round(wait/1000)+' วิ ('+window._salesPend.length+' ใบ) — ออกบิลเพิ่มได้เลย');
+}
+async function salesSend(){
+  clearTimeout(window._salesTimer);window._salesTimer=null;window._salesFirstAt=0;
+  const q=window._salesPend.splice(0);
+  if(!q.length)return;
   const gid=appSettings.line_summary_group;
-  if(!gid)return;   // ยังไม่ตั้งกลุ่ม = ข้ามเงียบ ๆ
-  const head=q.length>1?('🧾 ออกบิล '+q.length+' ใบ'):'🧾 ออกบิลใหม่';
-  const body=q.map(b=>'━━━━━━━━━━\n'+b.billNo+(b.tag?' '+b.tag:'')+' · '+b.code+' '+b.name
-    +'\nขนส่ง: '+b.method+' · ยอด ฿'+fmt(b.grand)
-    +'\nรายการ:\n'+b.items.map(x=>'\u2022 '+x).join('\n')).join('\n');
+  if(!gid)return;
+  const want=new Set(q.map(b=>b.billNo));
   try{
-    await db.functions.invoke('line-push',{body:{to:gid,messages:[{type:'text',text:(head+'\n'+body).slice(0,4900)}]}});
+    // ดึงบิลทั้งรอบ เพื่อให้เลขลำดับตรงกับสรุปตี 2 (แยกตามขนส่ง เรียงตามเวลา)
+    const r=cutoffRange(new Date());
+    const {data:all}=await db.from('bills')
+      .select(`bill_no,created_at,ship_status,revision,edit_note,
+        orders(order_no,status,order_items(qty,products(name,unit)),
+          customers(code,name,sale_name,contact_name,phone,billing_address,map_link,receive_time,note,
+            delivery_method,ship_receiver,ship_phone,ship_address))`)
+      .gte('created_at',r.start.toISOString()).lt('created_at',r.end.toISOString())
+      .order('created_at',{ascending:true});
+    const rows=(all||[]).filter(b=>b.ship_status!=='cancelled'&&b.orders&&b.orders.status!=='cancelled');
+    // จัดกลุ่มตามวิธีขนส่ง + นับลำดับ
+    const groups={};
+    rows.forEach(b=>{const m=(b.orders.customers||{}).delivery_method||'อื่นๆ';(groups[m]=groups[m]||[]).push(b);});
+    const fD=d=>d.toLocaleDateString('th-TH',{day:'2-digit',month:'2-digit',year:'numeric'});
+    const dateStr=fD(r.start)+' - '+fD(new Date(r.end.getTime()-1));
+    const msgs=[];
+    Object.entries(groups).forEach(([method,list])=>{
+      const picked=list.map((b,i)=>({b,i})).filter(x=>want.has(x.b.bill_no));
+      if(!picked.length)return;
+      const head='━━━━━━━━━━━━━━\n📦 ออเดอร์ '+method+' '+dateStr+'\n━━━━━━━━━━━━━━';
+      const body=picked.map(({b,i})=>{
+        const o=b.orders, c=o.customers||{};
+        let t='(ออเดอร์ '+(i+1)+'/'+list.length+')';
+        t+='\nเลขที่บิล : '+b.bill_no+((b.revision||1)>1?' (v.'+b.revision+')':'');
+        if(b.edit_note) t+='\n🔴 แก้บิล: '+b.edit_note;
+        if(c.sale_name) t+='\nSale : '+c.sale_name;
+        t+='\nผู้รับ : '+(c.ship_receiver||c.contact_name||c.name||'-');
+        const ph=c.ship_phone||c.phone; if(ph) t+='\nเบอร์ติดต่อ : '+ph;
+        if(c.map_link) t+='\nGoogle map : '+c.map_link;
+        const addr=c.ship_address||c.billing_address; if(addr) t+='\nที่อยู่ : '+addr;
+        if(c.receive_time) t+='\nเวลารับของ : '+c.receive_time;
+        t+='\nรายการ :';
+        (o.order_items||[]).forEach(it=>{t+='\n'+(it.products?.name||'?')+' '+Number(it.qty)+' '+(it.products?.unit||'');});
+        if(c.note) t+='\nหมายเหตุ : '+c.note;
+        return t;
+      }).join('\n\n');
+      msgs.push((head+'\n\n'+body).slice(0,4900));
+    });
+    if(!msgs.length)return;
+    await db.functions.invoke('line-push',{body:{to:gid,messages:msgs.slice(0,5).map(t=>({type:'text',text:t}))}});
   }catch(e){console.warn('sales summary',e);}
+}
+// ปิดหน้าจอ/สลับแท็บ ระหว่างรอ → ส่งทันที กันข้อความตกหล่น
+window.addEventListener('beforeunload',()=>{if(window._salesPend.length)salesSend();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&window._salesPend.length)salesSend();});
+
+/** ย่อชื่อขนส่งให้เหมือนสรุปตี 2 (Lalamove → Lala) */
+function shortMethod(m){
+  const v=String(m||'อื่นๆ');
+  if(/lalamove/i.test(v))return 'Lala';
+  if(/^bi$/i.test(v))return 'BI';
+  return v.length>8?v.slice(0,8):v;
 }
 async function togglePin(orderId,cur){
   const {error}=await db.from('orders').update({pinned:!cur}).eq('id',orderId);
