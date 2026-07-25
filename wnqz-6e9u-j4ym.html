@@ -590,6 +590,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <span style="color:var(--muted)">→</span>
       <input type="datetime-local" id="cs-to" style="width:225px;min-width:225px;font-size:15px;padding:8px 10px">
       <button class="btn-s" onclick="sendCustomSummary(this)">📤 ส่งสรุปช่วงนี้</button>
+      <button class="btn-g mini" onclick="previewSummary(this)" title="ดูผลก่อนส่งจริง — ไม่ส่งเข้าไลน์">🔍 ทดลองสรุป (ไม่ส่งไลน์)</button>
       <button class="btn-g mini" onclick="toggleSumLog()">🕘 ประวัติการส่งสรุป</button>
     </div></div>
   <div id="sumlog-box" style="display:none;margin-bottom:12px"></div>
@@ -1067,6 +1068,14 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   </div>
 </div>
 <!-- ===== ปรับสต๊อก ===== -->
+<div id="preview-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:120;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)this.style.display='none'">
+  <div class="card" style="max-width:640px;width:100%;max-height:88vh;overflow-y:auto">
+    <h3 style="margin:0 0 4px">🔍 ทดลองสรุป — ยังไม่ส่งเข้าไลน์</h3>
+    <p class="hint" style="margin:0 0 12px">นี่คือสิ่งที่จะถูกส่งจริงถ้ากดส่งสรุป ตรวจดูให้เรียบร้อยก่อน</p>
+    <div id="pv-body"></div>
+    <div style="margin-top:12px"><button class="btn-g" onclick="document.getElementById('preview-modal').style.display='none'">ปิด</button></div>
+  </div>
+</div>
 <div id="payhist-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)this.style.display='none'">
   <div class="card" style="max-width:520px;width:100%;max-height:85vh;overflow-y:auto">
     <h3 style="margin:0 0 4px">🧾 ประวัติการชำระ</h3>
@@ -3656,6 +3665,40 @@ async function sendSummaryRange(btn,rStart,rEnd,mode){
   }catch(e){console.warn('summary_log:',e);}
   toast('ส่งสรุป '+data.length+' ออเดอร์ ('+msgs.length+' ข้อความ) เข้าไลน์กลางแล้ว ✓');
 }
+/* ---- ทดลองสรุป (พรีวิว ไม่ส่งไลน์) ---- */
+async function previewSummary(btn){
+  const f=document.getElementById('cs-from').value, t=document.getElementById('cs-to').value;
+  const q=new URLSearchParams({preview:'1',force:'1'});
+  if(f&&t){q.set('start',f);q.set('end',t);}
+  const t0=btn.textContent;btn.disabled=true;btn.textContent='กำลังประมวลผล…';
+  try{
+    const r=await fetch(SUPABASE_URL+'/functions/v1/daily-summary?'+q.toString(),
+      {headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY}});
+    const d=await r.json();
+    btn.disabled=false;btn.textContent=t0;
+    if(d.skipped){alert('⏭️ ไม่มีอะไรส่ง\n\n'+d.skipped);return;}
+    if(d.error){alert('❌ '+d.error);return;}
+    const box=document.getElementById('pv-body');
+    let h='<div style="background:#f6efe9;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13.5px">'
+      +'<b>ช่วงเวลา:</b> '+esc((d['ช่วงเวลา']||[]).join('  →  '))
+      +'<br><b>จำนวนบิล:</b> '+(d.bills||0)+' ใบ</div>';
+    if(d.pdf)h+='<div style="margin-bottom:12px"><a href="'+esc(d.pdf)+'" target="_blank" class="btn-p" style="text-decoration:none;display:inline-block;padding:8px 14px;border-radius:10px">📄 เปิดดูไฟล์ PDF ที่จะส่ง</a></div>';
+    (d['จะส่ง']||[]).forEach(g=>{
+      h+='<div style="border:1px solid var(--line,#eee);border-radius:10px;padding:10px 12px;margin-bottom:10px">'
+        +'<div style="font-weight:700;margin-bottom:6px">📨 กลุ่ม: '+esc(g['กลุ่ม'])+'</div>';
+      if(g['ข้อความ'])g['ข้อความ'].forEach((tx,i)=>{
+        h+='<div style="font-size:11.5px;color:var(--muted);margin-top:6px">ข้อความที่ '+(i+1)+'</div>'
+          +'<pre style="white-space:pre-wrap;word-break:break-word;background:#faf7f4;border-radius:8px;padding:8px 10px;font-size:12.5px;margin:2px 0;max-height:260px;overflow:auto">'+esc(tx)+'</pre>';
+      });
+      if(g['รูปภาพ']!==undefined)h+='<div style="font-size:13px">🖼️ รูปบิล '+g['รูปภาพ']+' รูป · ป้ายกำกับ: '+esc((g['ป้ายกำกับ']||[]).join(' | '))+'</div>';
+      h+='</div>';
+    });
+    if(!(d['จะส่ง']||[]).length)h+='<div class="empty">ไม่มีข้อความที่จะส่ง</div>';
+    box.innerHTML=h;
+    document.getElementById('preview-modal').style.display='flex';
+  }catch(e){btn.disabled=false;btn.textContent=t0;alert('เรียกไม่สำเร็จ: '+(e.message||e));}
+}
+
 /* ---- ประวัติการส่งสรุป ---- */
 function renderSumLog(rows){
   if(!rows||!rows.length)return '<div style="padding:12px;color:var(--muted)">ยังไม่มีประวัติการส่งสรุป</div>';
