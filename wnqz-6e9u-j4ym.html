@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B</small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 26/07-B</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -3961,22 +3961,14 @@ function queueSalesSummary(o,billNo,grand,tag){
     method:o.customers?.delivery_method||'อื่นๆ',grand,
     items:(o.order_items||[]).map(it=>(it.products?.name||'?')+' '+it.qty+' '+(it.products?.unit||''))});
 }
-/* รวมบิลที่ออกติด ๆ กันเป็นข้อความเดียว — หน่วง 30 วิ ออกบิลเพิ่มระหว่างนี้จะรวมให้เอง
-   (กันหน่วงนานเกิน: ถ้าใบแรกรอเกิน 2 นาที ส่งทันที) */
-const SALES_DELAY=30000, SALES_MAX=120000;
+/* ส่งเข้ากลุ่มสรุปทันทีทุกครั้งที่ออกบิล (ข้อความมีบิลทั้งรอบของขนส่งนั้น สะสมเพิ่มเรื่อย ๆ) */
 window._salesPend=window._salesPend||[]; window._salesTimer=null; window._salesFirstAt=0;
 function flushSalesSummary(){
   const q=window._salesQ.splice(0);
   if(!q.length)return;
   if(!appSettings.line_summary_group)return;         // ยังไม่ตั้งกลุ่ม = ข้ามเงียบ ๆ
   window._salesPend.push(...q);
-  if(!window._salesFirstAt)window._salesFirstAt=Date.now();
-  clearTimeout(window._salesTimer);
-  const waited=Date.now()-window._salesFirstAt;
-  if(waited>=SALES_MAX){salesSend();return;}
-  const wait=Math.min(SALES_DELAY,SALES_MAX-waited);
-  window._salesTimer=setTimeout(salesSend,wait);
-  toast('📲 รวมส่งเข้ากลุ่มสรุปใน '+Math.round(wait/1000)+' วิ ('+window._salesPend.length+' ใบ) — ออกบิลเพิ่มได้เลย');
+  salesSend();
 }
 async function salesSend(){
   clearTimeout(window._salesTimer);window._salesTimer=null;window._salesFirstAt=0;
