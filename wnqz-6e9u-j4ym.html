@@ -765,6 +765,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div style="min-width:170px"><label>จากโกดัง (ต้นทาง)</label><select id="tf-from" style="width:100%" onchange="tfRecalc()"></select></div>
       <div style="min-width:170px"><label>ไปโกดัง (ปลายทาง)</label><select id="tf-to" style="width:100%" onchange="tfRecalc()"></select></div>
       <button class="btn-s" onclick="tfSuggest()">🧮 คำนวณแนะนำเรียกของ</button>
+      <button class="btn-g" onclick="tfImage(this)">🖼️ รูปสรุปโอนสินค้า</button>
       <span class="count" id="tf-count"></span>
     </div>
     <div class="row" style="margin-bottom:8px;align-items:flex-end">
@@ -5387,6 +5388,80 @@ async function nextTfNo(){
   let n=1;
   if(data&&data.length){const last=parseInt(data[0].tf_no.slice(prefix.length),10);if(!isNaN(last))n=last+1;}
   return prefix+String(n).padStart(4,'0');
+}
+/* รูปสรุปการโอนสินค้า — มีรูปสินค้า จำนวน หน่วย และสต๊อกต้นทาง/ปลายทาง */
+async function tfImage(btn){
+  if(!tfItems.length){toast('ยังไม่มีรายการโอน');return;}
+  const t0=btn.textContent;btn.disabled=true;btn.textContent='กำลังสร้างรูป…';
+  try{
+    await document.fonts.load('700 22px "IBM Plex Sans Thai"');
+    const list=tfItems.filter(it=>Number(it.qty)>0).sort(byThaiName);
+    if(!list.length)throw new Error('ยังไม่ได้ใส่จำนวนที่จะโอน');
+    const fromN=(whList.find(w=>w.id===Number(document.getElementById('tf-from').value))||{}).name||'-';
+    const toN=(whList.find(w=>w.id===Number(document.getElementById('tf-to').value))||{}).name||'-';
+    const S=2, W=794*S, PAD=26*S, rowH=62*S, headH=150*S, footH=70*S;
+    const cv=document.createElement('canvas');
+    cv.width=W; cv.height=headH+list.length*rowH+footH;
+    const x=cv.getContext('2d');
+    x.fillStyle='#fff';x.fillRect(0,0,cv.width,cv.height);
+    const F=(w,sz)=>x.font=w+' '+Math.round(sz*S)+'px "IBM Plex Sans Thai"';
+    // หัว
+    x.fillStyle='#111';F('700',24);x.fillText('ใบโอนสินค้าระหว่างโกดัง',PAD,42*S);
+    F('400',15);x.fillStyle='#444';
+    x.fillText('จาก: '+fromN+'   →   ไป: '+toN,PAD,72*S);
+    x.fillText('วันที่ '+new Date().toLocaleString('th-TH',{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})
+      +'   ·   '+list.length+' รายการ',PAD,96*S);
+    x.strokeStyle='#111';x.lineWidth=1.5*S;
+    x.beginPath();x.moveTo(PAD,116*S);x.lineTo(W-PAD,116*S);x.stroke();
+    // หัวตาราง
+    const cNo=PAD+8*S, cImg=PAD+40*S, cSku=PAD+110*S, cName=PAD+225*S, cQty=W-PAD-240*S, cFrom=W-PAD-140*S, cTo=W-PAD-40*S;
+    F('700',13);x.fillStyle='#555';
+    let y=headH-12*S;
+    x.fillText('#',cNo,y);x.fillText('รหัส',cSku,y);x.fillText('ชื่อสินค้า',cName,y);
+    x.textAlign='right';x.fillText('จำนวนโอน',cQty,y);x.fillText('ต้นทางเหลือ',cFrom,y);x.fillText('ปลายทางเป็น',cTo,y);
+    x.textAlign='left';
+    // แถว
+    for(let i=0;i<list.length;i++){
+      const it=list[i], ry=headH+i*rowH;
+      if(i%2)x.fillStyle='#faf7f4',x.fillRect(PAD,ry,W-2*PAD,rowH);
+      x.strokeStyle='#eee';x.lineWidth=1;x.beginPath();x.moveTo(PAD,ry+rowH);x.lineTo(W-PAD,ry+rowH);x.stroke();
+      const my=ry+rowH/2;
+      x.fillStyle='#111';F('400',13);x.textAlign='left';
+      x.fillText(String(i+1),cNo,my+5*S);
+      const pr=products.find(p=>p.id===it.product_id)||{};
+      if(pr.image_url){
+        const im=await new Promise(r=>{const g=new Image();g.crossOrigin='anonymous';g.onload=()=>r(g);g.onerror=()=>r(null);g.src=pr.image_url;});
+        if(im){const sz=44*S;try{x.drawImage(im,cImg,ry+(rowH-sz)/2,sz,sz);}catch(e){}}
+      }
+      F('400',12.5);x.fillStyle='#333';x.fillText(String(it.sku||''),cSku,my+5*S);
+      F('400',14);x.fillStyle='#111';
+      const nm=String(it.name||'');
+      x.fillText(nm.length>42?nm.slice(0,41)+'…':nm,cName,my+5*S);
+      x.textAlign='right';
+      F('700',16);x.fillStyle='#b52020';
+      x.fillText(Number(it.qty)+' '+(it.unit||''),cQty,my+6*S);
+      F('400',13);x.fillStyle='#666';
+      x.fillText(String((Number(it.stockFrom)||0)-Number(it.qty)),cFrom,my+5*S);
+      x.fillText(String((Number(it.stockTo)||0)+Number(it.qty)),cTo,my+5*S);
+      x.textAlign='left';
+    }
+    // ท้าย
+    y=headH+list.length*rowH+30*S;
+    x.strokeStyle='#111';x.lineWidth=1.5*S;x.beginPath();x.moveTo(PAD,y-16*S);x.lineTo(W-PAD,y-16*S);x.stroke();
+    F('700',15);x.fillStyle='#111';x.textAlign='right';
+    x.fillText('รวม '+list.length+' รายการ   ·   '+list.reduce((a,b)=>a+Number(b.qty),0)+' หน่วย',W-PAD,y+10*S);
+    x.textAlign='left';F('400',12);x.fillStyle='#999';
+    x.fillText('ผู้จัดทำ: '+(currentUser?.display_name||currentUser?.username||''),PAD,y+10*S);
+    // เปิดดู + ดาวน์โหลด
+    const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.9));
+    const url=URL.createObjectURL(blob);
+    window.open(url,'_blank');
+    const a=document.createElement('a');a.href=url;
+    a.download='ใบโอนสินค้า-'+fromN+'-'+toN+'-'+new Date().toISOString().slice(0,10)+'.jpg';a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),8000);
+    toast('สร้างรูปสรุปโอน '+list.length+' รายการแล้ว ✓');
+  }catch(e){toast('สร้างรูปไม่สำเร็จ: '+(e.message||e));}
+  btn.disabled=false;btn.textContent=t0;
 }
 async function saveTransfer(btn){
   if(!tfItems.length){toast('ยังไม่มีรายการโอน');return;}
