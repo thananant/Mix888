@@ -4003,10 +4003,10 @@ async function salesSend(){
     const dateStr=fD(r.start)+' - '+fD(new Date(r.end.getTime()-1));
     const msgs=[];
     Object.entries(groups).forEach(([method,list])=>{
-      const picked=list.map((b,i)=>({b,i})).filter(x=>want.has(x.b.bill_no));
-      if(!picked.length)return;
+      // ส่งทั้งรอบของขนส่งนั้น (สะสมเพิ่มทุกครั้งที่ออกบิลใหม่) — ส่งเฉพาะกลุ่มที่มีบิลใหม่
+      if(!list.some(b=>want.has(b.bill_no)))return;
       const head='━━━━━━━━━━━━━━\n📦 ออเดอร์ '+method+' '+dateStr+'\n━━━━━━━━━━━━━━';
-      const body=picked.map(({b,i})=>{
+      const blocks=list.map((b,i)=>{
         const o=b.orders, c=o.customers||{};
         let t='(ออเดอร์ '+(i+1)+'/'+list.length+')';
         t+='\nเลขที่บิล : '+b.bill_no+((b.revision||1)>1?' (v.'+b.revision+')':'');
@@ -4020,12 +4020,33 @@ async function salesSend(){
         t+='\nรายการ :';
         (o.order_items||[]).forEach(it=>{t+='\n'+(it.products?.name||'?')+' '+Number(it.qty)+' '+(it.products?.unit||'');});
         if(c.note) t+='\nหมายเหตุ : '+c.note;
+        if(want.has(b.bill_no)) t+='   🆕';      // ใบที่เพิ่งออกเมื่อกี้
         return t;
-      }).join('\n\n');
-      msgs.push((head+'\n\n'+body).slice(0,4900));
+      });
+      // แบ่งข้อความถ้ายาวเกินขีดจำกัดของ LINE
+      let cur=head, part=1;
+      const total=Math.ceil(blocks.join('\n\n').length/4300)||1;
+      blocks.forEach(bl=>{
+        if((cur+'\n\n'+bl).length>4600){
+          msgs.push(cur+(total>1?'\n\n(ต่อหน้าถัดไป)':''));
+          cur=head+' (ต่อ '+(++part)+')';
+        }
+        cur+='\n\n'+bl;
+      });
+      msgs.push(cur);
     });
+    // ท้ายข้อความสุดท้าย: ภาพรวมรอบนี้
+    if(msgs.length){
+      const sum=Object.entries(groups).map(([m,l])=>m+' '+l.length).join(' · ');
+      msgs[msgs.length-1]+='\n\n───────\n📊 รอบนี้ออกบิลแล้ว '+rows.length+' ใบ ('+sum+')';
+    }
     if(!msgs.length)return;
-    await db.functions.invoke('line-push',{body:{to:gid,messages:msgs.slice(0,5).map(t=>({type:'text',text:t}))}});
+    // ส่งทีละไม่เกิน 5 ข้อความ (ข้อจำกัด LINE)
+    for(let i=0;i<msgs.length;i+=5){
+      await db.functions.invoke('line-push',{body:{to:gid,
+        messages:msgs.slice(i,i+5).map(t=>({type:'text',text:t.slice(0,4900)}))}});
+      if(i+5<msgs.length)await new Promise(r=>setTimeout(r,500));
+    }
   }catch(e){console.warn('sales summary',e);}
 }
 // ปิดหน้าจอ/สลับแท็บ ระหว่างรอ → ส่งทันที กันข้อความตกหล่น
