@@ -34,6 +34,8 @@ body{font-family:'IBM Plex Sans Thai',sans-serif;background:var(--bg);color:var(
 .mi{display:flex;align-items:center;gap:11px;padding:11px 15px;color:rgba(255,255,255,.9);cursor:pointer;font-weight:500;border-radius:12px;margin:2px 0;font-size:14.5px;user-select:none;transition:background .15s}
 .mhead{display:flex;align-items:center;gap:11px;padding:11px 15px;color:rgba(255,255,255,.95);cursor:pointer;font-weight:600;border-radius:12px;margin:6px 0 2px;font-size:14.5px;user-select:none;transition:background .15s}
 .mhead:hover{background:rgba(255,255,255,.1)}
+.mhead.active{background:#fff;color:var(--brand);font-weight:700}
+.mhead.active .ic{filter:none}
 .mhead .chev{margin-left:auto;font-size:12px;transition:transform .18s;transform:rotate(-90deg);opacity:.85}
 .mgroup.open .mhead .chev{transform:rotate(0)}
 .mgroup .msub{display:none;margin:0 0 4px 12px;padding-left:8px;border-left:2px solid rgba(255,255,255,.18)}
@@ -165,12 +167,19 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       </div>
     </div>
 
+    <div class="mgroup" data-g="purchase">
+      <div class="mhead" onclick="toggleGroup('purchase')"><span class="ic">🛒</span>จัดซื้อ<span class="badge" id="pc-badge" style="display:none">0</span><span class="chev">▾</span></div>
+      <div class="msub">
+        <div class="mi" data-page="purchase" onclick="showPage('purchase')"><span class="ic">🧾</span>รายการสั่งซื้อ</div>
+        <div class="mi" data-page="suppliers" onclick="showPage('suppliers')"><span class="ic">🏢</span>ซัพพลายเออร์</div>
+      </div>
+    </div>
+
     <div class="mgroup" data-g="prod">
       <div class="mhead" onclick="toggleGroup('prod')"><span class="ic">📦</span>สินค้า<span class="badge" id="grp-prod-badge" style="display:none">0</span><span class="chev">▾</span></div>
       <div class="msub">
         <div class="mi" data-page="products" onclick="showPage('products')"><span class="ic">📦</span>สินค้า</div>
         <div class="mi" data-page="moves" onclick="showPage('moves')"><span class="ic">📊</span>เดินรายการสินค้า</div>
-        <div class="mi" data-page="purchase" onclick="showPage('purchase')"><span class="ic">🛒</span>จัดซื้อ<span class="badge" id="pc-badge" style="display:none">0</span></div>
         <div class="mi" data-page="transfer" onclick="showPage('transfer')"><span class="ic">🚛</span>โอนโกดัง<span class="badge" id="tf-badge" style="display:none">0</span></div>
         <div class="mi" data-page="receive" onclick="showPage('receive')"><span class="ic">📥</span>รับสินค้า<span class="badge" id="rc-badge" style="display:none">0</span></div>
         <div class="mi" data-page="warehouse" onclick="showPage('warehouse')"><span class="ic">🏭</span>คลังสินค้า</div>
@@ -340,7 +349,8 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <option value="thai">🛒 ซื้อในไทย (เข้าหน้าจัดซื้อ)</option>
       </select></div>
       <div style="align-self:flex-end"><label style="cursor:pointer" title="ถ้าโกดังหมด ให้ซื้อในไทยแทนได้"><input type="checkbox" id="p-thai" style="width:15px;height:15px;vertical-align:-2px"> โกดังหมดแล้วซื้อไทยได้</label></div>
-      <div><label>ซัพพลายเออร์</label><input id="p-supplier" style="width:150px" placeholder="เช่น กิจศิริ" title="ใช้จัดกลุ่มข้อความสั่งซื้อเมื่อของหมด"></div>
+      <div style="flex:1;min-width:260px"><label>ซัพพลายเออร์ (ติ๊กได้หลายราย)</label>
+        <div id="p-sups" style="display:flex;gap:6px;flex-wrap:wrap;border:1px solid var(--line,#e5ded7);border-radius:10px;padding:8px;max-height:92px;overflow-y:auto;background:#fff"></div></div>
       <div><label>Max Stock</label><input id="p-max" type="number" step="1" min="0" style="width:90px" class="num" value="0" title="เป้าเติมเต็มตอนเรียกของ (0 = ใช้ Safety)"></div>
       <div class="chk" style="padding-top:18px"><input type="checkbox" id="p-big"><span>ชิ้นใหญ่ (ค่าส่ง BI 20/ลัง)</span></div>
       <div><label>เรท 20 ลัง</label><input id="p-r20" type="number" step="0.01" style="width:100px" class="num" placeholder="ว่าง=กลาง"></div>
@@ -760,6 +770,32 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div id="mv-sum" style="display:none;margin-bottom:10px"></div>
       <div id="mv-body"><div class="empty">เลือกสินค้าแล้วกดดู — รวมทุกความเคลื่อนไหว: รับเข้า / ขายออก / ตีเสีย / โอนโกดัง / ปรับสต๊อก / แปลงสินค้า</div></div>
     </div>
+  </div>
+</div>
+
+<div class="page" id="page-suppliers">
+  <div class="pagehead"><h2>🏢 ซัพพลายเออร์</h2></div>
+  <div class="card">
+    <h3 class="ct" id="sup-form-title">เพิ่มซัพพลายเออร์</h3>
+    <input type="hidden" id="sup-id">
+    <div class="row" style="flex-wrap:wrap">
+      <div style="flex:1;min-width:200px"><label>ชื่อซัพพลายเออร์ *</label><input id="sup-name" style="width:100%" placeholder="เช่น กิจศิริวัสดุภัณฑ์"></div>
+      <div><label>ผู้ติดต่อ</label><input id="sup-contact" style="width:150px"></div>
+      <div><label>เบอร์โทร</label><input id="sup-phone" style="width:140px"></div>
+      <div><label>LINE ID</label><input id="sup-line" style="width:140px"></div>
+    </div>
+    <div class="row" style="flex-wrap:wrap;margin-top:8px">
+      <div style="flex:1;min-width:260px"><label>ที่อยู่</label><input id="sup-address" style="width:100%"></div>
+      <div style="flex:1;min-width:200px"><label>หมายเหตุ</label><input id="sup-note" style="width:100%" placeholder="เงื่อนไขชำระ / รอบส่งของ"></div>
+      <button class="btn-p" style="align-self:flex-end" onclick="saveSupplier(this)">💾 บันทึก</button>
+      <button class="btn-g" style="align-self:flex-end" onclick="resetSupForm()">ล้างฟอร์ม</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row" style="margin-bottom:10px"><input id="sup-q" placeholder="ค้นหา…" style="flex:1;min-width:180px" oninput="renderSuppliers()"><span class="count" id="sup-count"></span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>ชื่อ</th><th>ผู้ติดต่อ</th><th>เบอร์</th><th>LINE</th><th class="num">สินค้าที่ผูก</th><th>หมายเหตุ</th><th></th></tr></thead>
+      <tbody id="sup-body"></tbody></table></div>
   </div>
 </div>
 
@@ -1317,6 +1353,7 @@ function showPage(p){
   if(arguments[0]==='cost')setTimeout(costShowLock,0);
   document.querySelectorAll('.page').forEach(e=>e.classList.remove('active'));
   document.querySelectorAll('.mi').forEach(e=>e.classList.toggle('active',e.dataset.page===p));
+  document.querySelectorAll('.mhead[data-page]').forEach(e=>e.classList.toggle('active',e.dataset.page===p));   // เมนูหลักแบบไม่มีเมนูย่อย
   openActiveGroup();
   document.getElementById('page-'+p).classList.add('active');
   if(p==='dashboard') loadDashboard();
@@ -1330,6 +1367,7 @@ function showPage(p){
   if(p==='warehouse') loadWarehouse();
   if(p==='moves'){mvInit();loadMoves();}
   if(p==='purchase'){pcInit();pcCalc();}
+  if(p==='suppliers')loadSuppliers();
   if(p==='users')loadHolidays();
   if(p==='skucat') loadSkuCatPage();
   if(p==='users') loadUsers();
@@ -1792,7 +1830,7 @@ function editProduct(id){
   document.getElementById('p-safety').value=p.safety_stock||0;
   document.getElementById('p-thai').checked=!!p.thai_orderable;
   document.getElementById('p-source').value=p.source||'warehouse';
-  document.getElementById('p-supplier').value=p.supplier||'';
+  pcFillSupBoxes(p.id);
   document.getElementById('p-max').value=p.max_stock||0;
   document.getElementById('p-big').checked=!!p.is_big;
   document.getElementById('p-r20').value=p.price_r20??'';
@@ -1816,7 +1854,7 @@ function resetProductForm(){
   document.getElementById('p-stock').value='0';
   document.getElementById('p-alert').value='10';
   document.getElementById('p-safety').value=0;document.getElementById('p-max').value=0;document.getElementById('p-big').checked=false;
-  document.getElementById('p-thai').checked=false;document.getElementById('p-supplier').value='';document.getElementById('p-source').value='warehouse';
+  document.getElementById('p-thai').checked=false;pcFillSupBoxes(null);document.getElementById('p-source').value='warehouse';
   productImageFile=null; productImageUrl='';
   showProductPreview('');
 }
@@ -1852,7 +1890,7 @@ async function saveProduct(){
     safety_stock:parseFloat(document.getElementById('p-safety').value)||0,
     thai_orderable:document.getElementById('p-thai').checked,
     source:document.getElementById('p-source').value,
-    supplier:document.getElementById('p-supplier').value.trim()||null,
+
     max_stock:parseFloat(document.getElementById('p-max').value)||0,
     is_big:document.getElementById('p-big').checked
   };
@@ -1874,10 +1912,12 @@ async function saveProduct(){
   if(editProductId){
     const {error}=await db.from('products').update(rec).eq('id',editProductId);
     if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+    await saveProductSuppliers(editProductId);
     toast('อัพเดตสินค้าแล้ว');
   }else{
     const {data:ins,error}=await db.from('products').insert(rec).select('id').single();
     if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+    if(ins?.id)await saveProductSuppliers(ins.id);
     // ลงสต๊อกเริ่มต้นในคลังหลัก
     if(initStock>0 && whList.length){
       const selWh=Number(document.getElementById('p-stock-wh').value)||(whList.find(w=>w.is_default)||whList[0]).id;
@@ -6788,6 +6828,96 @@ async function alertOps(where,detail){
 window.addEventListener('error',e=>{alertOps('โค้ดหน้าจอผิดพลาด',(e.message||'')+' @'+String(e.filename||'').split('/').pop()+':'+e.lineno);});
 window.addEventListener('unhandledrejection',e=>{const r=e.reason;alertOps('งานเบื้องหลังล้มเหลว',(r&&(r.message||r.error_description))||String(r||''));});
 
+/* ==================== ซัพพลายเออร์ ==================== */
+let suppliers=[], prodSups=[];   // prodSups: [{product_id,supplier_id}]
+async function loadSuppliers(){
+  const [{data:sp},{data:ps}]=await Promise.all([
+    db.from('suppliers').select('*').order('name'),
+    db.from('product_suppliers').select('product_id,supplier_id')
+  ]);
+  suppliers=sp||[]; prodSups=ps||[];
+  renderSuppliers(); pcFillSupBoxes(editProductId);
+}
+function supProdCount(id){return prodSups.filter(x=>x.supplier_id===id).length;}
+function renderSuppliers(){
+  const el=document.getElementById('sup-body');if(!el)return;
+  const q=(document.getElementById('sup-q').value||'').toLowerCase();
+  const list=suppliers.filter(s=>!q||[s.name,s.contact,s.phone,s.note].some(v=>String(v||'').toLowerCase().includes(q)));
+  document.getElementById('sup-count').textContent=list.length+' ราย';
+  el.innerHTML=list.length?list.map(s=>`<tr${s.active===false?' style="opacity:.5"':''}>
+    <td><b>${esc(s.name)}</b>${s.active===false?' <span class="tag tag-out">ปิด</span>':''}</td>
+    <td>${esc(s.contact||'—')}</td><td>${esc(s.phone||'—')}</td><td>${esc(s.line_id||'—')}</td>
+    <td class="num">${supProdCount(s.id)}</td>
+    <td style="font-size:12.5px;color:var(--muted)">${esc(s.note||'')}</td>
+    <td style="white-space:nowrap">
+      <button class="btn-g mini" onclick="editSupplier(${s.id})">✏️ แก้ไข</button>
+      <button class="btn-g mini" onclick="delSupplier(${s.id})" style="color:#b52020">ลบ</button>
+    </td></tr>`).join(''):'<tr><td colspan="7" class="empty">ยังไม่มีซัพพลายเออร์ — เพิ่มด้านบนได้เลย</td></tr>';
+}
+function resetSupForm(){
+  ['sup-id','sup-name','sup-contact','sup-phone','sup-line','sup-address','sup-note'].forEach(i=>document.getElementById(i).value='');
+  document.getElementById('sup-form-title').textContent='เพิ่มซัพพลายเออร์';
+}
+function editSupplier(id){
+  const s=suppliers.find(x=>x.id===id);if(!s)return;
+  document.getElementById('sup-id').value=s.id;
+  document.getElementById('sup-name').value=s.name||'';
+  document.getElementById('sup-contact').value=s.contact||'';
+  document.getElementById('sup-phone').value=s.phone||'';
+  document.getElementById('sup-line').value=s.line_id||'';
+  document.getElementById('sup-address').value=s.address||'';
+  document.getElementById('sup-note').value=s.note||'';
+  document.getElementById('sup-form-title').textContent='แก้ไข: '+s.name;
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+async function saveSupplier(btn){
+  const name=document.getElementById('sup-name').value.trim();
+  if(!name){toast('ใส่ชื่อซัพพลายเออร์ก่อน');return;}
+  const rec={name,contact:document.getElementById('sup-contact').value.trim()||null,
+    phone:document.getElementById('sup-phone').value.trim()||null,
+    line_id:document.getElementById('sup-line').value.trim()||null,
+    address:document.getElementById('sup-address').value.trim()||null,
+    note:document.getElementById('sup-note').value.trim()||null};
+  const id=document.getElementById('sup-id').value;
+  btn.disabled=true;
+  const {error}=id?await db.from('suppliers').update(rec).eq('id',Number(id))
+                  :await db.from('suppliers').insert(rec);
+  btn.disabled=false;
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  toast(id?'อัปเดตแล้ว ✓':'เพิ่มซัพพลายเออร์แล้ว ✓');
+  resetSupForm(); loadSuppliers();
+}
+async function delSupplier(id){
+  const s=suppliers.find(x=>x.id===id);if(!s)return;
+  const n=supProdCount(id);
+  if(!confirm('ลบ "'+s.name+'"?'+(n?'\n⚠️ มีสินค้าผูกอยู่ '+n+' รายการ — การผูกจะถูกลบด้วย':'')))return;
+  const {error}=await db.from('suppliers').delete().eq('id',id);
+  if(error){toast('ลบไม่สำเร็จ: '+error.message);return;}
+  toast('ลบแล้ว'); loadSuppliers();
+}
+/* ช่องติ๊กซัพในฟอร์มสินค้า */
+function pcFillSupBoxes(productId){
+  const box=document.getElementById('p-sups');if(!box)return;
+  const mine=new Set(prodSups.filter(x=>x.product_id===productId).map(x=>x.supplier_id));
+  box.innerHTML=suppliers.filter(s=>s.active!==false).length
+    ? suppliers.filter(s=>s.active!==false).map(s=>
+      '<label style="cursor:pointer;user-select:none;background:'+(mine.has(s.id)?'#fdecec':'#f6efe9')
+      +';border-radius:999px;padding:4px 10px;font-size:13px"><input type="checkbox" class="p-sup" value="'+s.id+'"'
+      +(mine.has(s.id)?' checked':'')+' style="width:14px;height:14px;vertical-align:-2px;margin-right:4px">'+esc(s.name)+'</label>').join('')
+    : '<span class="hint">ยังไม่มีซัพพลายเออร์ — เพิ่มที่เมนู จัดซื้อ → ซัพพลายเออร์</span>';
+}
+async function saveProductSuppliers(productId){
+  const ids=[...document.querySelectorAll('.p-sup:checked')].map(x=>Number(x.value));
+  await db.from('product_suppliers').delete().eq('product_id',productId);
+  if(ids.length)await db.from('product_suppliers').insert(ids.map(id=>({product_id:productId,supplier_id:id})));
+  const {data:ps}=await db.from('product_suppliers').select('product_id,supplier_id');
+  prodSups=ps||[];
+}
+function supsOf(productId){
+  const ids=prodSups.filter(x=>x.product_id===productId).map(x=>x.supplier_id);
+  return suppliers.filter(s=>ids.includes(s.id)).map(s=>s.name);
+}
+
 /* ==================== หน้าจัดซื้อ ==================== */
 let pcRows=[];
 const roundUp5=n=>n<=0?0:Math.ceil(n/5)*5;
@@ -6818,11 +6948,13 @@ function pcCalc(){
     if(!why)return;
     const need=roundUp5(target-avail);
     if(need<=0)return;
-    pcRows.push({p,why,avail,safety,max:maxS,need,sup:p.supplier||'— ไม่ระบุ —'});
+    const sn=supsOf(p.id);
+    pcRows.push({p,why,avail,safety,max:maxS,need,sups:sn,sup:sn.length?sn.join(' / '):'— ไม่ระบุ —'});
   });
   pcRows.sort((a,b)=>String(a.sup).localeCompare(String(b.sup),'th')||byThaiName(a.p,b.p));
   const sel=document.getElementById('pc-sup'), keep=sel.value;
-  sel.innerHTML='<option value="">ทั้งหมด</option>'+[...new Set(pcRows.map(r=>r.sup))]
+  sel.innerHTML='<option value="">ทั้งหมด</option>'+[...new Set(pcRows.flatMap(r=>(r.sups&&r.sups.length)?r.sups:['— ไม่ระบุ —']))]
+    .sort((a,b)=>String(a).localeCompare(String(b),'th'))
     .map(s=>'<option value="'+esc(s)+'">'+esc(s)+'</option>').join('');
   sel.value=keep;
   pcRender();
@@ -6831,7 +6963,7 @@ function pcCalc(){
 }
 function pcFiltered(){
   const sup=document.getElementById('pc-sup').value, why=document.getElementById('pc-why').value;
-  return pcRows.filter(r=>(!sup||r.sup===sup)&&(!why||r.why===why));
+  return pcRows.filter(r=>(!sup||(r.sups||[]).includes(sup)||r.sup===sup)&&(!why||r.why===why));
 }
 function pcRender(){
   const list=pcFiltered(), el=document.getElementById('pc-body');
@@ -6848,7 +6980,8 @@ function pcRender(){
 }
 function pcText(){
   const list=pcFiltered();
-  const by={};list.forEach(r=>{(by[r.sup]=by[r.sup]||[]).push(r);});
+  const pick=document.getElementById('pc-sup').value;
+  const by={};list.forEach(r=>{const k=pick||((r.sups&&r.sups[0])||'— ไม่ระบุ —');(by[k]=by[k]||[]).push(r);});
   return '🛒 รายการสั่งซื้อ '+new Date().toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'})
     +'\n'+Object.entries(by).map(([sup,rs])=>'━━ '+sup+' ━━\n'
       +rs.map((r,i)=>(i+1)+'. '+r.p.name+'  '+r.need+' '+(r.p.unit||'')).join('\n')).join('\n')
@@ -7214,7 +7347,7 @@ async function loadCRM(){
 /* ==================== เริ่มต้น ==================== */
 async function startApp(){
   await loadSettings();                                   // ต้องมาก่อน: เวลาตัดรอบ/กลุ่มไลน์กลาง/ชื่อร้าน
-  await Promise.all([loadProducts(),loadCustomers(),loadSales(),loadWhList()]);  // ข้อมูลหลัก โหลดพร้อมกัน
+  await Promise.all([loadProducts(),loadCustomers(),loadSales(),loadWhList(),loadSuppliers().catch(()=>{})]);  // ข้อมูลหลัก โหลดพร้อมกัน
   await Promise.all([loadOrders(),loadBills()]);          // ตัวที่ใช้ข้อมูลหลักข้างบน
   loadRcvHistory();loadUsers();loadTransfers();loadQuotes();loadSkuCats();loadArAging();
   setRange('month');
