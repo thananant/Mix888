@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 26/07-F</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 26/07-G</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -1405,7 +1405,13 @@ function showPage(p){
   document.getElementById('page-'+p).classList.add('active');
   if(p==='dashboard') loadDashboard();
   if(p==='crm') loadCRM();
-  if(p==='custmap') loadCustMap();
+  if(p==='custmap'){
+    loadCustMap();
+    if(!window._cmAutoDone){            // หาพิกัดอัตโนมัติครั้งแรกที่เข้าหน้านี้
+      window._cmAutoDone=true;
+      setTimeout(()=>cmGeocodeAll(true),1500);
+    }
+  }
   if(p==='pricing') fillCustomerSelect();
   if(p==='sales') renderSales();
   if(p==='orders') loadOrders();
@@ -1507,15 +1513,20 @@ async function cmNominatim(qtext){
   if(lat<4||lat>21||lng<96||lng>106.5)return null;
   return{lat,lng};
 }
-async function cmGeocodeAll(){
+window.cmGeoStop=false;
+async function cmGeocodeAll(auto){
   if(cmGeoBusy)return;
   const list=customers.filter(c=>!(c.lat&&c.lng));
-  if(!list.length){toast('ทุกร้านมีพิกัดครบแล้ว');return;}
-  if(!confirm('หาพิกัดให้ '+list.length+' ร้านที่ยังไม่มีพิกัด\nใช้เวลาราว '+Math.ceil(list.length*1.2/60)+' นาที — เปิดหน้านี้ทิ้งไว้จนจบ\n(ร้านที่มีลิงก์แผนที่แบบเต็มจะได้พิกัดแม่นทันที ที่เหลือค้นจากที่อยู่)\n\nเริ่มเลย?'))return;
-  cmGeoBusy=true;const btn=document.getElementById('cm-geo-btn');btn.disabled=true;
+  if(!list.length){if(!auto)toast('ทุกร้านมีพิกัดครบแล้ว');return;}
+  if(!auto&&!confirm('หาพิกัดให้ '+list.length+' ร้านที่ยังไม่มีพิกัด\nใช้เวลาราว '+Math.ceil(list.length*1.2/60)+' นาที — เปิดหน้านี้ทิ้งไว้จนจบ\n\nเริ่มเลย?'))return;
+  cmGeoBusy=true;window.cmGeoStop=false;
+  const btn=document.getElementById('cm-geo-btn');
+  btn.disabled=false;btn.textContent='⏹️ หยุดหาพิกัด';btn.onclick=()=>{window.cmGeoStop=true;};
+  if(auto)toast('📍 กำลังหาพิกัดให้ '+list.length+' ร้านที่ยังไม่มี — ใช้งานหน้าอื่นต่อได้ กดปุ่มเพื่อหยุด');
   const prog=document.getElementById('cm-geo-progress');
   let ok=0,miss=0,i=0;
   for(const c of list){
+    if(window.cmGeoStop)break;
     i++;prog.textContent='📍 '+i+'/'+list.length+' — '+c.code;
     let g=cmParseMapLink(c.map_link);
     try{
@@ -1528,9 +1539,12 @@ async function cmGeocodeAll(){
     }else miss++;
     if(i%10===0)cmRender();
   }
-  cmGeoBusy=false;btn.disabled=false;prog.textContent='';
+  cmGeoBusy=false;prog.textContent='';
+  btn.disabled=false;btn.textContent='📍 หาพิกัดร้านที่ยังไม่มี';btn.onclick=()=>cmGeocodeAll();
   cmRender();
-  toast('📍 เสร็จ: ได้พิกัด '+ok+' ร้าน'+(miss?' · หาไม่เจอ '+miss+' ร้าน — เพิ่มลิงก์ Google Maps แบบเต็มในหน้าลูกค้า แล้วกดปุ่มนี้ซ้ำ':''));
+  toast((window.cmGeoStop?'⏹️ หยุดแล้ว · ':'📍 เสร็จ: ')+'ได้พิกัด '+ok+' ร้าน'
+    +(miss?' · หาไม่เจอ '+miss+' ร้าน — เพิ่มลิงก์ Google Maps แบบเต็มในหน้าลูกค้า แล้วกดซ้ำ':''));
+  window.cmGeoStop=false;
 }
 
 /* ==================== ภาพรวม ==================== */
