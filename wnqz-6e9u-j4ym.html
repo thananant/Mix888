@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 26/07-C</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 26/07-D</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -806,7 +806,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div><label>โกดังที่ต้องเติม</label><select id="pc-wh" style="min-width:160px" onchange="pcCalc()"></select></div>
       <div><label>ซัพพลายเออร์</label><select id="pc-sup" style="min-width:150px" onchange="pcRender()"><option value="">ทั้งหมด</option></select></div>
       <div><label>เหตุผล</label><select id="pc-why" style="min-width:170px" onchange="pcRender()">
-        <option value="">ทั้งหมด</option><option value="thai">🛒 ตั้งไว้ให้ซื้อในไทย</option><option value="empty">🏭 โกดังหมด/ไม่พอ</option></select></div>
+        <option value="">ทั้งหมด</option><option value="thai">🛒 ตั้งไว้ให้ซื้อในไทย</option><option value="empty">🏭 โกดังหมด (ซื้อไทยได้)</option><option value="short">⚠️ โกดังไม่พอ</option><option value="none">🚨 สั่งไม่ได้ ต้องหาทางแก้</option></select></div>
       <button class="btn-p" onclick="pcCalc()">🧮 คำนวณรายการที่ต้องซื้อ</button>
       <button class="btn-g" onclick="pcCopy()">📋 คัดลอกข้อความสั่งซื้อ</button>
       <button class="btn-g" onclick="pcImage(this)">🖼️ รูปสรุปจัดซื้อ</button>
@@ -7042,13 +7042,18 @@ function pcCalc(){
     const isThai=(p.source||'warehouse')==='thai';
     const fromWh=whSrc?((stockByProd[p.id]||{})[whSrc]||0):0;
     let why='';
-    if(isThai){ if(avail<safety||safety===0&&avail<=0)why='thai'; }
-    else if(avail<safety){ if(fromWh<=0)why=p.thai_orderable?'empty':''; }
+    const need0=target-avail;
+    if(isThai){ if(avail<safety||(safety===0&&avail<=0))why='thai'; }
+    else if(avail<safety){
+      if(fromWh<=0)why=p.thai_orderable?'empty':'none';          // โกดังหมด: ซื้อไทยได้ / ซื้อไม่ได้เลย
+      else if(fromWh<need0)why=p.thai_orderable?'short':'short0'; // โกดังมีไม่พอ
+    }
     if(!why)return;
-    const need=roundUp5(target-avail);
+    const need=roundUp5(need0);
     if(need<=0)return;
+    const gap=roundUp5(Math.max(0,need0-fromWh));                 // ส่วนที่โกดังเติมให้ไม่ได้
     const sn=supsOf(p.id);
-    pcRows.push({p,why,avail,safety,max:maxS,need,sups:sn,sup:sn.length?sn.join(' / '):'— ไม่ระบุ —'});
+    pcRows.push({p,why,avail,safety,max:maxS,need,gap,fromWh,sups:sn,sup:sn.length?sn.join(' / '):'— ไม่ระบุ —'});
   });
   pcRows.sort((a,b)=>String(a.sup).localeCompare(String(b.sup),'th')||byThaiName(a.p,b.p));
   const sel=document.getElementById('pc-sup'), keep=sel.value;
@@ -7062,7 +7067,8 @@ function pcCalc(){
 }
 function pcFiltered(){
   const sup=document.getElementById('pc-sup').value, why=document.getElementById('pc-why').value;
-  return pcRows.filter(r=>(!sup||(r.sups||[]).includes(sup)||r.sup===sup)&&(!why||r.why===why));
+  return pcRows.filter(r=>(!sup||(r.sups||[]).includes(sup)||r.sup===sup)
+    &&(!why||r.why===why||(why==='short'&&r.why==='short0')||(why==='none'&&r.why==='short0')));
 }
 function pcRender(){
   const list=pcFiltered(), el=document.getElementById('pc-body');
@@ -7071,20 +7077,27 @@ function pcRender(){
   el.innerHTML=list.map(r=>`<tr>
     <td style="font-size:12.5px"><b>${esc(r.p.sku)}</b></td>
     <td>${r.p.image_url?'<img src="'+esc(r.p.image_url)+'" style="width:30px;height:30px;object-fit:cover;border-radius:6px;vertical-align:-9px;margin-right:6px">':''}${esc(r.p.name)}</td>
-    <td><span class="tag ${r.why==='thai'?'tag-low':'tag-out'}">${r.why==='thai'?'🛒 ซื้อในไทย':'🏭 โกดังหมด'}</span></td>
+    <td>${({thai:'<span class="tag tag-low">🛒 ซื้อในไทย</span>',
+            empty:'<span class="tag tag-out">🏭 โกดังหมด</span>',
+            short:'<span class="tag tag-out">⚠️ โกดังไม่พอ ('+r.fromWh+')</span>',
+            short0:'<span class="tag tag-out" style="background:#fdecec;color:#b52020">🚨 โกดังไม่พอ · ซื้อไทยไม่ได้</span>',
+            none:'<span class="tag tag-out" style="background:#fdecec;color:#b52020">🚨 ของขาด · สั่งไม่ได้</span>'})[r.why]}</td>
     <td class="num" style="color:${r.avail<0?'#b52020':'#666'}">${r.avail}</td>
     <td class="num">${r.safety}</td><td class="num">${r.max||'—'}</td>
-    <td class="num" style="font-weight:700;color:#b52020">${r.need} ${esc(r.p.unit||'')}</td>
+    <td class="num" style="font-weight:700;color:#b52020">${(r.why==='short'||r.why==='short0')?r.gap:r.need} ${esc(r.p.unit||'')}</td>
     <td style="font-size:12.5px">${esc(r.sup)}</td></tr>`).join('');
 }
 function pcText(){
-  const list=pcFiltered();
+  const list=pcFiltered().filter(r=>r.why!=='none'&&r.why!=='short0');
   const pick=document.getElementById('pc-sup').value;
   const by={};list.forEach(r=>{const k=pick||((r.sups&&r.sups[0])||'— ไม่ระบุ —');(by[k]=by[k]||[]).push(r);});
   return '🛒 รายการสั่งซื้อ '+new Date().toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'})
     +'\n'+Object.entries(by).map(([sup,rs])=>'━━ '+sup+' ━━\n'
       +rs.map((r,i)=>(i+1)+'. '+r.p.name+'  '+r.need+' '+(r.p.unit||'')).join('\n')).join('\n')
-    +'\n\nรวม '+list.length+' รายการ';
+    +'\n\nรวม '+list.length+' รายการ'
+    +(()=>{const x=pcFiltered().filter(r=>r.why==='none'||r.why==='short0');
+      return x.length?'\n\n🚨 สั่งไม่ได้ '+x.length+' รายการ (ไม่มีในโกดัง + ยังไม่ได้ตั้งซัพในไทย)\n'
+        +x.map(r=>'\u2022 '+r.p.name).join('\n'):'';})();
 }
 function pcCopy(){
   if(!pcFiltered().length){toast('ไม่มีรายการ');return;}
