@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-D</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-E</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -1040,6 +1040,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div class="filters">
       <button class="fbtn active" data-f="unpaid" onclick="setFilter('unpaid')">ค้างจ่าย</button>
       <button class="fbtn" data-f="paid" onclick="setFilter('paid')">จ่ายแล้ว</button>
+      <button class="fbtn" data-f="cancelled" onclick="setFilter('cancelled')">ยกเลิกบิล</button>
       <button class="fbtn" data-f="all" onclick="setFilter('all')">ทั้งหมด</button>
       <button class="fbtn" data-f="slip" onclick="setFilter('slip')">🧾 มีสลิป</button>
       <select id="ac-sale" onchange="renderAccount()" title="กรองตามเซลล์">
@@ -4291,7 +4292,7 @@ async function loadBills(){
   renderAccount(); acStats();
 }
 function acStats(){
-  const unpaid=bills.filter(b=>b.payment_status!=='paid');
+  const unpaid=bills.filter(b=>b.payment_status!=='paid'&&(b.ship_status||'pending')!=='cancelled');   // บิลยกเลิกไม่ใช่หนี้ค้าง — หน้าภาพรวมตัดออกอยู่แล้ว หน้านี้ต้องตรงกัน
   const today=new Date();today.setHours(0,0,0,0);
   const paidToday=bills.filter(b=>b.payment_status==='paid'&&b.paid_at&&new Date(b.paid_at)>=today);
   document.getElementById('st-unpaid').textContent=unpaid.length+' บิล';
@@ -4348,8 +4349,11 @@ function renderAccount(){
   const from=document.getElementById('ac-from').value;
   const to=document.getElementById('ac-to').value;
   const list=bills.filter(b=>{
-    if(acFilter==='unpaid'&&b.payment_status==='paid')return false;
-    if(acFilter==='paid'&&b.payment_status!=='paid')return false;
+    const bCancelled=(b.ship_status||'pending')==='cancelled';
+    if(acFilter==='cancelled'&&!bCancelled)return false;
+    // บิลยกเลิกไม่ใช่หนี้ค้างและไม่ใช่รายรับ — แยกไปแท็บของมันเอง (แท็บทั้งหมดยังเห็นครบ)
+    if(acFilter==='unpaid'&&(b.payment_status==='paid'||bCancelled))return false;
+    if(acFilter==='paid'&&(b.payment_status!=='paid'||bCancelled))return false;
     if(acFilter==='slip'&&!b.slip_url)return false;
     if(shipF&&(b.ship_status||'pending')!==shipF)return false;
     const dlvF=document.getElementById('ac-delivery').value;
