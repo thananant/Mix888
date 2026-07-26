@@ -605,6 +605,13 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-g mini" onclick="saveCutoff()">บันทึกรอบ</button>
       <button class="btn-s" onclick="sendDailySummary(this)">📋 ส่งสรุปออเดอร์รอบนี้เข้าไลน์กลาง</button>
       <span style="border-left:1px solid var(--line,#ddd);height:22px"></span>
+      <label id="autobill-wrap" title="ออกบิลให้เองเมื่อมีออเดอร์ใหม่ — เหมือนกดปุ่ม &quot;ออกบิลเฉย ๆ&quot; ไม่ส่งกลุ่มลูกค้า&#10;ทำงานเฉพาะตอนเปิดหน้านี้ค้างไว้ · ปิดเองทุกครั้งที่รีเฟรชหน้า" style="display:flex;align-items:center;gap:6px;font-size:13px;padding:6px 10px;border:1px solid var(--line,#ddd);border-radius:8px;cursor:pointer">
+        <input type="checkbox" id="autobill" onchange="toggleAutoBill(this.checked)" style="cursor:pointer">
+        <span>⚡ ออกบิลอัตโนมัติ</span>
+        <span id="autobill-dot" style="display:none;color:var(--muted);font-size:12px"></span>
+      </label>
+      <button class="btn-g mini" id="autobill-skip-btn" onclick="editAutoBillSkip()" title="ร้านที่ห้ามออกบิลอัตโนมัติ — เช่น ร้านตัวอย่าง/ร้านทดสอบ">⛔ ยกเว้นร้าน</button>
+      <span style="border-left:1px solid var(--line,#ddd);height:22px"></span>
       <label style="font-size:13px;color:var(--muted)">กำหนดเอง</label>
       <input type="datetime-local" id="cs-from" style="width:225px;min-width:225px;font-size:15px;padding:8px 10px">
       <span style="color:var(--muted)">→</span>
@@ -3627,6 +3634,7 @@ async function makeBill(orderId,btn,sendLine,opts){
   const sellerMode=opts.sellerMode||o.customers?.bill_seller_mode||'none';
   const grand=Math.max(0,Number(o.total)+shipFee-discount);
   btn.disabled=true;btn.textContent='กำลังออกบิล…';
+  let ok=false;
   try{
     const billNo=await nextBillNo();
     const result=await drawBill(o,billNo,{shipFee,discount,grand,revision:1,docType,sellerMode});
@@ -3641,7 +3649,8 @@ async function makeBill(orderId,btn,sendLine,opts){
     const pageUrls=await uploadA4Pages(result,billNo);   // หน้า A4 สำหรับส่งเข้าไลน์ตอนสรุป
 
     // สร้าง PDF แล้วดาวน์โหลดให้ทันที
-    try{
+    // โหมดอัตโนมัติข้ามขั้นนี้ — เบราว์เซอร์บล็อกการดาวน์โหลดหลายไฟล์รวดโดยไม่มีคนกด
+    if(!opts.auto)try{
       const pdf=await billToPDF(result,billNo);
       pdf.save(billNo+'.pdf');
     }catch(e){console.warn('PDF error',e);}
@@ -3672,17 +3681,129 @@ async function makeBill(orderId,btn,sendLine,opts){
       queueSalesSummary(o,billNo,grand);
       }
     }else{
-      window.open(imageUrl,'_blank');
-      toast('ออกบิล '+billNo+' แล้ว'+(sendLine?' (ลูกค้าไม่ได้ผูก LINE เปิดรูปให้แทน)':' (ยังไม่ส่ง LINE)'));
+      if(!opts.auto){   // อัตโนมัติ: ไม่เปิดแท็บรูป ไม่เด้ง toast ทีละใบ
+        window.open(imageUrl,'_blank');
+        toast('ออกบิล '+billNo+' แล้ว'+(sendLine?' (ลูกค้าไม่ได้ผูก LINE เปิดรูปให้แทน)':' (ยังไม่ส่ง LINE)'));
+      }
     queueSalesSummary(o,billNo,grand);
     }
-    await loadOrders(); await loadBills();
+    ok=true;
+    if(!opts.auto){await loadOrders(); await loadBills();}
   }catch(e){
     toast(String(e.message||e));
     btn.disabled=false;btn.textContent='🧾 ออกบิล';
   }
   if(!window._salesBatch)flushSalesSummary();   // แจ้งกลุ่มสรุปออเดอร์ทันทีที่ออกบิล
+  return ok;
 }
+
+/* ==================== ออกบิลอัตโนมัติ ==================== */
+/* ทำงานเหมือนกดปุ่ม "ออกบิลเฉย ๆ" ให้ทุกใบที่เข้ามาใหม่
+   - ไม่ส่งเข้ากลุ่มไลน์ของลูกค้า (sendLine=false)
+   - รวบแจ้งกลุ่มสรุปกลางเป็นข้อความเดียวต่อรอบ ด้วย _salesBatch
+   - ไม่ดาวน์โหลด PDF และไม่เปิดแท็บรูป (โหลดทีหลังได้ที่หน้าบัญชี)
+   ข้อจำกัด: บิลถูกวาดด้วย canvas ในเบราว์เซอร์ จึงทำงานเฉพาะตอนเปิดหน้านี้ค้างไว้
+   ความปลอดภัย: ปิดเองทุกครั้งที่รีเฟรชหน้า กันลืมเปิดค้างแล้วบิลไหลออกเงียบ ๆ */
+let autoBillTimer=null, autoBillBusy=false;
+const autoBillFail=new Map();      // order_id -> จำนวนครั้งที่พลาด (พลาดครบ 3 ครั้งแล้วเลิกลอง)
+const AUTOBILL_EVERY=20000;        // เช็คทุก 20 วินาที
+const AUTOBILL_MAXTRY=3;
+
+/* รายชื่อร้านที่ห้ามออกบิลอัตโนมัติ — เก็บใน settings.autobill_skip คั่นด้วยจุลภาค */
+function autoBillSkipSet(){
+  return new Set(String(appSettings.autobill_skip||'').split(',')
+    .map(x=>x.trim().toUpperCase()).filter(Boolean));
+}
+function renderAutoBillSkip(){
+  const b=document.getElementById('autobill-skip-btn');if(!b)return;
+  const n=autoBillSkipSet().size;
+  b.textContent='⛔ ยกเว้นร้าน'+(n?' ('+n+')':'');
+}
+async function editAutoBillSkip(){
+  const cur=String(appSettings.autobill_skip||'').trim();
+  const v=prompt('รหัสลูกค้าที่ห้ามออกบิลอัตโนมัติ — คั่นด้วยจุลภาค\n'
+    +'เช่น  SKG00001,BFF00002\n\n'
+    +'เว้นว่าง = ออกบิลให้ทุกร้าน\n'
+    +'(ยกเว้นเฉพาะตัวออโต้ ยังกดออกบิลเองได้ตามปกติ)',cur);
+  if(v===null)return;
+  const clean=v.split(',').map(x=>x.trim().toUpperCase()).filter(Boolean).join(',');
+  const {error}=await db.from('settings').upsert({key:'autobill_skip',value:clean},{onConflict:'key'});
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  appSettings.autobill_skip=clean;
+  renderAutoBillSkip();
+  toast(clean?'ยกเว้นแล้ว '+autoBillSkipSet().size+' ร้าน ✓':'ยกเลิกการยกเว้นทั้งหมดแล้ว');
+}
+function autoBillNote(t){
+  const d=document.getElementById('autobill-dot');
+  if(d){d.style.display=t?'':'none';d.textContent=t||'';}
+}
+function toggleAutoBill(on){
+  if(autoBillTimer){clearInterval(autoBillTimer);autoBillTimer=null;}
+  if(on){
+    autoBillNote('— กำลังเฝ้าดู');
+    autoBillTimer=setInterval(runAutoBill,AUTOBILL_EVERY);
+    toast('เปิดออกบิลอัตโนมัติแล้ว — ห้ามปิดแท็บนี้');
+    runAutoBill();
+  }else{
+    autoBillNote('');
+    toast('ปิดออกบิลอัตโนมัติแล้ว');
+  }
+}
+async function runAutoBill(){
+  if(autoBillBusy)return;
+  if(!document.getElementById('autobill')?.checked)return;
+  autoBillBusy=true;
+  try{
+    await loadOrders();                                    // ดึงออเดอร์ล่าสุดก่อนทุกรอบ
+    const skip=autoBillSkipSet();
+    const all=(orders||[]).filter(o=>o.status==='new');
+    const queue=all.filter(o=>!skip.has(String(o.customers?.code||'').toUpperCase())
+      && (autoBillFail.get(o.id)||0) < AUTOBILL_MAXTRY);
+    const skipped=all.length-queue.length;
+    if(!queue.length){
+      autoBillNote(skipped?'— เฝ้าดู (ข้ามร้านยกเว้น '+skipped+')':'— กำลังเฝ้าดู');
+      return;
+    }
+    window._salesBatch=true;                               // รวบสรุปกลุ่มกลางไว้ก่อน
+    let done=0, fail=0, lastErr='';
+    for(let i=0;i<queue.length;i++){
+      const o=queue[i];
+      autoBillNote('— กำลังออกบิล '+(i+1)+'/'+queue.length);
+      let r=false;
+      try{
+        // กันชนกับการกดปุ่มออกบิลเองระหว่างที่รอบนี้กำลังวิ่ง — เช็คสถานะสด ๆ ก่อนทุกใบ
+        const {data:cur}=await db.from('orders').select('status').eq('id',o.id).single();
+        if(cur&&cur.status!=='new'){autoBillFail.set(o.id,AUTOBILL_MAXTRY);continue;}
+        r=await makeBill(o.id,{},false,{auto:true});
+      }
+      catch(e){ lastErr=String(e.message||e); }
+      if(r){done++;autoBillFail.delete(o.id);}
+      else{
+        fail++;
+        const n=(autoBillFail.get(o.id)||0)+1;
+        autoBillFail.set(o.id,n);
+        if(n>=AUTOBILL_MAXTRY)lastErr=(o.order_no||o.id)+' พลาดครบ '+AUTOBILL_MAXTRY+' ครั้ง — หยุดลองแล้ว';
+      }
+    }
+    window._salesBatch=false;
+    try{flushSalesSummary();}catch(e){console.warn('flushSalesSummary',e);}
+    if(done)toast('ออกบิลอัตโนมัติ '+done+' ใบ ✓ ยังไม่ส่งกลุ่มลูกค้า'
+      +(skipped?' · ข้ามร้านยกเว้น '+skipped+' ใบ':''));
+    if(fail)toast('ออกบิลไม่สำเร็จ '+fail+' ใบ'+(lastErr?' — '+lastErr:'')+' (จะลองใหม่รอบหน้า)');
+    await loadOrders(); await loadBills();
+  }catch(e){
+    console.warn('runAutoBill',e);
+    toast('ออกบิลอัตโนมัติสะดุด: '+String(e.message||e));
+  }finally{
+    window._salesBatch=false;
+    autoBillBusy=false;
+    if(document.getElementById('autobill')?.checked)autoBillNote('— กำลังเฝ้าดู');
+  }
+}
+// กันปิดแท็บระหว่างที่ยังออกบิลค้างอยู่
+window.addEventListener('beforeunload',e=>{
+  if(autoBillBusy){e.preventDefault();e.returnValue='';}
+});
 
 /* ==================== สรุปออเดอร์วันนี้เข้าไลน์กลาง ==================== */
 /* ---- รอบตัดบิล: คืนช่วง [start,end) ของรอบที่ครอบเวลา ref ---- */
@@ -7800,6 +7921,7 @@ async function loadSettings(){
   if(el)el.value=appSettings.line_central_group||'';
   const map={'st-shopname':'shop_name','st-taxid':'shop_taxid','st-address':'shop_address','st-phone':'shop_phone','st-email':'shop_email'};
   for(const [id,key] of Object.entries(map)){const e=document.getElementById(id);if(e)e.value=appSettings[key]||'';}
+  renderAutoBillSkip();
 }
 async function loadHolidays(){
   const el=document.getElementById('hol-list');if(!el)return;
