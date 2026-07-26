@@ -605,11 +605,10 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-g mini" onclick="saveCutoff()">บันทึกรอบ</button>
       <button class="btn-s" onclick="sendDailySummary(this)">📋 ส่งสรุปออเดอร์รอบนี้เข้าไลน์กลาง</button>
       <span style="border-left:1px solid var(--line,#ddd);height:22px"></span>
-      <label id="autobill-wrap" title="ออกบิลให้เองเมื่อมีออเดอร์ใหม่ — เหมือนกดปุ่ม &quot;ออกบิลเฉย ๆ&quot; ไม่ส่งกลุ่มลูกค้า&#10;ทำงานเฉพาะตอนเปิดหน้านี้ค้างไว้ · ปิดเองทุกครั้งที่รีเฟรชหน้า" style="display:flex;align-items:center;gap:6px;font-size:13px;padding:6px 10px;border:1px solid var(--line,#ddd);border-radius:8px;cursor:pointer">
-        <input type="checkbox" id="autobill" onchange="toggleAutoBill(this.checked)" style="cursor:pointer">
+      <span id="autobill-wrap" title="ออกบิลให้เองทุกครั้งที่มีออเดอร์ใหม่ — เหมือนกดปุ่ม &quot;ออกบิลเฉย ๆ&quot; ไม่ส่งกลุ่มลูกค้า&#10;ทำงานตลอดเวลาที่เปิดหน้าเว็บนี้ค้างไว้" style="display:flex;align-items:center;gap:6px;font-size:13px;padding:6px 10px;border:1px solid var(--line,#ddd);border-radius:8px">
         <span>⚡ ออกบิลอัตโนมัติ</span>
-        <span id="autobill-dot" style="display:none;color:var(--muted);font-size:12px"></span>
-      </label>
+        <span id="autobill-dot" style="color:var(--muted);font-size:12px">— กำลังเริ่ม</span>
+      </span>
       <button class="btn-g mini" id="autobill-skip-btn" onclick="editAutoBillSkip()" title="ร้านที่ห้ามออกบิลอัตโนมัติ — เช่น ร้านตัวอย่าง/ร้านทดสอบ">⛔ ยกเว้นร้าน</button>
       <span style="border-left:1px solid var(--line,#ddd);height:22px"></span>
       <label style="font-size:13px;color:var(--muted)">กำหนดเอง</label>
@@ -3627,6 +3626,16 @@ function boClose(ok){
 }
 async function makeBill(orderId,btn,sendLine,opts){
   const o=orders.find(x=>x.id===orderId);if(!o)return;
+  // กันออกบิลซ้ำใบเดิม — เช็คสถานะสด ๆ จากฐานข้อมูลก่อนเสมอ
+  // ปุ่มในหน้านี้ไม่เคยเช็คมาก่อน กดรัว ๆ หรือเปิดสองแท็บแล้วได้บิลซ้ำได้
+  try{
+    const {data:cur}=await db.from('orders').select('status').eq('id',orderId).single();
+    if(cur&&cur.status!=='new'){
+      toast('ออเดอร์นี้ถูกออกบิลหรือยกเลิกไปแล้ว — รีเฟรชหน้าดูอีกที');
+      await loadOrders();
+      return false;
+    }
+  }catch(e){console.warn('check order status',e);}
   const shipFee=Number(document.getElementById('bs-ship-'+orderId)?.value)||0;
   const discount=Number(document.getElementById('bs-disc-'+orderId)?.value)||0;
   opts=opts||{};   // ไม่ถามตอนออกบิล — ใช้ค่าที่ตั้งไว้ในข้อมูลลูกค้า (เลือกรูปแบบได้ตอนกดปุ่ม PDF)
@@ -3707,6 +3716,7 @@ async function makeBill(orderId,btn,sendLine,opts){
 let autoBillTimer=null, autoBillBusy=false;
 const autoBillFail=new Map();      // order_id -> จำนวนครั้งที่พลาด (พลาดครบ 3 ครั้งแล้วเลิกลอง)
 const AUTOBILL_EVERY=20000;        // เช็คทุก 20 วินาที
+const AUTOBILL_DELAY=15000;        // หน่วงก่อนเริ่มรอบแรกหลังเข้าระบบ
 const AUTOBILL_MAXTRY=3;
 
 /* รายชื่อร้านที่ห้ามออกบิลอัตโนมัติ — เก็บใน settings.autobill_skip คั่นด้วยจุลภาค */
@@ -3737,21 +3747,23 @@ function autoBillNote(t){
   const d=document.getElementById('autobill-dot');
   if(d){d.style.display=t?'':'none';d.textContent=t||'';}
 }
-function toggleAutoBill(on){
-  if(autoBillTimer){clearInterval(autoBillTimer);autoBillTimer=null;}
-  if(on){
+/* เริ่มทำงานเองหลังเข้าระบบ — ไม่มีสวิตช์เปิด/ปิด
+   หน่วงไว้ก่อนสักครู่แล้วนับถอยหลังให้เห็น เผื่ออยากตั้งร้านยกเว้นหรือปิดแท็บทัน */
+function startAutoBill(){
+  if(autoBillTimer)return;
+  let left=AUTOBILL_DELAY/1000;
+  autoBillNote('— เริ่มใน '+left+' วิ');
+  const cd=setInterval(()=>{
+    left--;
+    if(left>0){autoBillNote('— เริ่มใน '+left+' วิ');return;}
+    clearInterval(cd);
     autoBillNote('— กำลังเฝ้าดู');
     autoBillTimer=setInterval(runAutoBill,AUTOBILL_EVERY);
-    toast('เปิดออกบิลอัตโนมัติแล้ว — ห้ามปิดแท็บนี้');
     runAutoBill();
-  }else{
-    autoBillNote('');
-    toast('ปิดออกบิลอัตโนมัติแล้ว');
-  }
+  },1000);
 }
 async function runAutoBill(){
   if(autoBillBusy)return;
-  if(!document.getElementById('autobill')?.checked)return;
   autoBillBusy=true;
   try{
     await loadOrders();                                    // ดึงออเดอร์ล่าสุดก่อนทุกรอบ
@@ -3797,7 +3809,7 @@ async function runAutoBill(){
   }finally{
     window._salesBatch=false;
     autoBillBusy=false;
-    if(document.getElementById('autobill')?.checked)autoBillNote('— กำลังเฝ้าดู');
+    autoBillNote('— กำลังเฝ้าดู');
   }
 }
 // กันปิดแท็บระหว่างที่ยังออกบิลค้างอยู่
@@ -5790,6 +5802,7 @@ async function nextTfNo(){
 /* ตัววาดรูปเอกสารรายการสินค้า (ใช้ร่วมกัน: ใบโอน / ใบสั่งซื้อ) — แบ่งหน้า A4 อัตโนมัติ
    rows: [{sku,name,qty,unit,product_id,note,extra}] · opt: {title,sub,colA,colB,file} */
 async function tfDrawPages(rows,opt){
+  const blobs=[];
   await document.fonts.load('700 22px "IBM Plex Sans Thai"');
   const S=2, W=794*S, PAD=26*S, rowH=62*S;
   const pageH=Math.round(W*297/210), headH=150*S, tblHeadH=28*S, footH=64*S;
@@ -5857,8 +5870,11 @@ async function tfDrawPages(rows,opt){
     F('700',15);x.fillStyle='#111';x.textAlign='right';
     x.fillText(pg===pages-1?('รวม '+rows.length+' รายการ   ·   '+totalQty+' หน่วย'):'ยังมีต่อหน้าถัดไป \u2192',W-PAD,fy);
     x.textAlign='left';
-    urls.push(URL.createObjectURL(await new Promise(r=>cv.toBlob(r,'image/jpeg',0.9))));
+    const _b=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.9));
+    blobs.push(_b); urls.push(URL.createObjectURL(_b));
   }
+  // โหมดคืนไฟล์: ใช้ตอนต้องอัปขึ้นเซิร์ฟเวอร์เพื่อส่งไลน์ — ไม่เปิดแท็บ ไม่โหลดลงเครื่อง
+  if(opt.blobs){setTimeout(()=>urls.forEach(u=>URL.revokeObjectURL(u)),1000);return blobs;}
   window.open(urls[0],'_blank');
   const base=opt.file+'-'+new Date().toISOString().slice(0,10);
   for(let i=0;i<urls.length;i++){
@@ -5910,25 +5926,69 @@ async function saveTransfer(btn){
     const {error:ie}=await db.from('transfer_items').insert(
       tfItems.map(it=>({transfer_id:tf.id,product_id:it.product_id,qty:it.qty})));
     if(ie)throw new Error(ie.message);
-    // แจ้ง LINE กลุ่มกลาง
-    if(appSettings.line_central_group){
+    // ── ตั้งแต่จุดนี้ใบโอนถูกบันทึกเรียบร้อยแล้ว ──
+    // ห้ามปล่อยให้ error จากการส่งไลน์หลุดออกไปข้างนอกเด็ดขาด
+    // ไม่งั้นจะขึ้นว่า "บันทึกไม่สำเร็จ" ทั้งที่บันทึกแล้ว แล้วคนกดซ้ำ = ได้ใบโอนซ้ำ สต๊อกเด้งสองรอบ
+    let lineErr='';
+    if(appSettings.line_central_group)try{
+      btn.textContent='กำลังสร้างรูป…';
       const wn=id=>whList.find(w=>w.id===id)?.name||id;
-      let txt='🚛 ใบโอนของ '+tfNo+'\nจาก '+wn(fromW)+' → '+wn(toW)
-        +'\nโดย: '+(currentUser?.display_name||currentUser?.username||'-')
-        +'\n\nรายการ ('+tfItems.length+'):';
-      tfItems.forEach(it=>{txt+='\n• '+it.name+' ×'+it.qty+' '+it.unit;});
       const note=document.getElementById('tf-note').value.trim();
-      if(note)txt+='\n\nหมายเหตุ: '+note;
-      txt+='\n\nฝากโกดังแพ็คของตามรายการนี้ครับ 🙏';
-      await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
-        messages:[{type:'text',text:txt.slice(0,4900)}]}});
-    }
-    toast('บันทึกใบโอน '+tfNo+' แล้ว ✓');
+      const cap='🚛 ใบโอนของ '+tfNo+'\nจาก '+wn(fromW)+' → '+wn(toW)
+        +'\nโดย: '+(currentUser?.display_name||currentUser?.username||'-')
+        +'\nรายการ '+tfItems.length+' อย่าง'
+        +(note?'\nหมายเหตุ: '+note:'')
+        +'\n\nฝากโกดังแพ็คของตามรูปครับ 🙏';
+      const msgs=[{type:'text',text:cap.slice(0,4900)}];
+      try{
+        const urls=await tfUploadPages(tfNo,wn(fromW),wn(toW));
+        urls.forEach(u=>msgs.push({type:'image',originalContentUrl:u,previewImageUrl:u}));
+      }catch(e){
+        // วาดหรืออัปรูปไม่สำเร็จ → ส่งรายการเป็นข้อความแทน
+        // จะได้ไม่มีวันที่โกดังไม่ได้รับอะไรเลยเพราะรูปพัง
+        console.warn('tf image',e);
+        let t='รายการ ('+tfItems.length+'):';
+        tfItems.forEach(it=>{t+='\n• '+it.name+' ×'+it.qty+' '+it.unit;});
+        msgs.push({type:'text',text:(t+'\n\n(สร้างรูปไม่สำเร็จ ส่งเป็นข้อความแทน)').slice(0,4900)});
+      }
+      btn.textContent='กำลังส่ง LINE…';
+      // ไลน์รับได้ครั้งละ 5 ข้อความ — ใบโอนยาว ๆ อาจได้หลายหน้า ต้องแบ่งส่ง
+      for(let i=0;i<msgs.length;i+=5){
+        const {error:pe}=await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
+          messages:msgs.slice(i,i+5)}});
+        if(pe)throw new Error(pe.message||'ส่ง LINE ไม่สำเร็จ');
+      }
+    }catch(e){lineErr=String(e.message||e);console.warn('tf line',e);}
+    toast(lineErr
+      ? 'บันทึกใบโอน '+tfNo+' แล้ว ✓ แต่แจ้ง LINE ไม่สำเร็จ — '+lineErr+' (ใบโอนอยู่ในประวัติแล้ว ไม่ต้องกดซ้ำ)'
+      : 'บันทึกใบโอน '+tfNo+' แล้ว ✓');
     tfItems=[];document.getElementById('tf-note').value='';
     tfRender(); loadTransfers();
   }catch(e){toast('บันทึกใบโอนไม่สำเร็จ: '+String(e.message||e));}
   btn.disabled=false;btn.textContent='💾 บันทึกใบโอน + แจ้ง LINE';
 }
+/* ---- อัปรูปใบโอนขึ้นสตอเรจ แล้วคืน URL สาธารณะ ----
+   ไลน์ส่งรูปได้เฉพาะจาก URL ที่เข้าถึงได้จากภายนอก ส่งไฟล์ดิบไปไม่ได้
+   ใช้ถังเดียวกับบิลเพราะเปิดสาธารณะอยู่แล้ว ไม่ต้องตั้งค่าถังใหม่ */
+async function tfUploadPages(tfNo,fromN,toN){
+  const list=tfItems.filter(it=>Number(it.qty)>0).sort(byThaiName);
+  if(!list.length)throw new Error('ไม่มีรายการที่ใส่จำนวน');
+  const blobs=await tfDrawPages(list.map(it=>({sku:it.sku,name:it.name,qty:it.qty,unit:it.unit,
+    product_id:it.product_id,
+    note:String((Number(it.stockFrom)||0)-Number(it.qty)),
+    extra:String((Number(it.stockTo)||0)+Number(it.qty))})),
+    {title:'ใบโอนสินค้าระหว่างโกดัง',sub:tfNo+'   ·   จาก: '+fromN+'   \u2192   ไป: '+toN,
+     colA:'ต้นทางเหลือ',colB:'ปลายทางเป็น',file:'ใบโอนสินค้า',blobs:true});
+  const out=[];
+  for(let i=0;i<blobs.length;i++){
+    const path='transfer/'+tfNo+'-'+rndTag(6)+'-'+(i+1)+'.jpg';
+    const {error}=await db.storage.from('bills').upload(path,blobs[i],{contentType:'image/jpeg',upsert:true});
+    if(error)throw new Error('อัพรูปไม่สำเร็จ: '+error.message);
+    out.push(db.storage.from('bills').getPublicUrl(path).data.publicUrl);
+  }
+  return out;
+}
+
 /* ---- ใบโอนสินค้า PDF A4 (ให้โกดังพิมพ์แพ็คของ/เซ็นรับ) ---- */
 async function makeTfPDF(id,btn){
   const t=transfers.find(x=>x.id===id);if(!t)return;
@@ -8019,6 +8079,7 @@ async function startApp(){
   await Promise.all([loadOrders(),loadBills()]);          // ตัวที่ใช้ข้อมูลหลักข้างบน
   loadRcvHistory();loadUsers();loadTransfers();loadQuotes();loadSkuCats();loadArAging();
   setRange('month');
+  startAutoBill();                                        // ออกบิลอัตโนมัติ เริ่มเองหลังโหลดข้อมูลครบ
 }
 (async function(){
   initRtimeSelects();
