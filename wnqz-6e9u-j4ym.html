@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-B</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-D</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -605,11 +605,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-g mini" onclick="saveCutoff()">บันทึกรอบ</button>
       <button class="btn-s" onclick="sendDailySummary(this)">📋 ส่งสรุปออเดอร์รอบนี้เข้าไลน์กลาง</button>
       <span style="border-left:1px solid var(--line,#ddd);height:22px"></span>
-      <span id="autobill-wrap" title="ออกบิลให้เองทุกครั้งที่มีออเดอร์ใหม่ — เหมือนกดปุ่ม &quot;ออกบิลเฉย ๆ&quot; ไม่ส่งกลุ่มลูกค้า&#10;ทำงานตลอดเวลาที่เปิดหน้าเว็บนี้ค้างไว้" style="display:flex;align-items:center;gap:6px;font-size:13px;padding:6px 10px;border:1px solid var(--line,#ddd);border-radius:8px">
-        <span>⚡ ออกบิลอัตโนมัติ</span>
-        <span id="autobill-dot" style="color:var(--muted);font-size:12px">— กำลังเริ่ม</span>
-      </span>
-      <button class="btn-g mini" id="autobill-skip-btn" onclick="editAutoBillSkip()" title="ร้านที่ห้ามออกบิลอัตโนมัติ — เช่น ร้านตัวอย่าง/ร้านทดสอบ">⛔ ยกเว้นร้าน</button>
+      <button class="btn-g mini" id="autobill-skip-btn" onclick="editAutoBillSkip()" title="ร้านที่ระบบจะไม่ออกบิลอัตโนมัติตอนถึงรอบตัด — เช่น ร้านตัวอย่าง/ร้านทดสอบ">⛔ ยกเว้นร้าน (ออกบิลอัตโนมัติ)</button>
       <span style="border-left:1px solid var(--line,#ddd);height:22px"></span>
       <label style="font-size:13px;color:var(--muted)">กำหนดเอง</label>
       <input type="datetime-local" id="cs-from" style="width:225px;min-width:225px;font-size:15px;padding:8px 10px">
@@ -3626,16 +3622,21 @@ function boClose(ok){
 }
 async function makeBill(orderId,btn,sendLine,opts){
   const o=orders.find(x=>x.id===orderId);if(!o)return;
-  // กันออกบิลซ้ำใบเดิม — เช็คสถานะสด ๆ จากฐานข้อมูลก่อนเสมอ
-  // ปุ่มในหน้านี้ไม่เคยเช็คมาก่อน กดรัว ๆ หรือเปิดสองแท็บแล้วได้บิลซ้ำได้
+  // จองออเดอร์แบบ atomic — เปลี่ยนเป็น billed เฉพาะเมื่อยังเป็น new เท่านั้น ในคำสั่งเดียว
+  // แบบเดิมเช็คก่อนแล้วค่อยทำ มีช่องว่างหลายวินาทีระหว่างเช็คกับบันทึก
+  // สองแท็บ/สองคน/ระบบอัตโนมัติ ชนกันในช่องนั้นได้บิลซ้ำ (เกิดแล้ว: IV...0022/0023 นาทีเดียวกัน)
+  let claimed=false;
   try{
-    const {data:cur}=await db.from('orders').select('status').eq('id',orderId).single();
-    if(cur&&cur.status!=='new'){
-      toast('ออเดอร์นี้ถูกออกบิลหรือยกเลิกไปแล้ว — รีเฟรชหน้าดูอีกที');
-      await loadOrders();
-      return false;
-    }
-  }catch(e){console.warn('check order status',e);}
+    const {data:cl,error:ce}=await db.from('orders').update({status:'billed'})
+      .eq('id',orderId).eq('status','new').select('id');
+    if(ce)throw ce;
+    claimed=Array.isArray(cl)&&cl.length>0;
+  }catch(e){console.warn('claim order',e);}
+  if(!claimed){
+    toast('ออเดอร์นี้ถูกออกบิลหรือยกเลิกไปแล้ว — รีเฟรชหน้าดูอีกที');
+    await loadOrders();
+    return false;
+  }
   const shipFee=Number(document.getElementById('bs-ship-'+orderId)?.value)||0;
   const discount=Number(document.getElementById('bs-disc-'+orderId)?.value)||0;
   opts=opts||{};   // ไม่ถามตอนออกบิล — ใช้ค่าที่ตั้งไว้ในข้อมูลลูกค้า (เลือกรูปแบบได้ตอนกดปุ่ม PDF)
@@ -3643,7 +3644,7 @@ async function makeBill(orderId,btn,sendLine,opts){
   const sellerMode=opts.sellerMode||o.customers?.bill_seller_mode||'none';
   const grand=Math.max(0,Number(o.total)+shipFee-discount);
   btn.disabled=true;btn.textContent='กำลังออกบิล…';
-  let ok=false;
+  let ok=false,billSaved=false;
   try{
     const billNo=await nextBillNo();
     const result=await drawBill(o,billNo,{shipFee,discount,grand,revision:1,docType,sellerMode});
@@ -3669,7 +3670,7 @@ async function makeBill(orderId,btn,sendLine,opts){
       total:grand,shipping_fee:shipFee,discount:discount,revision:1,doc_type:docType,seller_mode:sellerMode,
       image_url:imageUrl,line_sent:false});
     if(insErr)throw new Error('บันทึกบิลไม่สำเร็จ: '+insErr.message);
-    await db.from('orders').update({status:'billed'}).eq('id',o.id);
+    billSaved=true;   // ผ่านจุดนี้ = มีบิลจริงในระบบแล้ว ห้ามคืนสถานะออเดอร์เด็ดขาด
 
     if(sendLine&&o.customers.line_group_id){
       const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
@@ -3699,6 +3700,11 @@ async function makeBill(orderId,btn,sendLine,opts){
     ok=true;
     if(!opts.auto){await loadOrders(); await loadBills();}
   }catch(e){
+    // พังหลังจองออเดอร์แต่ยังไม่มีบิล → คืนสถานะให้ออกใหม่ได้
+    // ถ้าบิลบันทึกแล้ว (พังขั้นหลังจากนั้น) ห้ามคืน ไม่งั้นออกซ้ำได้อีก
+    if(!billSaved)try{
+      await db.from('orders').update({status:'new'}).eq('id',orderId).eq('status','billed');
+    }catch(_){/* คืนไม่ได้ก็ปล่อย ออเดอร์จะค้าง billed ให้เห็นว่าต้องตามดู */}
     toast(String(e.message||e));
     btn.disabled=false;btn.textContent='🧾 ออกบิล';
   }
@@ -3706,20 +3712,9 @@ async function makeBill(orderId,btn,sendLine,opts){
   return ok;
 }
 
-/* ==================== ออกบิลอัตโนมัติ ==================== */
-/* ทำงานเหมือนกดปุ่ม "ออกบิลเฉย ๆ" ให้ทุกใบที่เข้ามาใหม่
-   - ไม่ส่งเข้ากลุ่มไลน์ของลูกค้า (sendLine=false)
-   - รวบแจ้งกลุ่มสรุปกลางเป็นข้อความเดียวต่อรอบ ด้วย _salesBatch
-   - ไม่ดาวน์โหลด PDF และไม่เปิดแท็บรูป (โหลดทีหลังได้ที่หน้าบัญชี)
-   ข้อจำกัด: บิลถูกวาดด้วย canvas ในเบราว์เซอร์ จึงทำงานเฉพาะตอนเปิดหน้านี้ค้างไว้
-   ความปลอดภัย: ปิดเองทุกครั้งที่รีเฟรชหน้า กันลืมเปิดค้างแล้วบิลไหลออกเงียบ ๆ */
-let autoBillTimer=null, autoBillBusy=false;
-const autoBillFail=new Map();      // order_id -> จำนวนครั้งที่พลาด (พลาดครบ 3 ครั้งแล้วเลิกลอง)
-const AUTOBILL_EVERY=20000;        // เช็คทุก 20 วินาที
-const AUTOBILL_DELAY=15000;        // หน่วงก่อนเริ่มรอบแรกหลังเข้าระบบ
-const AUTOBILL_MAXTRY=3;
-
-/* รายชื่อร้านที่ห้ามออกบิลอัตโนมัติ — เก็บใน settings.autobill_skip คั่นด้วยจุลภาค */
+/* ออกบิลอัตโนมัติ: ย้ายไปทำที่เซิร์ฟเวอร์แล้ว (daily-summary ตอนถึงรอบตัด)
+   จึงไม่ต้องเปิดหน้านี้ค้างไว้อีก · เหลือไว้แค่ตัวจัดการรายชื่อร้านยกเว้น
+   ซึ่งมีผลกับฝั่งเซิร์ฟเวอร์ เพราะอ่านจาก settings.autobill_skip ตัวเดียวกัน */
 function autoBillSkipSet(){
   return new Set(String(appSettings.autobill_skip||'').split(',')
     .map(x=>x.trim().toUpperCase()).filter(Boolean));
@@ -3727,96 +3722,22 @@ function autoBillSkipSet(){
 function renderAutoBillSkip(){
   const b=document.getElementById('autobill-skip-btn');if(!b)return;
   const n=autoBillSkipSet().size;
-  b.textContent='⛔ ยกเว้นร้าน'+(n?' ('+n+')':'');
+  b.textContent='⛔ ยกเว้นร้าน (ออกบิลอัตโนมัติ)'+(n?' · '+n:'');
 }
 async function editAutoBillSkip(){
   const cur=String(appSettings.autobill_skip||'').trim();
-  const v=prompt('รหัสลูกค้าที่ห้ามออกบิลอัตโนมัติ — คั่นด้วยจุลภาค\n'
+  const v=prompt('รหัสลูกค้าที่ระบบจะไม่ออกบิลอัตโนมัติตอนถึงรอบตัด — คั่นด้วยจุลภาค\n'
     +'เช่น  SKG00001,BFF00002\n\n'
     +'เว้นว่าง = ออกบิลให้ทุกร้าน\n'
-    +'(ยกเว้นเฉพาะตัวออโต้ ยังกดออกบิลเองได้ตามปกติ)',cur);
+    +'(ยกเว้นเฉพาะระบบอัตโนมัติ ยังกดออกบิลเองได้ตามปกติ)',cur);
   if(v===null)return;
   const clean=v.split(',').map(x=>x.trim().toUpperCase()).filter(Boolean).join(',');
   const {error}=await db.from('settings').upsert({key:'autobill_skip',value:clean},{onConflict:'key'});
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
   appSettings.autobill_skip=clean;
   renderAutoBillSkip();
-  toast(clean?'ยกเว้นแล้ว '+autoBillSkipSet().size+' ร้าน ✓':'ยกเลิกการยกเว้นทั้งหมดแล้ว');
+  toast(clean?'ยกเว้นแล้ว '+autoBillSkipSet().size+' ร้าน ✓ (มีผลรอบตัดถัดไป)':'ยกเลิกการยกเว้นทั้งหมดแล้ว');
 }
-function autoBillNote(t){
-  const d=document.getElementById('autobill-dot');
-  if(d){d.style.display=t?'':'none';d.textContent=t||'';}
-}
-/* เริ่มทำงานเองหลังเข้าระบบ — ไม่มีสวิตช์เปิด/ปิด
-   หน่วงไว้ก่อนสักครู่แล้วนับถอยหลังให้เห็น เผื่ออยากตั้งร้านยกเว้นหรือปิดแท็บทัน */
-function startAutoBill(){
-  if(autoBillTimer)return;
-  let left=AUTOBILL_DELAY/1000;
-  autoBillNote('— เริ่มใน '+left+' วิ');
-  const cd=setInterval(()=>{
-    left--;
-    if(left>0){autoBillNote('— เริ่มใน '+left+' วิ');return;}
-    clearInterval(cd);
-    autoBillNote('— กำลังเฝ้าดู');
-    autoBillTimer=setInterval(runAutoBill,AUTOBILL_EVERY);
-    runAutoBill();
-  },1000);
-}
-async function runAutoBill(){
-  if(autoBillBusy)return;
-  autoBillBusy=true;
-  try{
-    await loadOrders();                                    // ดึงออเดอร์ล่าสุดก่อนทุกรอบ
-    const skip=autoBillSkipSet();
-    const all=(orders||[]).filter(o=>o.status==='new');
-    const queue=all.filter(o=>!skip.has(String(o.customers?.code||'').toUpperCase())
-      && (autoBillFail.get(o.id)||0) < AUTOBILL_MAXTRY);
-    const skipped=all.length-queue.length;
-    if(!queue.length){
-      autoBillNote(skipped?'— เฝ้าดู (ข้ามร้านยกเว้น '+skipped+')':'— กำลังเฝ้าดู');
-      return;
-    }
-    window._salesBatch=true;                               // รวบสรุปกลุ่มกลางไว้ก่อน
-    let done=0, fail=0, lastErr='';
-    for(let i=0;i<queue.length;i++){
-      const o=queue[i];
-      autoBillNote('— กำลังออกบิล '+(i+1)+'/'+queue.length);
-      let r=false;
-      try{
-        // กันชนกับการกดปุ่มออกบิลเองระหว่างที่รอบนี้กำลังวิ่ง — เช็คสถานะสด ๆ ก่อนทุกใบ
-        const {data:cur}=await db.from('orders').select('status').eq('id',o.id).single();
-        if(cur&&cur.status!=='new'){autoBillFail.set(o.id,AUTOBILL_MAXTRY);continue;}
-        r=await makeBill(o.id,{},false,{auto:true});
-      }
-      catch(e){ lastErr=String(e.message||e); }
-      if(r){done++;autoBillFail.delete(o.id);}
-      else{
-        fail++;
-        const n=(autoBillFail.get(o.id)||0)+1;
-        autoBillFail.set(o.id,n);
-        if(n>=AUTOBILL_MAXTRY)lastErr=(o.order_no||o.id)+' พลาดครบ '+AUTOBILL_MAXTRY+' ครั้ง — หยุดลองแล้ว';
-      }
-    }
-    window._salesBatch=false;
-    try{flushSalesSummary();}catch(e){console.warn('flushSalesSummary',e);}
-    if(done)toast('ออกบิลอัตโนมัติ '+done+' ใบ ✓ ยังไม่ส่งกลุ่มลูกค้า'
-      +(skipped?' · ข้ามร้านยกเว้น '+skipped+' ใบ':''));
-    if(fail)toast('ออกบิลไม่สำเร็จ '+fail+' ใบ'+(lastErr?' — '+lastErr:'')+' (จะลองใหม่รอบหน้า)');
-    await loadOrders(); await loadBills();
-  }catch(e){
-    console.warn('runAutoBill',e);
-    toast('ออกบิลอัตโนมัติสะดุด: '+String(e.message||e));
-  }finally{
-    window._salesBatch=false;
-    autoBillBusy=false;
-    autoBillNote('— กำลังเฝ้าดู');
-  }
-}
-// กันปิดแท็บระหว่างที่ยังออกบิลค้างอยู่
-window.addEventListener('beforeunload',e=>{
-  if(autoBillBusy){e.preventDefault();e.returnValue='';}
-});
-
 /* ==================== สรุปออเดอร์วันนี้เข้าไลน์กลาง ==================== */
 /* ---- รอบตัดบิล: คืนช่วง [start,end) ของรอบที่ครอบเวลา ref ---- */
 function cutoffRange(ref){
@@ -8089,7 +8010,6 @@ async function startApp(){
   await Promise.all([loadOrders(),loadBills()]);          // ตัวที่ใช้ข้อมูลหลักข้างบน
   loadRcvHistory();loadUsers();loadTransfers();loadQuotes();loadSkuCats();loadArAging();
   setRange('month');
-  startAutoBill();                                        // ออกบิลอัตโนมัติ เริ่มเองหลังโหลดข้อมูลครบ
 }
 (async function(){
   initRtimeSelects();
