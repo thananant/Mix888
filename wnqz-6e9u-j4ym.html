@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-A</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-B</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -3845,12 +3845,19 @@ function initCutoffInput(){
 async function saveCutoff(){
   const v=document.getElementById('bill-cutoff').value;
   if(!/^\d{2}:\d{2}$/.test(v)){toast('เลือกเวลาก่อน');return;}
-  const {error}=await db.from('settings').upsert({key:'bill_cutoff',value:v},{onConflict:'key'});
-  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
-  appSettings.bill_cutoff=v;
+  // ตั้งทั้งรอบตัดและตารางส่งสรุปพร้อมกัน — เมื่อก่อนแยกกันแล้วเหลื่อมกันบ่อย
+  const {data,error}=await db.rpc('set_summary_time',{p_time:v});
+  if(error){
+    toast(/function|does not exist|schema cache/i.test(error.message||'')
+      ? 'ยังไม่ได้รัน 08_ตั้งเวลารอบสรุป.sql — รันก่อนแล้วกดใหม่'
+      : 'บันทึกไม่สำเร็จ: '+error.message);
+    return;
+  }
+  appSettings.bill_cutoff=v; delete appSettings.summary_cutoff;
   const r=cutoffRange(new Date());
   const f=d=>d.toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
-  toast('ตั้งเวลาตัดรอบ '+v+' แล้ว ✓ รอบปัจจุบัน: '+f(r.start)+' → '+f(r.end));
+  const warn=data&&data['เตือน']?'\n⚠ '+data['เตือน']:'';
+  toast('ตั้งรอบตัด '+v+' และส่งสรุป '+v+' น. แล้ว ✓ รอบปัจจุบัน: '+f(r.start)+' → '+f(r.end)+warn);
 }
 /* หั่นสรุปเป็นข้อความละไม่เกิน lim ตัวอักษร — ตัดที่ขอบเขตรายออเดอร์ บล็อกที่แตกต่อจะขึ้นหัว (ต่อ) */
 function dsChunks(blocks,lim){
