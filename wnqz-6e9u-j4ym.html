@@ -5930,7 +5930,10 @@ async function saveTransfer(btn){
     // ห้ามปล่อยให้ error จากการส่งไลน์หลุดออกไปข้างนอกเด็ดขาด
     // ไม่งั้นจะขึ้นว่า "บันทึกไม่สำเร็จ" ทั้งที่บันทึกแล้ว แล้วคนกดซ้ำ = ได้ใบโอนซ้ำ สต๊อกเด้งสองรอบ
     let lineErr='';
-    if(appSettings.line_central_group)try{
+    // ส่งเข้ากลุ่มซัพพลายเออร์ (โกดังต้นทางที่ต้องแพ็คของส่งมา) กลุ่มเดียวกับที่ "เรียกของ" ส่ง
+    // ถ้ายังไม่ได้ตั้งกลุ่มนั้นไว้ ค่อยตกไปกลุ่มกลางเหมือนเดิม
+    const tfGid=appSettings.line_supplier_group||appSettings.line_central_group;
+    if(tfGid)try{
       btn.textContent='กำลังสร้างรูป…';
       const wn=id=>whList.find(w=>w.id===id)?.name||id;
       const note=document.getElementById('tf-note').value.trim();
@@ -5954,7 +5957,7 @@ async function saveTransfer(btn){
       btn.textContent='กำลังส่ง LINE…';
       // ไลน์รับได้ครั้งละ 5 ข้อความ — ใบโอนยาว ๆ อาจได้หลายหน้า ต้องแบ่งส่ง
       for(let i=0;i<msgs.length;i+=5){
-        const {error:pe}=await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
+        const {error:pe}=await db.functions.invoke('line-push',{body:{to:tfGid,
           messages:msgs.slice(i,i+5)}});
         if(pe)throw new Error(pe.message||'ส่ง LINE ไม่สำเร็จ');
       }
