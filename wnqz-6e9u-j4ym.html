@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-G</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-I</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -1078,7 +1078,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-p mini" id="ac-issue-sel" onclick="acIssueSelected(this)" style="display:none">🧾 ออกบิลที่เลือก</button>
       <button class="btn-p mini" id="ac-pdf-sel" onclick="acPdfSelected(this)" style="display:none">📄 โหลด PDF ที่เลือก</button>
       <button class="btn-g mini" id="ac-view-sel" onclick="acViewSelected(this)" style="display:none">👁️ ดูบิลที่เลือก (ไฟล์เดียว)</button>
-      <button class="btn-g mini" id="ac-a4-sel" onclick="acMakeA4(this)" style="display:none" title="สร้างรูปหน้า A4 สำหรับส่งเข้าไลน์ (บิลเก่าที่ยังไม่มี)">📐 สร้างหน้า A4</button>
+      <button class="btn-g mini" id="ac-a4-sel" onclick="acMakeA4(this)" style="display:none" title="วาดรูปบิลใหม่ทั้งรูปยาวและหน้า A4 — ใช้กับบิลเก่าที่ยังไม่มีรูป หรือล้างรูปที่มีข้อความแก้ไขค้างอยู่">📐 สร้างรูปบิลใหม่</button>
       <label>ผู้ตรวจ</label><input id="ac-staff" style="width:100px" placeholder="ชื่อ">
       <input type="month" id="ac-month" style="width:140px" title="เดือนสำหรับ Export Excel">
       <button class="btn-g" onclick="exportMonthExcel(this)">📊 Excel รายเดือน</button>
@@ -5092,7 +5092,32 @@ function acSelAllBills(cb){
   document.querySelectorAll('.ac-selb').forEach(x=>x.checked=cb.checked);
   acSelCount();
 }
-/** รวมบิลที่ติ๊กเป็น PDF ไฟล์เดียว (บิลละหน้า เรียงตามลำดับในตาราง) แล้วเปิดดูทันที */
+/** วาดรูปบิลใหม่จากข้อมูลจริง อัปขึ้นสตอเรจ แล้วบันทึกทับใน bills — คืน {imageUrl,pageUrls}
+    ใช้กับบิลที่ระบบออกอัตโนมัติ (ยังไม่มีรูป) และล้างรูปเก่าที่มีข้อความแก้ไขค้าง */
+async function regenBillImages(billId){
+  const {data:bill,error}=await db.from('bills')
+    .select('bill_no,order_id,shipping_fee,discount,total,revision,doc_type,seller_mode').eq('id',billId).single();
+  if(error||!bill)throw new Error('โหลดบิลไม่ได้');
+  const {data:o}=await db.from('orders')
+    .select('*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,bill_seller_mode,ship_shop_name,ship_receiver,ship_phone,ship_address), order_items(qty,price,amount,product_id,products(name,unit,sku,image_url))')
+    .eq('id',bill.order_id).single();
+  if(!o)throw new Error('ไม่พบออเดอร์');
+  const result=await drawBill(o,bill.bill_no,{shipFee:Number(bill.shipping_fee)||0,discount:Number(bill.discount)||0,
+    grand:Number(bill.total),revision:bill.revision||1,docType:bill.doc_type||'บิลเงินสด',
+    sellerMode:bill.seller_mode||'none'});
+  const blob=await new Promise(res=>result.cv.toBlob(res,'image/jpeg',0.9));
+  const path=bill.bill_no+'-'+rndTag(10)+'.jpg';
+  const {error:upErr}=await db.storage.from('bills').upload(path,blob,{contentType:'image/jpeg',upsert:true});
+  if(upErr)throw new Error('อัพรูปไม่สำเร็จ: '+upErr.message);
+  const imageUrl=db.storage.from('bills').getPublicUrl(path).data.publicUrl;
+  const pageUrls=await uploadA4Pages(result,bill.bill_no);
+  if(!pageUrls.length)throw new Error('อัปรูปหน้า A4 ไม่สำเร็จ');
+  const {error:ue}=await db.from('bills').update({image_url:imageUrl,page_urls:pageUrls}).eq('id',billId);
+  if(ue)throw new Error(ue.message);
+  return {imageUrl,pageUrls};
+}
+
+/** รวมบิลที่ติ๊กเป็น PDF ไฟล์เดียว (เรียงตามลำดับในตาราง) แล้วเปิดดูทันที */
 async function acViewSelected(btn){
   const ids=[...document.querySelectorAll('.ac-selb:checked')].map(x=>Number(x.value));
   if(!ids.length){toast('ติ๊กเลือกบิลก่อน');return;}
@@ -5104,28 +5129,43 @@ async function acViewSelected(btn){
     const {jsPDF}=window.jspdf;
     const pdf=new jsPDF({unit:'pt',format:'a4'});
     const pw=pdf.internal.pageSize.getWidth(), ph=pdf.internal.pageSize.getHeight();
-    let added=0;
+    const loadImg=u=>new Promise(res=>{const im=new Image();im.crossOrigin='anonymous';
+      im.onload=()=>res(im);im.onerror=()=>res(null);
+      im.src=u+(u.includes('?')?'&':'?')+'v='+Date.now();});
+    let added=0,billsIn=0;const skipped=[];
     for(let i=0;i<list.length;i++){
-      btn.textContent='กำลังรวม '+(i+1)+'/'+list.length+'…';
       const b=list[i];
-      if(!b.image_url)continue;
-      const img=await new Promise(res=>{
-        const im=new Image();im.crossOrigin='anonymous';
-        im.onload=()=>res(im);im.onerror=()=>res(null);
-        im.src=b.image_url+(b.image_url.includes('?')?'&':'?')+'v='+Date.now();
-      });
-      if(!img)continue;
-      let w=pw,h=pw*img.height/img.width;
-      if(h>ph){h=ph;w=ph*img.width/img.height;}
-      const cv2=document.createElement('canvas');cv2.width=img.width;cv2.height=img.height;
-      const c2=cv2.getContext('2d');c2.fillStyle='#fff';c2.fillRect(0,0,cv2.width,cv2.height);c2.drawImage(img,0,0);
-      if(added)pdf.addPage();
-      pdf.addImage(cv2.toDataURL('image/jpeg',0.9),'JPEG',(pw-w)/2,0,w,h);
-      added++;
+      btn.textContent='กำลังรวม '+(i+1)+'/'+list.length+'…';
+      // ใช้หน้า A4 ของบิลก่อน (คมชัด สัดส่วนพอดีหน้า) — ถ้าไม่มีค่อยตกไปรูปยาว
+      let pages=(Array.isArray(b.page_urls)&&b.page_urls.length)?b.page_urls:null;
+      if(!pages&&!b.image_url){
+        // บิลที่ระบบออกอัตโนมัติยังไม่มีรูป — วาดสดตรงนี้ แล้วบันทึกเก็บให้เลย
+        // ครั้งหน้าเปิดดูหรือส่งไลน์ก็ใช้รูปชุดเดียวกันได้ทันที ไม่ต้องวาดซ้ำ
+        try{
+          btn.textContent='กำลังวาด '+(b.bill_no||'')+'…';
+          const fresh=await regenBillImages(b.id);
+          pages=fresh.pageUrls;b.image_url=fresh.imageUrl;b.page_urls=fresh.pageUrls;
+        }catch(e){console.warn('draw bill',b.bill_no,e);}
+      }
+      if(!pages&&b.image_url)pages=[b.image_url];
+      if(!pages){skipped.push(b.bill_no||('#'+b.id));continue;}
+      let got=0;
+      for(const u of pages){
+        const img=await loadImg(u);
+        if(!img)continue;
+        let w=pw,h=pw*img.height/img.width;
+        if(h>ph){h=ph;w=ph*img.width/img.height;}
+        const cv2=document.createElement('canvas');cv2.width=img.width;cv2.height=img.height;
+        const c2=cv2.getContext('2d');c2.fillStyle='#fff';c2.fillRect(0,0,cv2.width,cv2.height);c2.drawImage(img,0,0);
+        if(added)pdf.addPage();
+        pdf.addImage(cv2.toDataURL('image/jpeg',0.9),'JPEG',(pw-w)/2,0,w,h);
+        added++;got++;
+      }
+      if(got)billsIn++;else skipped.push(b.bill_no||('#'+b.id));
     }
-    if(!added)throw new Error('โหลดรูปบิลไม่ได้สักใบ');
+    if(!added)throw new Error('โหลดรูปบิลไม่ได้สักใบ'+(skipped.length?' ('+skipped.join(', ')+')':''));
     window.open(URL.createObjectURL(pdf.output('blob')),'_blank');
-    toast('รวม '+added+' บิลเป็นไฟล์เดียวแล้ว ✓');
+    toast('รวม '+billsIn+' บิล ('+added+' หน้า) เป็นไฟล์เดียวแล้ว'+(skipped.length?' · ข้ามที่วาดไม่ได้: '+skipped.join(', '):' ✓'));
   }catch(e){toast('รวมบิลไม่สำเร็จ: '+(e.message||e));}
   btn.disabled=false;btn.textContent=t0;acSelCount();
 }
@@ -5139,20 +5179,7 @@ async function acMakeA4(btn){
   for(let i=0;i<ids.length;i++){
     btn.textContent='กำลังสร้าง '+(i+1)+'/'+ids.length+'…';
     try{
-      const {data:bill,error}=await db.from('bills')
-        .select('bill_no,order_id,shipping_fee,discount,total,revision,doc_type,seller_mode,edit_note').eq('id',ids[i]).single();
-      if(error||!bill)throw new Error('โหลดบิลไม่ได้');
-      const {data:o}=await db.from('orders')
-        .select('*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,bill_seller_mode,ship_shop_name,ship_receiver,ship_phone,ship_address), order_items(qty,price,amount,product_id,products(name,unit,sku,image_url))')
-        .eq('id',bill.order_id).single();
-      if(!o)throw new Error('ไม่พบออเดอร์');
-      const result=await drawBill(o,bill.bill_no,{shipFee:Number(bill.shipping_fee)||0,discount:Number(bill.discount)||0,
-        grand:Number(bill.total),revision:bill.revision||1,docType:bill.doc_type||'บิลเงินสด',
-        sellerMode:bill.seller_mode||'none',editNote:bill.edit_note||''});
-      const urls=await uploadA4Pages(result,bill.bill_no);
-      if(!urls.length)throw new Error('อัปรูปไม่สำเร็จ');
-      const {error:ue}=await db.from('bills').update({page_urls:urls}).eq('id',ids[i]);
-      if(ue)throw new Error(ue.message);
+      await regenBillImages(ids[i]);   // วาด+อัป+บันทึกทับ ทั้งรูปยาวและหน้า A4
       ok++;
     }catch(e){fails.push(String(e.message||e));}
     await new Promise(r=>setTimeout(r,250));
