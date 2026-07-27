@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-E</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-F</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -199,6 +199,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <div class="mi" data-page="pricing" onclick="showPage('pricing')"><span class="ic">🏷️</span>จัดสินค้า</div>
         <div class="mi" data-page="shipcalc" onclick="showPage('shipcalc')"><span class="ic">🚚</span>คำนวณค่าส่ง</div>
         <div class="mi" data-page="crm" onclick="showPage('crm')"><span class="ic">📇</span>ลูกค้า CRM</div>
+        <div class="mi" data-page="custhist" onclick="showPage('custhist')"><span class="ic">🧾</span>ประวัติสั่งซื้อ</div>
         <div class="mi" data-page="custmap" onclick="showPage('custmap')"><span class="ic">🗺️</span>แผนที่ลูกค้า</div>
       </div>
     </div>
@@ -281,6 +282,23 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 </div>
 
 <!-- ============ CRM ============ -->
+<div class="page" id="page-custhist">
+  <div class="pagehead"><h2>ประวัติสั่งซื้อรายลูกค้า</h2><span class="date" id="ch-sub">สั่งไปกี่ออเดอร์ · สั่งอะไรบ้าง</span></div>
+  <div style="display:grid;grid-template-columns:340px 1fr;gap:14px;align-items:start">
+    <div class="card" style="position:sticky;top:12px">
+      <input id="ch-q" placeholder="ค้นหาชื่อร้าน / รหัส…" oninput="chRenderList()" style="width:100%;margin-bottom:8px">
+      <select id="ch-sort" onchange="chRenderList()" style="width:100%;margin-bottom:8px">
+        <option value="total">เรียงตามยอดซื้อรวม</option>
+        <option value="orders">เรียงตามจำนวนออเดอร์</option>
+        <option value="last">เรียงตามสั่งล่าสุด</option>
+        <option value="name">เรียงตามชื่อ</option>
+      </select>
+      <div id="ch-list" style="max-height:70vh;overflow-y:auto"></div>
+    </div>
+    <div class="card" id="ch-detail"><div class="empty">เลือกลูกค้าจากรายการซ้ายมือ</div></div>
+  </div>
+</div>
+
 <div class="page" id="page-crm">
   <div class="pagehead"><h2>ลูกค้า CRM</h2><span class="date">ให้เซลล์ตามลูกค้าเก่ากลับมาซื้อซ้ำ</span></div>
   <div class="card">
@@ -1443,6 +1461,7 @@ function showPage(p){
   document.getElementById('page-'+p).classList.add('active');
   if(p==='dashboard') loadDashboard();
   if(p==='crm') loadCRM();
+  if(p==='custhist') loadCustHist();
   if(p==='custmap'){
     loadCustMap();
     if(!window._cmAutoDone){            // หาพิกัดอัตโนมัติครั้งแรกที่เข้าหน้านี้
@@ -3739,6 +3758,116 @@ async function editAutoBillSkip(){
   renderAutoBillSkip();
   toast(clean?'ยกเว้นแล้ว '+autoBillSkipSet().size+' ร้าน ✓ (มีผลรอบตัดถัดไป)':'ยกเลิกการยกเว้นทั้งหมดแล้ว');
 }
+/* ==================== ประวัติสั่งซื้อรายลูกค้า ==================== */
+/* สรุปจากตาราง orders ของระบบใหม่ (ตัดใบยกเลิก) — ประวัติจากโปรแกรมเก่า
+   ยังไม่รวม เพราะชื่อลูกค้าเก่ายังไม่ได้จับคู่กับ customer_id ในระบบนี้ */
+let chAgg=null, chSelId=null;
+async function loadCustHist(){
+  const box=document.getElementById('ch-list');
+  if(!chAgg)box.innerHTML='<div class="empty">กำลังโหลด…</div>';
+  // ดึงเป็นหน้า ๆ กันชนเพดาน 1000 แถวของ PostgREST — ออเดอร์โตทุกวัน เดี๋ยวก็เกิน
+  const rows=[];const STEP=1000;
+  for(let from=0;;from+=STEP){
+    const {data,error}=await db.from('orders')
+      .select('id,order_no,total,created_at,customer_id')
+      .neq('status','cancelled')
+      .order('created_at',{ascending:false})
+      .range(from,from+STEP-1);
+    if(error){box.innerHTML='<div class="empty">โหลดไม่ได้: '+esc(error.message)+'</div>';return;}
+    rows.push(...(data||[]));
+    if(!data||data.length<STEP)break;
+  }
+  const m=new Map();
+  rows.forEach(o=>{
+    if(!o.customer_id)return;
+    let a=m.get(o.customer_id);
+    if(!a){a={orders:0,total:0,last:null,first:null};m.set(o.customer_id,a);}
+    a.orders++;a.total+=Number(o.total)||0;
+    const t=o.created_at;
+    if(!a.last||t>a.last)a.last=t;
+    if(!a.first||t<a.first)a.first=t;
+  });
+  chAgg=m;
+  document.getElementById('ch-sub').textContent=
+    'ลูกค้าที่เคยสั่ง '+m.size+' ราย · '+fmt0(rows.length)+' ออเดอร์ · ยอดรวม ฿'+fmt0(rows.reduce((s,o)=>s+(Number(o.total)||0),0));
+  chRenderList();
+  if(chSelId)chShow(chSelId);
+}
+function chRenderList(){
+  if(!chAgg)return;
+  const q=(document.getElementById('ch-q').value||'').toLowerCase();
+  const sort=document.getElementById('ch-sort').value;
+  const list=[...chAgg.entries()].map(([id,a])=>{
+    const c=customers.find(x=>x.id===id);
+    return {id,a,c,label:c?(c.code+' · '+c.name+(c.branch_name?' '+c.branch_name:'')):('#'+id)};
+  }).filter(x=>!q||x.label.toLowerCase().includes(q));
+  list.sort((x,y)=>
+    sort==='orders'?y.a.orders-x.a.orders:
+    sort==='last'  ?String(y.a.last).localeCompare(String(x.a.last)):
+    sort==='name'  ?x.label.localeCompare(y.label,'th'):
+                    y.a.total-x.a.total);
+  document.getElementById('ch-list').innerHTML=list.length?list.map(x=>{
+    const d=x.a.last?new Date(x.a.last).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit'}):'-';
+    return `<div onclick="chShow(${x.id})" style="padding:9px 10px;border-radius:9px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center;${x.id===chSelId?'background:#fbeceb':'border-bottom:1px solid var(--line,#eee)'}">
+      <div style="min-width:0"><div style="font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.label)}</div>
+        <div style="font-size:12px;color:var(--muted)">${x.a.orders} ออเดอร์ · ล่าสุด ${d}</div></div>
+      <div style="font-weight:700;font-size:13px;white-space:nowrap">฿${fmt0(x.a.total)}</div>
+    </div>`;
+  }).join(''):'<div class="empty">ไม่พบลูกค้า</div>';
+}
+async function chShow(cid){
+  chSelId=cid;chRenderList();
+  const el=document.getElementById('ch-detail');
+  el.innerHTML='<div class="empty">กำลังโหลด…</div>';
+  const c=customers.find(x=>x.id===cid)||{};
+  const {data:ords,error}=await db.from('orders')
+    .select('id,order_no,total,created_at,status,order_items(qty,price,amount,products(name,unit))')
+    .eq('customer_id',cid).neq('status','cancelled')
+    .order('created_at',{ascending:false}).limit(400);
+  if(error){el.innerHTML='<div class="empty">โหลดไม่ได้: '+esc(error.message)+'</div>';return;}
+  const os=ords||[];
+  const total=os.reduce((s,o)=>s+(Number(o.total)||0),0);
+  // รวมสินค้า: ตัวไหนสั่งกี่ครั้ง รวมกี่หน่วย ยอดเท่าไหร่
+  const prod=new Map();
+  os.forEach(o=>(o.order_items||[]).forEach(it=>{
+    const k=it.products?.name||'?';
+    let p=prod.get(k);
+    if(!p){p={qty:0,times:0,amt:0,unit:it.products?.unit||''};prod.set(k,p);}
+    p.qty+=Number(it.qty)||0;p.times++;p.amt+=Number(it.amount)||0;
+  }));
+  const top=[...prod.entries()].sort((a,b)=>b[1].amt-a[1].amt);
+  const first=os.length?os[os.length-1].created_at:null;
+  const days=first?Math.max(1,Math.round((Date.now()-new Date(first))/86400000)):1;
+  const perMonth=os.length/(days/30);
+  const fd=t=>new Date(t).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit'});
+  el.innerHTML=`
+    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:baseline">
+      <h3 style="margin:0">${esc(c.code||'')} · ${esc(c.name||('#'+cid))}${c.branch_name?' <span style="font-weight:400;color:var(--muted)">'+esc(c.branch_name)+'</span>':''}</h3>
+      <span style="font-size:12.5px;color:var(--muted)">${c.sale_name?'เซลล์ '+esc(c.sale_name)+' · ':''}เริ่มสั่ง ${first?fd(first):'-'}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0">
+      ${[[os.length+' ออเดอร์','ทั้งหมด'],['฿'+fmt0(total),'ยอดซื้อรวม'],['฿'+fmt0(os.length?total/os.length:0),'เฉลี่ย/ออเดอร์'],[perMonth.toFixed(1)+'/เดือน','ความถี่การสั่ง']]
+        .map(x=>`<div style="background:var(--bg,#faf7f3);border-radius:10px;padding:10px 12px;text-align:center"><div style="font-weight:700;font-size:16px">${x[0]}</div><div style="font-size:11.5px;color:var(--muted)">${x[1]}</div></div>`).join('')}
+    </div>
+    <h3 class="ct" style="margin-top:4px">🏆 สินค้าที่สั่ง (${prod.size} รายการ)</h3>
+    <div style="overflow-x:auto;max-height:34vh;overflow-y:auto"><table>
+      <thead><tr><th>สินค้า</th><th class="num">สั่งกี่ครั้ง</th><th class="num">รวมจำนวน</th><th class="num">ยอดรวม (฿)</th></tr></thead>
+      <tbody>${top.map(([n,p])=>`<tr><td>${esc(n)}</td><td class="num">${p.times}</td><td class="num">${fmt0(p.qty)} ${esc(p.unit)}</td><td class="num">${fmt0(p.amt)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">ไม่มีข้อมูล</td></tr>'}</tbody>
+    </table></div>
+    <h3 class="ct" style="margin-top:14px">🧾 ออเดอร์ทั้งหมด (ใหม่→เก่า${os.length===400?' · แสดง 400 ล่าสุด':''})</h3>
+    <div>${os.map(o=>`
+      <details style="border-bottom:1px solid var(--line,#eee);padding:6px 2px">
+        <summary style="cursor:pointer;display:flex;justify-content:space-between;gap:10px;list-style:none">
+          <span><b>${esc(o.order_no)}</b> <span style="color:var(--muted);font-size:12.5px">· ${fd(o.created_at)}</span></span>
+          <span style="font-weight:700">฿${fmt(o.total)}</span>
+        </summary>
+        <div style="padding:6px 10px 4px;font-size:13px;color:#3a3430">
+          ${(o.order_items||[]).map(it=>`• ${esc(it.products?.name||'?')} × ${fmt0(it.qty)} ${esc(it.products?.unit||'')} = ฿${fmt(it.amount)}`).join('<br>')||'—'}
+        </div>
+      </details>`).join('')||'<div class="empty">ยังไม่มีออเดอร์</div>'}
+    </div>`;
+}
+
 /* ==================== สรุปออเดอร์วันนี้เข้าไลน์กลาง ==================== */
 /* ---- รอบตัดบิล: คืนช่วง [start,end) ของรอบที่ครอบเวลา ref ---- */
 function cutoffRange(ref){
