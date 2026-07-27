@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-F</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-G</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -1349,7 +1349,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div style="display:flex;gap:14px;margin-top:14px;flex-wrap:wrap;align-items:flex-end">
       <div><label>ค่าขนส่ง (฿)</label><input id="eb-ship" type="number" step="0.01" min="0" class="num" style="width:110px" oninput="ebTotals()"></div>
       <div><label>ส่วนลด (฿)</label><input id="eb-disc" type="number" step="0.01" min="0" class="num" style="width:110px" oninput="ebTotals()"></div>
-      <div style="flex:1;min-width:220px"><label>เหตุผลที่แก้บิล <span style="color:#c0201f">*</span></label><input id="eb-note" placeholder="เช่น ลูกค้าเพิ่มของ / คีย์จำนวนผิด / เปลี่ยนราคา" style="width:100%"></div>
+      <div style="flex:1;min-width:220px"><label>เหตุผลที่แก้บิล <span style="color:var(--muted);font-weight:400">(บันทึกภายใน — ไม่แสดงบนบิลและไม่ส่งให้ลูกค้า)</span></label><input id="eb-note" placeholder="เช่น ลูกค้าเพิ่มของ / คีย์จำนวนผิด / เปลี่ยนราคา" style="width:100%"></div>
       <div style="margin-left:auto;text-align:right">
         <div style="font-size:13px;color:var(--muted)">รวมสินค้า ฿<span id="eb-sub">0</span></div>
         <div style="font-weight:700;font-size:18px">ยอดเรียกเก็บ ฿<span id="eb-grand">0</span></div>
@@ -3424,13 +3424,7 @@ async function drawBill(o,billNo,extra){
   });
   x.textAlign='left';
 
-  if(extra.editNote){
-    x.textAlign='right';
-    x.fillStyle='#c0201f';x.font='700 20px "IBM Plex Sans Thai"';
-    x.fillText('🔴 แก้ไข: '+String(extra.editNote).slice(0,60),R,y+124);
-    x.fillStyle='#555';x.font='400 18px "IBM Plex Sans Thai"';
-  }
-  x.textAlign='left';
+  // เหตุผลการแก้บิลเก็บใน edit_note เป็นบันทึกภายในเท่านั้น — ไม่วาดลงบนบิลอีก (ลูกค้าไม่ต้องเห็น)
 
   return {cv, contentH:(y+120), cutYs, headBand, tableEndPx};
 }
@@ -6446,7 +6440,6 @@ async function saveEditBill(btn){
   const itemsChanged=ebState.removed.length>0
     ||ebState.items.some(it=>!it.id||it.qty!==it.orig_qty||it.price!==(it.orig_price??it.price));
   const feesOnlyEdit=!itemsChanged;
-  if(!editNote&&!feesOnlyEdit){toast('กรอกเหตุผลที่แก้บิลก่อน — จะขึ้นในบิลและสรุปออเดอร์');document.getElementById('eb-note').focus();return;}
   btn.disabled=true;btn.textContent='กำลังบันทึก…';
   try{
     const b=ebState.bill,o=ebState.order;
@@ -6514,7 +6507,7 @@ async function saveEditBill(btn){
     if(o2.customers?.line_group_id&&confirm('ส่งบิลฉบับแก้ไข (v.'+newRev+') เข้ากลุ่ม LINE ลูกค้าเลยไหม?')){
       await db.functions.invoke('line-push',{body:{to:o2.customers.line_group_id,messages:[
         {type:'image',originalContentUrl:imageUrl,previewImageUrl:imageUrl},
-        {type:'text',text:shopTag(o2.customers)+'🧾 บิลเลขที่ '+b.bill_no+' (แก้ไขครั้งที่ '+newRev+')'+(editNote?'\n🔴 เหตุผล: '+editNote:'')
+        {type:'text',text:shopTag(o2.customers)+'🧾 บิลเลขที่ '+b.bill_no+' (แก้ไขครั้งที่ '+newRev+')'
           +(ship?'\nค่าขนส่ง ฿'+fmt(ship):'')+(disc?'\nส่วนลด -฿'+fmt(disc):'')
           +'\nยอดรวม ฿'+fmt(grand)+'\nขออภัยในความไม่สะดวกครับ 🙏'}]}});
     }
