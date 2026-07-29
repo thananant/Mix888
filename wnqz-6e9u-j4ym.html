@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-J</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-K</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -3672,19 +3672,23 @@ async function makeBill(orderId,btn,sendLine,opts){
     const imageUrl=pub.publicUrl;
     const pageUrls=await uploadA4Pages(result,billNo);   // หน้า A4 สำหรับส่งเข้าไลน์ตอนสรุป
 
-    // สร้าง PDF แล้วดาวน์โหลดให้ทันที
-    // โหมดอัตโนมัติข้ามขั้นนี้ — เบราว์เซอร์บล็อกการดาวน์โหลดหลายไฟล์รวดโดยไม่มีคนกด
-    if(!opts.auto)try{
-      const pdf=await billToPDF(result,billNo);
-      pdf.save(billNo+'.pdf');
-    }catch(e){console.warn('PDF error',e);}
-
+    // ⚠ ลำดับสำคัญมาก: บันทึกบิลลงฐานข้อมูล "ก่อน" เปิด PDF เสมอ
+    // บน iPhone/iPad การเปิด PDF จะทับแท็บเดิมแล้วฆ่าโค้ดที่เหลือทิ้งกลางทาง
+    // ของเดิมเปิด PDF ก่อนบันทึก → ออเดอร์ถูกจองแต่ไม่มีบิล หายจากทุกหน้า (เกิดจริงบน iPhone แล้ว)
     const {error:insErr}=await db.from('bills').insert({
       bill_no:billNo,order_id:o.id,customer_id:o.customers.id,page_urls:pageUrls,
       total:grand,shipping_fee:shipFee,discount:discount,revision:1,doc_type:docType,seller_mode:sellerMode,
       image_url:imageUrl,line_sent:false});
     if(insErr)throw new Error('บันทึกบิลไม่สำเร็จ: '+insErr.message);
     billSaved=true;   // ผ่านจุดนี้ = มีบิลจริงในระบบแล้ว ห้ามคืนสถานะออเดอร์เด็ดขาด
+
+    // ดาวน์โหลด PDF ทันทีเฉพาะเดสก์ท็อป — iPhone/iPad เปิด PDF ทับแท็บ ขั้นถัดไปตายหมด
+    // มือถือไปกดปุ่ม PDF ในหน้าบัญชีแทน (ข้อมูลครบเหมือนกัน)
+    const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+    if(!opts.auto&&!isIOS)try{
+      const pdf=await billToPDF(result,billNo);
+      pdf.save(billNo+'.pdf');
+    }catch(e){console.warn('PDF error',e);}
 
     if(sendLine&&o.customers.line_group_id){
       const {data:res,error:fnErr}=await db.functions.invoke('line-push',{body:{
@@ -4346,6 +4350,13 @@ async function salesSend(){
 }
 // ปิดหน้าจอ/สลับแท็บ ระหว่างรอ → ส่งทันที กันข้อความตกหล่น
 window.addEventListener('beforeunload',()=>{if(window._salesPend.length)salesSend();});
+// iPhone/iPad กดย้อนกลับจากหน้าดู PDF — เบราว์เซอร์คืนหน้าเดิมจากแคช (ข้อมูลเก่าค้าง)
+// โหลดรายการใหม่ให้ทันที จะได้เห็นบิล/ออเดอร์ตรงกับความจริงเสมอ
+window.addEventListener('pageshow',e=>{
+  if(e.persisted&&typeof currentUser!=='undefined'&&currentUser){
+    try{loadOrders();loadBills();}catch(_){/**/}
+  }
+});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&window._salesPend.length)salesSend();});
 
 /** ย่อชื่อขนส่งให้เหมือนสรุปตี 2 (Lalamove → Lala) */
