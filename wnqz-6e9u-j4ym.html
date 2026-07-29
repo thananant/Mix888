@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-M</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-N</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -4062,16 +4062,25 @@ async function previewSummary(btn){
 }
 
 /* ---- ประวัติการส่งสรุป ---- */
-function renderSumLog(rows){
+function renderSumLog(rows,imgMap){
+  imgMap=imgMap||{};
   if(!rows||!rows.length)return '<div style="padding:12px;color:var(--muted)">ยังไม่มีประวัติการส่งสรุป</div>';
   const f=d=>new Date(d).toLocaleString('th-TH',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
   return rows.map(r=>{
-    const items=(r.detail||[]).map(d=>'<tr><td>'+esc(d.order_no||'-')+'</td><td>'+esc(d.bill_no||'-')+'</td><td>'+esc(d.customer||'-')+'</td><td>'+esc(d.method||'')+'</td><td style="text-align:right">'+fmt(d.total||0)+'</td></tr>').join('');
+    const items=(r.detail||[]).map(d=>{
+      // เช็คจากสถานะรูปของบิล ณ ตอนนี้ — บิลที่เพิ่งกด 📐 วาดทีหลังจะขึ้นว่ามีรูปแล้ว
+      const im=imgMap[d.bill_no];
+      const pic=!d.bill_no?'-'
+        :im===undefined?'-'
+        :im>0?'🖼️ '+im+' หน้า'
+        :'<span style="color:#c0201f">❌ ไม่มีรูป</span> <span style="color:var(--muted)">— ติ๊กบิลนี้ในหน้าบัญชีแล้วกด 📐 สร้างได้</span>';
+      return '<tr><td>'+esc(d.order_no||'-')+'</td><td>'+esc(d.bill_no||'-')+'</td><td>'+esc(d.customer||'-')+'</td><td>'+esc(d.method||'')+'</td><td>'+pic+'</td><td style="text-align:right">'+fmt(d.total||0)+'</td></tr>';
+    }).join('');
     return '<details style="border:1px solid var(--line,#eee);border-radius:10px;padding:8px 12px;margin-bottom:8px;background:#fff">'
       +'<summary style="cursor:pointer;font-size:13.5px">🕘 ส่งเมื่อ '+f(r.created_at)+(r.sent_by?' โดย '+esc(r.sent_by):'')
       +' · '+(r.mode==='custom'?'กำหนดเอง':'รอบตัดอัตโนมัติ')+' '+f(r.range_start)+' → '+f(r.range_end)
       +' · <b>'+r.order_count+' ออเดอร์</b> / '+r.msg_count+' ข้อความ</summary>'
-      +'<div style="overflow-x:auto;margin-top:8px"><table style="width:100%;font-size:12.5px"><tr><th style="text-align:left">ออเดอร์</th><th style="text-align:left">บิล</th><th style="text-align:left">ร้าน</th><th style="text-align:left">จัดส่ง</th><th style="text-align:right">ยอด</th></tr>'+items+'</table></div></details>';
+      +'<div style="overflow-x:auto;margin-top:8px"><table style="width:100%;font-size:12.5px"><tr><th style="text-align:left">ออเดอร์</th><th style="text-align:left">บิล</th><th style="text-align:left">ร้าน</th><th style="text-align:left">จัดส่ง</th><th style="text-align:left">รูปบิล (ปัจจุบัน)</th><th style="text-align:right">ยอด</th></tr>'+items+'</table></div></details>';
   }).join('');
 }
 async function loadSumLog(){
@@ -4079,7 +4088,14 @@ async function loadSumLog(){
   box.innerHTML='<div style="padding:12px;color:var(--muted)">กำลังโหลด…</div>';
   const {data,error}=await db.from('summary_log').select('*').order('created_at',{ascending:false}).limit(30);
   if(error){box.innerHTML='<div style="padding:12px;color:#c0201f">โหลดประวัติไม่ได้: '+esc(error.message)+' (รัน summary_log.sql หรือยัง?)</div>';return;}
-  box.innerHTML=renderSumLog(data);
+  // เช็คว่าบิลแต่ละใบมีรูปไหม (สถานะปัจจุบัน) — ถามเป็นชุดเดียว
+  const nos=[...new Set((data||[]).flatMap(r=>(r.detail||[]).map(d=>d.bill_no).filter(Boolean)))];
+  const imgMap={};
+  for(let i=0;i<nos.length;i+=150){
+    const {data:bs}=await db.from('bills').select('bill_no,image_url,page_urls').in('bill_no',nos.slice(i,i+150));
+    (bs||[]).forEach(b=>{imgMap[b.bill_no]=(Array.isArray(b.page_urls)&&b.page_urls.length)||(b.image_url?1:0);});
+  }
+  box.innerHTML=renderSumLog(data,imgMap);
 }
 function toggleSumLog(){
   const box=document.getElementById('sumlog-box');
