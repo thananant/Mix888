@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-K</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-L</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -3678,7 +3678,8 @@ async function makeBill(orderId,btn,sendLine,opts){
     const {error:insErr}=await db.from('bills').insert({
       bill_no:billNo,order_id:o.id,customer_id:o.customers.id,page_urls:pageUrls,
       total:grand,shipping_fee:shipFee,discount:discount,revision:1,doc_type:docType,seller_mode:sellerMode,
-      image_url:imageUrl,line_sent:false});
+      image_url:imageUrl,line_sent:false,
+      created_by:currentUser?.display_name||currentUser?.username||null});
     if(insErr)throw new Error('บันทึกบิลไม่สำเร็จ: '+insErr.message);
     billSaved=true;   // ผ่านจุดนี้ = มีบิลจริงในระบบแล้ว ห้ามคืนสถานะออเดอร์เด็ดขาด
 
@@ -4541,7 +4542,7 @@ function renderAccount(){
       <td><input type="checkbox" class="ac-selb" value="${b.id}" onchange="acSelCount()" style="width:17px;height:17px;vertical-align:-3px;margin-right:4px">${opin?'📌 ':''}<b>${esc(b.bill_no)}</b>${(b.revision||1)>1?' <span class="tag tag-low">v.'+b.revision+'</span>':''}${b.orders?.order_no?'<div style="font-size:12px;color:var(--muted)">'+esc(b.orders.order_no)+'</div>':''}${onote?'<div style="font-size:12px;color:#a06b00;background:#fff3d6;border-radius:6px;padding:2px 6px;margin-top:3px;max-width:200px">📝 '+esc(onote)+'</div>':''}</td>
       <td>${esc(b.customers?.code)} · ${esc(b.customers?.name)}</td>
       <td class="num"><b>${fmt(b.total)}</b></td>
-      <td style="font-size:13px;color:var(--muted)">${d}${b.orders?.created_by?'<div style="font-size:11.5px">🙋 '+esc(b.orders.created_by)+'</div>':''}</td>
+      <td style="font-size:13px;color:var(--muted)">${d}${b.created_by?'<div style="font-size:11.5px" title="คนออกบิล">✍️ '+esc(b.created_by)+'</div>':''}${b.orders?.created_by?'<div style="font-size:11.5px" title="คนสั่งออเดอร์">🙋 '+esc(b.orders.created_by)+'</div>':''}</td>
       <td>${b.line_sent?'<span class="tag tag-ok">ส่งแล้ว</span>':'<span class="tag tag-low">ยังไม่ส่ง</span>'}</td>
       <td>${shipTag(ss)}</td>
       <td>${paid?'<span class="tag tag-ok">✓ จ่ายแล้ว'+(b.pay_method==='cash'?' 💵':'')+'</span>'
