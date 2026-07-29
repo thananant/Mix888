@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-L</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-M</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -1125,7 +1125,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-p" onclick="addHoliday(this)">+ เพิ่มวันหยุด</button>
     </div>
     <div id="hol-list" style="margin-top:10px"></div>
-    <p class="hint">วันอาทิตย์ปิดอัตโนมัติอยู่แล้ว ไม่ต้องใส่ · ออเดอร์ในวันหยุดจะยกไปรวมสรุปตี 2 ของวันเปิดถัดไปให้เอง</p>
+    <p class="hint">วันอาทิตย์ปิดอัตโนมัติอยู่แล้ว ไม่ต้องใส่ · ออเดอร์ในวันหยุดจะยกไปรวมในสรุปรอบตัดของวันเปิดถัดไปให้เอง</p>
     <h3 class="ct" style="margin-top:18px">💾 สำรองข้อมูล</h3>
     <div class="row" style="align-items:center">
       <button class="btn-p" id="bk-btn" onclick="downloadBackup(this)">⬇️ ดาวน์โหลดไฟล์สำรอง</button>
@@ -4286,7 +4286,7 @@ async function salesSend(){
   if(!gid)return;
   const want=new Set(q.map(b=>b.billNo));
   try{
-    // ดึงบิลทั้งรอบ เพื่อให้เลขลำดับตรงกับสรุปตี 2 (แยกตามขนส่ง เรียงตามเวลา)
+    // ดึงบิลทั้งรอบ เพื่อให้เลขลำดับตรงกับสรุปตอนรอบตัด (แยกตามขนส่ง เรียงตามเวลา)
     const r=cutoffRange(new Date());
     const {data:all}=await db.from('bills')
       .select(`bill_no,created_at,ship_status,revision,edit_note,
@@ -4360,7 +4360,7 @@ window.addEventListener('pageshow',e=>{
 });
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&window._salesPend.length)salesSend();});
 
-/** ย่อชื่อขนส่งให้เหมือนสรุปตี 2 (Lalamove → Lala) */
+/** ย่อชื่อขนส่งให้เหมือนสรุปตอนรอบตัด (Lalamove → Lala) */
 function shortMethod(m){
   const v=String(m||'อื่นๆ');
   if(/lalamove/i.test(v))return 'Lala';
@@ -5185,7 +5185,8 @@ async function acViewSelected(btn){
 async function acMakeA4(btn){
   const ids=[...document.querySelectorAll('.ac-selb:checked')].map(x=>Number(x.value));
   if(!ids.length){toast('ติ๊กเลือกบิลก่อน');return;}
-  if(!confirm('สร้างรูปหน้า A4 ให้ '+ids.length+' บิล\n\nใช้สำหรับส่งเข้าไลน์ตอนสรุปตี 2 — บิลเดิมและ PDF ไม่เปลี่ยนแปลง'))return;
+  const cutT=(appSettings.bill_cutoff||'').trim();
+  if(!confirm('สร้างรูปหน้า A4 ให้ '+ids.length+' บิล\n\nใช้สำหรับส่งเข้าไลน์ตอนสรุปรอบตัด'+(cutT?' '+cutT+' น.':'')+' — บิลเดิมและ PDF ไม่เปลี่ยนแปลง'))return;
   const t0=btn.textContent;btn.disabled=true;
   let ok=0;const fails=[];
   for(let i=0;i<ids.length;i++){
