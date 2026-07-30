@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-N</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-O</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -4571,7 +4571,7 @@ function renderAccount(){
       <td style="white-space:nowrap">
         <button class="btn-g mini" onclick="togglePin(${b.order_id},${(b.orders&&b.orders.pinned)?'true':'false'})" title="ปักหมุดขึ้นบนสุด">📌</button>
         <button class="btn-g mini" onclick="editOpNote(${b.order_id})" title="โน้ตกันลืม">📝</button>
-        <button class="btn-g mini" onclick="window.open('${b.image_url}','_blank')">ดูบิล</button>
+        <button class="btn-g mini" onclick="viewBill(${b.id})">ดูบิล</button>
         <button class="btn-g mini" onclick="downloadBillPDF(${b.id},this)">PDF</button>
         <button class="btn-g mini" onclick="makeLabel(${b.id},this)" title="ใบปะหน้า 100×150 มม.">🏷️ ปะหน้า</button>
         ${ss!=='cancelled'?`<button class="btn-s mini" onclick="openEditBill(${b.id})">✏️ แก้บิล</button>`:''}
@@ -5120,6 +5120,20 @@ function acSelAllBills(cb){
   document.querySelectorAll('.ac-selb').forEach(x=>x.checked=cb.checked);
   acSelCount();
 }
+/** เปิดดูรูปบิล — บิลที่ระบบออกอัตโนมัติอาจยังไม่มีรูป (image_url = null)
+    แบบเดิม window.open(null) กลายเป็นลิงก์ /null แล้วขึ้น 404 — วาดสดให้แทน */
+async function viewBill(id){
+  const b=bills.find(x=>x.id===id);
+  if(b&&b.image_url){window.open(b.image_url,'_blank');return;}
+  toast('บิลนี้ยังไม่มีรูป — กำลังวาดให้ รอสักครู่…');
+  try{
+    const fresh=await regenBillImages(id);
+    if(b){b.image_url=fresh.imageUrl;b.page_urls=fresh.pageUrls;}
+    const w=window.open(fresh.imageUrl,'_blank');
+    if(!w)toast('วาดเสร็จแล้ว ✓ กดดูบิลอีกครั้งเพื่อเปิด (เบราว์เซอร์กันป๊อปอัป)');
+  }catch(e){toast('วาดรูปบิลไม่สำเร็จ: '+(e.message||e));}
+}
+
 /** วาดรูปบิลใหม่จากข้อมูลจริง อัปขึ้นสตอเรจ แล้วบันทึกทับใน bills — คืน {imageUrl,pageUrls}
     ใช้กับบิลที่ระบบออกอัตโนมัติ (ยังไม่มีรูป) และล้างรูปเก่าที่มีข้อความแก้ไขค้าง */
 async function regenBillImages(billId){
