@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-P</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-Q</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -4645,6 +4645,15 @@ async function resendBill(id,btn){
   if(!confirm('ส่งบิล '+b.bill_no+' (฿'+fmt(b.total)+') เข้ากลุ่ม LINE ของ "'+b.customers.name+'"'
     +(b.line_sent?'\n\n⚠️ บิลนี้เคยส่งแล้ว — จะส่งซ้ำอีกครั้ง':'')+' ?'))return;
   btn.disabled=true;
+  // บิลที่ระบบออกอัตโนมัติอาจยังไม่มีรูป — ส่งลิงก์ว่างไปไลน์จะโดนตีกลับ 400
+  // วาดสดตรงนี้ก่อน แล้วค่อยส่ง (บันทึกรูปเก็บเข้าบิลด้วย)
+  if(!b.image_url){
+    toast('บิลนี้ยังไม่มีรูป — กำลังวาดก่อนส่ง…');
+    try{
+      const fresh=await regenBillImages(b.id);
+      b.image_url=fresh.imageUrl;b.page_urls=fresh.pageUrls;
+    }catch(e){toast('วาดรูปบิลไม่สำเร็จ: '+(e.message||e));btn.disabled=false;return;}
+  }
   const {data:res,error}=await db.functions.invoke('line-push',{body:{
     to:b.customers.line_group_id,
     messages:[
