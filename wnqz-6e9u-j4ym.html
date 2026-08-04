@@ -148,7 +148,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
-  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-S</div></small></div>
+  <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 04/08-A</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
 
@@ -5726,17 +5726,33 @@ async function exportMonthExcel(btn){
     const from=new Date(y,m-1,1),to=new Date(y,m,1);
     const thM=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'][m-1];
     const title=thM+'/'+(y+543);
-    const {data:bs,error}=await db.from('bills')
-      .select('*, customers(code,name,sale_name,delivery_method), orders(id,order_no)')
-      .gte('created_at',from.toISOString()).lt('created_at',to.toISOString())
-      .neq('ship_status','cancelled').order('created_at');
-    if(error)throw new Error(error.message);
+    // ดึงบิลทีละหน้าให้ครบ — PostgREST ตัดที่ 1,000 แถว เดือนที่บิลเยอะจะขาดท้ายเดือนแบบเงียบ ๆ
+    const bs=[];
+    for(let pg0=0;;pg0+=1000){
+      const {data:pg,error}=await db.from('bills')
+        .select('*, customers(code,name,sale_name,delivery_method), orders(id,order_no)')
+        .gte('created_at',from.toISOString()).lt('created_at',to.toISOString())
+        .neq('ship_status','cancelled').order('created_at').range(pg0,pg0+999);
+      if(error)throw new Error(error.message);
+      bs.push(...(pg||[]));
+      if(!pg||pg.length<1000)break;
+    }
     if(!bs.length){toast('เดือนนี้ไม่มีบิล');btn.disabled=false;btn.textContent='📊 Excel รายเดือน';return;}
     const orderIds=bs.map(b=>b.order_id).filter(Boolean);
-    const {data:its,error:e2}=await db.from('order_items')
-      .select('order_id,qty,price,amount,cost,products(sku,name,unit,last_cost)')
-      .in('order_id',orderIds);
-    if(e2)throw new Error(e2.message);
+    // รายการสินค้า: แบ่งถามทีละ 100 ออเดอร์ + ไล่หน้าให้ครบ — เดิมยิงทีเดียวโดนเพดาน 1,000 แถวตัดเงียบ
+    // ทำให้ "หน้ายอดขายมีออเดอร์ แต่หน้าสรุปกำไรไม่มี" กับออเดอร์ช่วงท้ายเดือน
+    const its=[];
+    for(let i0=0;i0<orderIds.length;i0+=100){
+      const ids=orderIds.slice(i0,i0+100);
+      for(let pg0=0;;pg0+=1000){
+        const {data:pg,error:e2}=await db.from('order_items')
+          .select('order_id,qty,price,amount,cost,products(sku,name,unit,last_cost)')
+          .in('order_id',ids).range(pg0,pg0+999);
+        if(e2)throw new Error(e2.message);
+        its.push(...(pg||[]));
+        if(!pg||pg.length<1000)break;
+      }
+    }
     const itemsByOrder={};(its||[]).forEach(it=>{(itemsByOrder[it.order_id]=itemsByOrder[it.order_id]||[]).push(it);});
     const dstr=dt=>{const d=new Date(dt);return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear();};
     // ต้นทุน: ใช้ FIFO ที่ตัดจริง (it.cost) ถ้ายังไม่ตัด (รอส่ง) ประมาณด้วยราคาซื้อล่าสุด
@@ -5799,11 +5815,18 @@ async function exportAccountXlsx(btn){
     const orderIds=[...new Set(list.map(b=>b.order_id).filter(Boolean))];
     let itemsByOrder={};
     if(orderIds.length){
-      const {data:its,error}=await db.from('order_items')
-        .select('order_id,qty,price,amount,cost,products(sku,name,unit,last_cost)')
-        .in('order_id',orderIds);
-      if(error)throw new Error(error.message);
-      (its||[]).forEach(it=>{(itemsByOrder[it.order_id]=itemsByOrder[it.order_id]||[]).push(it);});
+      // แบ่งถามทีละ 100 ออเดอร์ + ไล่หน้าให้ครบ — กันเพดาน 1,000 แถวตัดรายการเงียบ ๆ (บั๊กเดียวกับ Excel รายเดือน)
+      for(let i0=0;i0<orderIds.length;i0+=100){
+        const ids=orderIds.slice(i0,i0+100);
+        for(let pg0=0;;pg0+=1000){
+          const {data:its,error}=await db.from('order_items')
+            .select('order_id,qty,price,amount,cost,products(sku,name,unit,last_cost)')
+            .in('order_id',ids).range(pg0,pg0+999);
+          if(error)throw new Error(error.message);
+          (its||[]).forEach(it=>{(itemsByOrder[it.order_id]=itemsByOrder[it.order_id]||[]).push(it);});
+          if(!its||its.length<1000)break;
+        }
+      }
     }
     const dstr=dt=>{const d=new Date(dt);return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear()+' '+d.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});};
 
@@ -5937,6 +5960,26 @@ async function nextTfNo(){
   if(data&&data.length){const last=parseInt(data[0].tf_no.slice(prefix.length),10);if(!isNaN(last))n=last+1;}
   return prefix+String(n).padStart(4,'0');
 }
+/* แบ่งชื่อยาวเป็น 2 บรรทัดตามความกว้างจริง — ไม่หั่นสระ/วรรณยุกต์ออกจากพยัญชนะ
+   (ทีมแพ็คขอ 03/08: ชื่อโดนตัด "…" แล้วหยิบของยาก — ฝั่ง edge แก้ไปแล้วใน cron-46) */
+function tfWrap2(x,text,maxW){
+  const s=String(text||'').trim();
+  if(!s||x.measureText(s).width<=maxW)return[s];
+  const mark=/[\u0E31\u0E33-\u0E3A\u0E45\u0E47-\u0E4E]/;   // สระบน-ล่าง/วรรณยุกต์/ๅ ต้องเกาะพยัญชนะเดิม (ชุดเดียวกับ THAI_MARK ใน ds.ts)
+  let cut=s.length;
+  while(cut>1&&x.measureText(s.slice(0,cut)).width>maxW)cut--;
+  const sp=s.lastIndexOf(' ',cut);                   // มีช่องว่างใกล้จุดตัด → ตัดตรงนั้นอ่านง่ายกว่า (ตาม cutAt ฝั่ง edge)
+  if(sp>=cut-12&&sp>0)cut=sp;
+  else while(cut>1&&mark.test(s[cut]))cut--;         // บรรทัดใหม่ห้ามขึ้นต้นด้วยเครื่องหมายผสม
+  let l2=s.slice(cut).trim();
+  if(!l2)return[s.slice(0,cut)];
+  if(x.measureText(l2).width>maxW){                  // ยาวเกิน 2 บรรทัด → ตัดท้ายบรรทัดสอง
+    while(l2.length>1&&x.measureText(l2+'…').width>maxW)l2=l2.slice(0,-1);
+    while(l2.length>1&&mark.test(l2[l2.length-1]))l2=l2.slice(0,-1);
+    l2+='…';
+  }
+  return[s.slice(0,cut),l2];
+}
 /* ตัววาดรูปเอกสารรายการสินค้า (ใช้ร่วมกัน: ใบโอน / ใบสั่งซื้อ) — แบ่งหน้า A4 อัตโนมัติ
    rows: [{sku,name,qty,unit,product_id,note,extra}] · opt: {title,sub,colA,colB,file} */
 async function tfDrawPages(rows,opt){
@@ -5987,12 +6030,9 @@ async function tfDrawPages(rows,opt){
       if(im){const sz=44*S;try{x.drawImage(im,cImg,my-sz/2,sz,sz);}catch(e){}}
       F('400',12.5);x.fillStyle='#333';x.fillText(String(it.sku||''),cSku,my+5*S);
       F('400',14);x.fillStyle='#111';
-      let nm=String(it.name||'');
-      if(x.measureText(nm).width>nameMaxW){
-        while(nm.length>1&&x.measureText(nm+'…').width>nameMaxW)nm=nm.slice(0,-1);
-        nm+='…';
-      }
-      x.fillText(nm,cName,my+5*S);
+      const nmLines=tfWrap2(x,it.name,nameMaxW);   // ชื่อยาวแบ่ง 2 บรรทัด เลิกตัด "…" (แบบเดียวกับ edge cron-46)
+      if(nmLines.length===1)x.fillText(nmLines[0],cName,my+5*S);
+      else{x.fillText(nmLines[0],cName,my-4*S);x.fillText(nmLines[1],cName,my+14*S);}
       x.textAlign='right';F('700',16);x.fillStyle='#b52020';
       x.fillText(Number(it.qty)+' '+(it.unit||''),cQty,my+6*S);
       F('400',12.5);x.fillStyle='#666';
