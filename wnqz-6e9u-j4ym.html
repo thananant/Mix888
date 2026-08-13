@@ -6,13 +6,13 @@
 <meta name="robots" content="noindex,nofollow,noarchive">
 <title>Mix Fresh 168 — หลังบ้าน</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js" crossorigin="anonymous"></script>
 <script src="thai_postcode.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Mali:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -142,7 +142,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 }
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
@@ -1687,8 +1687,8 @@ async function loadDashboard(){
   const fmtD=d=>d.toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit'});
   const sameDay=dFrom.toDateString()===dTo.toDateString();
   document.getElementById('dash-date').textContent='📅 ช่วงที่แสดง: '+(sameDay?fmtD(dFrom):fmtD(dFrom)+' – '+fmtD(dTo));
-  // เดือนของช่วงที่กรอง (อิงวันสิ้นสุดช่วง) — การ์ด "ยอดขายเดือน" ตามที่กรองไว้
-  const mFrom=new Date(dTo.getFullYear(),dTo.getMonth(),1), mTo=new Date(dTo.getFullYear(),dTo.getMonth()+1,0,23,59,59,999);
+  // การ์ด "ยอดขายเดือนนี้" = เดือนปัจจุบันเสมอ ไม่เปลี่ยนตามช่วงที่กรอง
+  const mNow=new Date(), mFrom=new Date(mNow.getFullYear(),mNow.getMonth(),1);
 
   const [{data:ords},{data:items},{data:wastes},{data:exps},{data:mData}]=await Promise.all([
     db.from('orders').select('total,created_at,status,customers(sale_name)')
@@ -1699,7 +1699,7 @@ async function loadDashboard(){
       .eq('type','waste').gte('created_at',dFrom.toISOString()).lte('created_at',dTo.toISOString()),
     db.from('stock_receive_items').select('qty,expiry_date,products(name,unit)')
       .not('expiry_date','is',null).order('expiry_date',{ascending:true}).limit(200),
-    db.from('orders').select('total').gte('created_at',mFrom.toISOString()).lte('created_at',mTo.toISOString()).neq('status','cancelled')
+    db.from('orders').select('total').gte('created_at',mFrom.toISOString()).neq('status','cancelled')
   ]);
   if(dGen!==dashGen)return;   // มีการเปลี่ยนช่วงเวลาไประหว่างรอ — ทิ้งผลรอบนี้
 
@@ -1710,8 +1710,6 @@ async function loadDashboard(){
   const nowD=new Date();
   const isTodayRange=sameDay&&dFrom.toDateString()===nowD.toDateString();
   document.getElementById('d-today-l').textContent=isTodayRange?'ยอดขายวันนี้':sameDay?'ยอดขายวันที่ '+fmtD(dFrom):'ยอดขายช่วงที่เลือก';
-  const isThisMonth=mFrom.getMonth()===nowD.getMonth()&&mFrom.getFullYear()===nowD.getFullYear();
-  document.getElementById('d-month-l').textContent=isThisMonth?'ยอดขายเดือนนี้':'ยอดขายเดือน '+mFrom.toLocaleDateString('th-TH',{month:'short',year:'2-digit'});
   // บรรทัดเล็ก "วันนี้ ฿X" เมื่อช่วงที่กรองยาวกว่า 1 วันและครอบวันนี้ (คิดจากออเดอร์ในช่วงที่ดึงมาแล้ว)
   const subEl=document.getElementById('d-today-sub');
   if(subEl){
@@ -7692,7 +7690,10 @@ async function alertOps(where,detail){
   }catch(e){console.warn('alertOps:',e);return false;}
   finally{opsSending=false;}
 }
-window.addEventListener('error',e=>{alertOps('โค้ดหน้าจอผิดพลาด',(e.message||'')+' @'+String(e.filename||'').split('/').pop()+':'+e.lineno);});
+window.addEventListener('error',e=>{
+  const masked=String(e.message||'')==='Script error.'&&!e.filename;   // error จากสคริปต์นอกที่เบราว์เซอร์ปิดบังรายละเอียด
+  alertOps('โค้ดหน้าจอผิดพลาด',masked?'Script error. (จากสคริปต์ภายนอก/ส่วนขยายเบราว์เซอร์ — ถ้าระบบยังใช้ได้ปกติ ไม่ต้องทำอะไร)':(e.message||'')+' @'+String(e.filename||'').split('/').pop()+':'+e.lineno);
+});
 window.addEventListener('unhandledrejection',e=>{const r=e.reason;alertOps('งานเบื้องหลังล้มเหลว',(r&&(r.message||r.error_description))||String(r||''));});
 
 /* ==================== แพลนการสั่งซื้อ ==================== */
