@@ -1088,7 +1088,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th><input type="checkbox" onclick="acSelAllBills(this)" title="เลือก/ไม่เลือกบิลทั้งหมดในหน้านี้" style="width:16px;height:16px;vertical-align:-3px;margin-right:4px">เลขบิล / SO</th><th>ลูกค้า</th><th class="num">ยอด</th><th>ออกเมื่อ</th><th>LINE</th><th>ส่ง</th><th>ชำระ</th><th>รับยอดโดย</th><th>ขนส่ง</th><th class="num">ค่าใช้จ่าย</th><th></th></tr></thead>
+      <thead><tr><th><input type="checkbox" onclick="acSelAllBills(this)" title="เลือก/ไม่เลือกบิลทั้งหมดในหน้านี้" style="width:16px;height:16px;vertical-align:-3px;margin-right:4px">เลขบิล / SO</th><th>ลูกค้า</th><th class="num">ยอด</th><th>ออกเมื่อ</th><th>LINE</th><th>ส่ง</th><th>ชำระ</th><th>รับยอดโดย</th><th>ขนส่ง</th><th>นัดส่ง</th><th class="num">ค่าใช้จ่าย</th><th></th></tr></thead>
       <tbody id="ac-body"></tbody>
     </table>
     </div>
@@ -4293,11 +4293,7 @@ async function notifySalesCancel(b){
   if(!gid||!b)return;
   try{
     const method=(b.customers&&b.customers.delivery_method)||'อื่นๆ';
-    const r=cutoffRange(new Date());
-    const {data:all}=await db.from('bills')
-      .select('bill_no,ship_status, orders(status, customers(code,name,delivery_method))')
-      .gte('created_at',r.start.toISOString()).lt('created_at',r.end.toISOString())
-      .order('created_at',{ascending:true});
+    const all=await roundBills('bill_no,ship_status,created_at, orders(status,deliver_date, customers(code,name,delivery_method))');
     const left=(all||[]).filter(x=>x.ship_status!=='cancelled'&&x.orders&&x.orders.status!=='cancelled'
       &&(((x.orders.customers||{}).delivery_method)||'อื่นๆ')===method);
     let t='❌ ยกเลิกบิล '+b.bill_no+'\n'+((b.customers&&b.customers.code)||'')+' '+((b.customers&&b.customers.name)||'')
@@ -4324,13 +4320,10 @@ async function salesSend(){
   try{
     // ดึงบิลทั้งรอบ เพื่อให้เลขลำดับตรงกับสรุปตอนรอบตัด (แยกตามขนส่ง เรียงตามเวลา)
     const r=cutoffRange(new Date());
-    const {data:all}=await db.from('bills')
-      .select(`bill_no,created_at,ship_status,revision,edit_note,
-        orders(order_no,status,order_items(qty,products(name,unit)),
+    const all=await roundBills(`bill_no,created_at,ship_status,revision,edit_note,
+        orders(order_no,status,deliver_date,order_items(qty,products(name,unit)),
           customers(code,name,sale_name,contact_name,phone,billing_address,map_link,receive_time,note,
-            delivery_method,ship_receiver,ship_phone,ship_address))`)
-      .gte('created_at',r.start.toISOString()).lt('created_at',r.end.toISOString())
-      .order('created_at',{ascending:true});
+            delivery_method,ship_receiver,ship_phone,ship_address))`);
     const rows=(all||[]).filter(b=>b.ship_status!=='cancelled'&&b.orders&&b.orders.status!=='cancelled');
     // จัดกลุ่มตามวิธีขนส่ง + นับลำดับ
     const groups={};
@@ -4347,6 +4340,7 @@ async function salesSend(){
         let t='(ออเดอร์ '+(i+1)+'/'+list.length+')';
         t+='\nเลขที่บิล : '+b.bill_no+((b.revision||1)>1?' (v.'+b.revision+')':'');
         if(b.edit_note) t+='\n🔴 แก้บิล: '+b.edit_note;
+        if(b.orders&&b.orders.deliver_date) t+='\n📅 นัดส่ง : '+String(b.orders.deliver_date).slice(0,10).split('-').reverse().join('/');
         if(c.sale_name) t+='\nSale : '+c.sale_name;
         t+='\nผู้รับ : '+(c.ship_receiver||c.contact_name||c.name||'-');
         const ph=c.ship_phone||c.phone; if(ph) t+='\nเบอร์ติดต่อ : '+ph;
@@ -4403,6 +4397,98 @@ function shortMethod(m){
   if(/^bi$/i.test(v))return 'BI';
   return v.length>8?v.slice(0,8):v;
 }
+/* ==================== วันนัดส่ง (ลูกค้าแจ้งให้ส่งวันอื่น) ==================== */
+function dueCell(o,orderId){
+  const v=o&&o.deliver_date?String(o.deliver_date).slice(0,10):'';
+  const t=new Date(),p=n=>String(n).padStart(2,'0');
+  const today=t.getFullYear()+'-'+p(t.getMonth()+1)+'-'+p(t.getDate());
+  let style='width:118px;font:inherit;font-size:12px;padding:3px 4px;border:1px solid var(--line,#ddd);border-radius:8px';
+  if(v){ if(v===today)style+=';background:#e1f5ee;border-color:#159b78';
+         else if(v<today)style+=';background:#fdeeee;border-color:#e0a9a9';
+         else style+=';background:#fff7e0;border-color:#e2c56a'; }
+  return '<input type="date" value="'+v+'" onchange="setDeliverDate('+orderId+',this.value)" title="วันนัดส่งตามที่ลูกค้าแจ้ง (เว้นว่าง = ส่งตามรอบปกติ)" style="'+style+'">';
+}
+async function setDeliverDate(orderId,v){
+  const {error}=await db.from('orders').update({deliver_date:v||null}).eq('id',orderId);
+  if(error){toast('บันทึกวันนัดส่งไม่สำเร็จ: '+error.message+(/deliver_date/.test(String(error.message))?' — รันไฟล์ mix888-deliver-date.sql ใน Supabase ก่อน':''));return;}
+  toast(v?'📅 บันทึกนัดส่ง '+v.split('-').reverse().join('/')+' — บิลนี้จะไปอยู่ในสรุปแพคของของวันนั้น':'เอาวันนัดส่งออกแล้ว — กลับไปตามรอบปกติ');
+  // ตั้งนัดเป็น "วันนี้" ให้บิลที่ออกไว้ก่อนหน้า → แจ้งกลุ่มแพคของทันที
+  try{
+    const t=new Date(),p=n=>String(n).padStart(2,'0');
+    const today=t.getFullYear()+'-'+p(t.getMonth()+1)+'-'+p(t.getDate());
+    const b=bills.find(x=>x.order_id===orderId);
+    if(v===today&&b&&typeof appSettings!=='undefined'&&appSettings.line_summary_group
+       &&new Date(b.created_at)<cutoffRange(new Date()).start){
+      await db.functions.invoke('line-push',{body:{to:appSettings.line_summary_group,messages:[{type:'text',
+        text:'📅 เพิ่มนัดส่งวันนี้: '+b.bill_no+' · '+((b.customers||{}).code||'')+' '+((b.customers||{}).name||'')
+             +'\nขนส่ง: '+(((b.customers||{}).delivery_method)||'-')}]}});
+    }
+  }catch(e){}
+  loadBills();
+}
+// วันที่ (ค.ศ. YYYY-MM-DD) ที่รอบตัดนี้ครอบคลุม
+function roundDates(r){
+  const f=d=>{const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());};
+  const a=f(r.start),b=f(new Date(r.end.getTime()-1));
+  return a===b?[a]:[a,b];
+}
+/* บิลของรอบนี้ = ออกในรอบ (และไม่ได้นัดส่งวันอื่น) + บิลที่นัดส่งตรงกับวันของรอบนี้ */
+async function roundBills(select){
+  const r=cutoffRange(new Date());
+  const dates=roundDates(r);
+  const [{data:byTime},{data:bySched}]=await Promise.all([
+    db.from('bills').select(select)
+      .gte('created_at',r.start.toISOString()).lt('created_at',r.end.toISOString())
+      .order('created_at',{ascending:true}),
+    db.from('bills').select(select.replace('orders(','orders!inner('))
+      .in('orders.deliver_date',dates)
+      .order('created_at',{ascending:true}),
+  ]);
+  const seen=new Set(),out=[];
+  for(const b of [...(byTime||[]),...(bySched||[])]){
+    if(seen.has(b.bill_no))continue;
+    seen.add(b.bill_no);
+    const dd=b.orders&&b.orders.deliver_date?String(b.orders.deliver_date).slice(0,10):null;
+    if(dd&&!dates.includes(dd))continue;   // นัดส่งวันอื่น → เอาไว้สรุปของวันนั้นแทน
+    out.push(b);
+  }
+  out.sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+  return out;
+}
+/* ถึงวันนัด → สรุปบิลที่นัดไว้ (ที่ออกก่อนรอบนี้) เข้ากลุ่มแพคของ ครั้งเดียวต่อรอบ */
+async function checkScheduledAnnounce(){
+  try{
+    if(typeof appSettings==='undefined'||!appSettings||!appSettings.line_summary_group)return;
+    const r=cutoffRange(new Date());
+    const dates=roundDates(r);
+    const roundKey='sched:'+dates.join(',');
+    const {data:st}=await db.from('settings').select('value').eq('key','sched_announce_last').maybeSingle();
+    if(st&&st.value===roundKey)return;
+    const {data:sch}=await db.from('bills')
+      .select(`bill_no,created_at,ship_status,orders!inner(order_no,status,deliver_date,order_items(qty,products(name,unit)),customers(code,name,delivery_method))`)
+      .in('orders.deliver_date',dates)
+      .lt('created_at',r.start.toISOString());
+    const rows=(sch||[]).filter(b=>b.ship_status!=='cancelled'&&b.orders&&b.orders.status!=='cancelled');
+    if(!rows.length)return;   // ยังไม่มาร์ครอบ เผื่อมีการตั้งนัดเพิ่มระหว่างวัน
+    const fD=s=>String(s).slice(0,10).split('-').reverse().join('/');
+    const groups={};
+    rows.forEach(b=>{const m=(b.orders.customers||{}).delivery_method||'อื่นๆ';(groups[m]=groups[m]||[]).push(b);});
+    for(const [method,list] of Object.entries(groups)){
+      let t='━━━━━━━━━━━━━━\n📅 นัดส่งวันนี้ '+method+' ('+list.length+' บิล)\n━━━━━━━━━━━━━━';
+      list.forEach((b,i)=>{
+        const c=b.orders.customers||{};
+        t+='\n('+(i+1)+'/'+list.length+') '+b.bill_no+' · '+(c.code||'')+' '+(c.name||'');
+        t+='\n   นัดส่ง '+fD(b.orders.deliver_date)+' · สั่งไว้เมื่อ '+new Date(b.created_at).toLocaleDateString('th-TH',{day:'numeric',month:'short'});
+        (b.orders.order_items||[]).forEach(it=>{t+='\n   \u2022 '+((it.products||{}).name||'?')+' \u00d7 '+it.qty+' '+((it.products||{}).unit||'');});
+      });
+      await db.functions.invoke('line-push',{body:{to:appSettings.line_summary_group,messages:[{type:'text',text:t.slice(0,4900)}]}});
+    }
+    await db.from('settings').upsert({key:'sched_announce_last',value:roundKey},{onConflict:'key'});
+  }catch(e){console.warn('sched announce',e);}
+}
+setTimeout(checkScheduledAnnounce,15000);
+setInterval(checkScheduledAnnounce,10*60*1000);
+
 async function togglePin(orderId,cur){
   const {error}=await db.from('orders').update({pinned:!cur}).eq('id',orderId);
   if(error){toast('ปักหมุดไม่สำเร็จ: '+error.message);return;}
@@ -4445,7 +4531,7 @@ async function loadBills(){
   const acFrom=(document.getElementById('ac-from')||{}).value||'';
   const acTo=(document.getElementById('ac-to')||{}).value||'';
   let bq=db.from('bills')
-      .select('*, customers(code,name,branch_name,line_group_id,delivery_method,sale_name,sale_id), orders(order_no,pinned,op_note,carrier,extra_cost,extra_note,created_by)')
+      .select('*, customers(code,name,branch_name,line_group_id,delivery_method,sale_name,sale_id), orders(order_no,pinned,op_note,carrier,extra_cost,extra_note,created_by,deliver_date)')
       .order('created_at',{ascending:false});
   if(acFrom)bq=bq.gte('created_at',acFrom+'T00:00:00+07:00');
   if(acTo)bq=bq.lte('created_at',acTo+'T23:59:59.999+07:00');
@@ -4453,7 +4539,7 @@ async function loadBills(){
   const [{data,error},{data:po}]=await Promise.all([
     bq,
     db.from('orders')
-      .select('id,order_no,total,created_at,pinned,op_note,carrier,extra_cost,extra_note,created_by, customers(code,name,delivery_method,sale_name,sale_id)')
+      .select('id,order_no,total,created_at,pinned,op_note,carrier,extra_cost,extra_note,created_by,deliver_date, customers(code,name,delivery_method,sale_name,sale_id)')
       .eq('status','new').order('created_at',{ascending:false})
   ]);
   if(error){toast('โหลดบิลไม่ได้: '+error.message);return;}
@@ -4564,6 +4650,7 @@ function renderAccount(){
       <td style="font-size:13px;color:var(--muted)">${d}</td>
       <td>—</td><td>—</td><td>—</td><td>—</td>
       <td style="font-size:12.5px">${dlvCell(o.customers,o)}</td>
+      <td>${dueCell(o,o.id)}</td>
       <td style="font-size:12.5px">${extraCell(o,o.id)}</td>
       <td style="white-space:nowrap">
         <button class="btn-g mini" onclick="togglePin(${o.id},${o.pinned?'true':'false'})" title="ปักหมุดขึ้นบนสุด">📌</button>
@@ -4574,7 +4661,7 @@ function renderAccount(){
   });
   list.sort((a,b)=>((b.orders&&b.orders.pinned)?1:0)-((a.orders&&a.orders.pinned)?1:0));
   window.acLastList=list;
-  if(!list.length&&!pendRows.length){el.innerHTML='<tr><td colspan="11" class="empty">ไม่มีบิลในหมวดนี้</td></tr>';return;}
+  if(!list.length&&!pendRows.length){el.innerHTML='<tr><td colspan="12" class="empty">ไม่มีบิลในหมวดนี้</td></tr>';return;}
   el.innerHTML=pendRows.join('')+list.map(b=>{
     const d=new Date(b.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
     const paid=b.payment_status==='paid';
@@ -4594,6 +4681,7 @@ function renderAccount(){
           :'<span class="tag tag-out">ค้างจ่าย</span>')}</td>
       <td style="font-size:13px;color:var(--muted)">${paid?esc(b.paid_by||'')+'<br>'+pd:'—'}</td>
       <td style="font-size:12.5px">${dlvCell(b.customers,b.orders)}</td>
+      <td>${dueCell(b.orders,b.order_id)}</td>
       <td style="font-size:12.5px">${extraCell(b.orders,b.order_id)}</td>
       <td style="white-space:nowrap">
         <button class="btn-g mini" onclick="togglePin(${b.order_id},${(b.orders&&b.orders.pinned)?'true':'false'})" title="ปักหมุดขึ้นบนสุด">📌</button>
