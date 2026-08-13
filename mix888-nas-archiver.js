@@ -94,6 +94,19 @@ function ensureBillDir(dayDir, b){
   return wantPath;
 }
 function safeName(s){ return String(s||'').replace(/[\\/:*?"<>|]/g, '_'); }
+// บิลถูกยกเลิก: ไม่เก็บ และลบโฟลเดอร์ที่เคยเก็บไว้ทิ้ง (ต้นฉบับยังอยู่ใน Supabase เสมอ)
+function removeBillDir(dayDir, b){
+  const base = safeName(b.bill_no);
+  for(const s of ['', ...PAY_SUFFIXES]){
+    const p = path.join(dayDir, base + s);
+    if(fs.existsSync(p)){
+      try{
+        fs.rmSync(p, {recursive: true, force: true});
+        log('  🗑️ ลบโฟลเดอร์บิลยกเลิก ' + base + s);
+      }catch(e){ log('  ⚠️ ลบโฟลเดอร์ ' + base + s + ' ไม่ได้ — ' + e.message); }
+    }
+  }
+}
 
 async function api(pathAndQuery){
   const r = await fetch(SUPABASE_URL + pathAndQuery, {
@@ -160,6 +173,10 @@ async function syncOnce(){
       const {y, m, ddmmyyyy} = thDate(b.created_at);
       const dayDir  = path.join(ROOT, y, m, ddmmyyyy);
       (byDay[dayDir] = byDay[dayDir] || {ddmmyyyy, rows: []}).rows.push(b);
+      if((b.ship_status || 'pending') === 'cancelled'){
+        if(fs.existsSync(dayDir)) removeBillDir(dayDir, b);   // เคยเก็บไว้ = ลบทิ้ง
+        continue;                                             // ไม่เก็บบิลยกเลิก
+      }
       const billDir = fs.existsSync(dayDir) ? ensureBillDir(dayDir, b)
                     : path.join(dayDir, safeName(b.bill_no) + paySuffix(b));
 
