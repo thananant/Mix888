@@ -257,7 +257,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="charts" style="margin-top:16px">
     <div class="card"><h3 class="ct">ยอดขายแยกตามเซลล์ (ช่วงที่เลือก)</h3><div class="chart-box" style="height:260px"><canvas id="ch-sale"></canvas></div></div>
     <div class="card"><h3 class="ct">สรุปยอดต่อเซลล์</h3><div style="overflow-x:auto"><table>
-      <thead><tr><th>เซลล์</th><th class="num">ออเดอร์</th><th class="num">ยอดขาย</th><th class="num">%</th></tr></thead>
+      <thead><tr><th>เซลล์</th><th class="num">ออเดอร์</th><th class="num">เฉลี่ย/บิล</th><th class="num">ยอดขาย</th><th class="num">%</th></tr></thead>
       <tbody id="d-bysale"></tbody></table></div></div>
   </div>
   <div class="charts">
@@ -1773,11 +1773,13 @@ async function loadDashboard(){
       options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
         scales:{y:{beginAtZero:true,ticks:{callback:v=>'฿'+fmt0(v)}},x:{grid:{display:false}}}}});
   }
+  const seCnt=se.reduce((s,[,v])=>s+v.cnt,0);
   document.getElementById('d-bysale').innerHTML=se.length?
     se.map(([nm,v])=>`<tr><td><b>${esc(nm)}</b></td><td class="num">${v.cnt}</td>
+      <td class="num" style="color:var(--muted)">฿${fmt0(v.cnt?v.amt/v.cnt:0)}</td>
       <td class="num">฿${fmt0(v.amt)}</td><td class="num" style="color:var(--muted)">${grand?Math.round(v.amt/grand*100):0}%</td></tr>`).join('')
-      +`<tr style="border-top:2px solid var(--line)"><td><b>รวม</b></td><td class="num"><b>${se.reduce((s,[,v])=>s+v.cnt,0)}</b></td><td class="num"><b>฿${fmt0(grand)}</b></td><td class="num">100%</td></tr>`
-    :'<tr><td colspan="4" class="empty">ไม่มียอดขายในช่วงนี้</td></tr>';
+      +`<tr style="border-top:2px solid var(--line)"><td><b>รวม</b></td><td class="num"><b>${seCnt}</b></td><td class="num" style="color:var(--muted)"><b>฿${fmt0(seCnt?grand/seCnt:0)}</b></td><td class="num"><b>฿${fmt0(grand)}</b></td><td class="num">100%</td></tr>`
+    :'<tr><td colspan="5" class="empty">ไม่มียอดขายในช่วงนี้</td></tr>';
 
   // สินค้าขายออกในช่วงที่เลือก (รายตัว)
   const soldAgg={};
