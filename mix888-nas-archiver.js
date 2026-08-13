@@ -26,6 +26,7 @@ const DAYS_BACK  = 45;                // ซิงก์บิลย้อนห
 const EVERY_MIN  = 30;                // ซิงก์ซ้ำทุกกี่นาที
 const SUPABASE_URL = 'https://eqbzpgynzgdwvouuzfwt.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_HqLNQDwR4omYcb7BNUEKIw_vyHCo4N-';
+const NAS_EXPORT_KEY = 'PASTE_NAS_EXPORT_KEY_HERE';   // รหัสลับให้ตรงกับที่รันในไฟล์ mix888-nas-export.sql
 /* =========================================== */
 
 const fs   = require('fs');
@@ -70,6 +71,20 @@ async function api(pathAndQuery){
 }
 
 async function fetchBills(sinceISO){
+  // ทางหลัก: ฟังก์ชัน nas_export_bills (ตาราง bills ถูกล็อก RLS — อ่านตรงจะได้ 0 แถว)
+  try{
+    const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/nas_export_bills', {
+      method: 'POST',
+      headers: {apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY,
+                'Content-Type': 'application/json'},
+      body: JSON.stringify({p_key: NAS_EXPORT_KEY, p_since: sinceISO})});
+    if(!r.ok) throw new Error('RPC ' + r.status + ': ' + (await r.text()).slice(0, 200));
+    const data = await r.json();
+    return Array.isArray(data) ? data : (data || []);
+  }catch(e){
+    log('เรียก nas_export_bills ไม่สำเร็จ (' + e.message + ') — ลองอ่านตารางตรงแทน');
+    log('  ↳ ถ้ายังได้บิล 0 ใบตลอด: รันไฟล์ mix888-nas-export.sql ใน Supabase ก่อน');
+  }
   const base = '/rest/v1/bills?select=';
   const cols = 'id,bill_no,total,shipping_fee,discount,revision,created_at,payment_status,paid_at,pay_method,ship_status,image_url,page_urls,slip_url,customers(code,name,branch_name),orders(order_no)';
   const tail = '&created_at=gte.' + encodeURIComponent(sinceISO) + '&order=created_at.asc&limit=10000';
