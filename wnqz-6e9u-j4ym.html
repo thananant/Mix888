@@ -1400,6 +1400,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <input type="file" id="sp-file" accept="image/*" multiple style="width:100%;margin:4px 0 6px">
     <img id="sp-preview" title="กดเพื่อดูรูปเต็มจอ" style="display:none;max-width:100%;max-height:220px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in" onclick="showImgView(this.src)">
     <div id="sp-qr" style="display:none;margin-top:8px;padding:8px 10px;border-radius:10px;font-size:13px"></div>
+    <div id="sp-slipok" style="display:none;margin-top:6px;padding:8px 10px;border-radius:10px;font-size:13px"></div>
     </div><!-- /sp-slip-zone -->
     <label style="margin-top:10px" id="sp-amount-label">ยอดที่โอนมา (ตามสลิป ฿) — เว้นว่าง = รับเต็มยอด</label>
     <input id="sp-amount" type="number" step="0.01" min="0" class="num" style="width:100%" oninput="spAmtCheck()" placeholder="เช่น 3500">
@@ -4428,9 +4429,10 @@ async function setDeliverDate(orderId,v){
 }
 // วันที่ (ค.ศ. YYYY-MM-DD) ที่รอบตัดนี้ครอบคลุม
 function roundDates(r){
-  const f=d=>{const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());};
-  const a=f(r.start),b=f(new Date(r.end.getTime()-1));
-  return a===b?[a]:[a,b];
+  // ใช้วันที่ตรงกึ่งกลางรอบเป็นตัวแทน — วันนัดส่ง 1 วันจับคู่ได้ 1 รอบเสมอ ไม่เหลื่อมสองรอบ
+  const mid=new Date((r.start.getTime()+r.end.getTime())/2);
+  const p=n=>String(n).padStart(2,'0');
+  return [mid.getFullYear()+'-'+p(mid.getMonth()+1)+'-'+p(mid.getDate())];
 }
 /* บิลของรอบนี้ = ออกในรอบ (และไม่ได้นัดส่งวันอื่น) + บิลที่นัดส่งตรงกับวันของรอบนี้ */
 async function roundBills(select){
@@ -4647,7 +4649,7 @@ function renderAccount(){
       <td><input type="checkbox" class="ac-sel" value="${o.id}" onchange="acSelCount()" style="width:17px;height:17px;vertical-align:-3px;margin-right:4px">${o.pinned?'📌 ':''}<span class="tag tag-low">ยังไม่ออกบิล</span><div style="font-size:12px;color:var(--muted)">${esc(o.order_no)}</div>${o.op_note?'<div style="font-size:12px;color:#a06b00;background:#fff3d6;border-radius:6px;padding:2px 6px;margin-top:3px;max-width:200px">📝 '+esc(o.op_note)+'</div>':''}</td>
       <td>${esc(o.customers?.code)} · ${esc(o.customers?.name)}</td>
       <td class="num"><b>${fmt(o.total)}</b></td>
-      <td style="font-size:13px;color:var(--muted)">${d}</td>
+      <td style="font-size:13px;color:var(--muted)">${d}<div style="font-size:11.5px" title="คนสั่งออเดอร์">${o.created_by?'🙋 '+esc(o.created_by):'<span style="color:#0f7a5c;font-weight:700">🛒 ลูกค้าสั่งเอง</span>'}</div></td>
       <td>—</td><td>—</td><td>—</td><td>—</td>
       <td style="font-size:12.5px">${dlvCell(o.customers,o)}</td>
       <td>${dueCell(o,o.id)}</td>
@@ -4672,7 +4674,7 @@ function renderAccount(){
       <td><input type="checkbox" class="ac-selb" value="${b.id}" onchange="acSelCount()" style="width:17px;height:17px;vertical-align:-3px;margin-right:4px">${opin?'📌 ':''}<b>${esc(b.bill_no)}</b>${(b.revision||1)>1?' <span class="tag tag-low">v.'+b.revision+'</span>':''}${b.orders?.order_no?'<div style="font-size:12px;color:var(--muted)">'+esc(b.orders.order_no)+'</div>':''}${onote?'<div style="font-size:12px;color:#a06b00;background:#fff3d6;border-radius:6px;padding:2px 6px;margin-top:3px;max-width:200px">📝 '+esc(onote)+'</div>':''}</td>
       <td>${esc(b.customers?.code)} · ${esc(b.customers?.name)}</td>
       <td class="num"><b>${fmt(b.total)}</b></td>
-      <td style="font-size:13px;color:var(--muted)">${d}${b.created_by?'<div style="font-size:11.5px" title="คนออกบิล">✍️ '+esc(b.created_by)+'</div>':''}${b.orders?.created_by?'<div style="font-size:11.5px" title="คนสั่งออเดอร์">🙋 '+esc(b.orders.created_by)+'</div>':''}</td>
+      <td style="font-size:13px;color:var(--muted)">${d}${b.created_by?'<div style="font-size:11.5px" title="คนออกบิล">✍️ '+esc(b.created_by)+'</div>':''}${b.orders?('<div style="font-size:11.5px" title="คนสั่งออเดอร์">'+(b.orders.created_by?'🙋 '+esc(b.orders.created_by):'<span style="color:#0f7a5c;font-weight:700">🛒 ลูกค้าสั่งเอง</span>')+'</div>'):''}</td>
       <td>${b.line_sent?'<span class="tag tag-ok">ส่งแล้ว</span>':'<span class="tag tag-low">ยังไม่ส่ง</span>'}</td>
       <td>${shipTag(ss)}</td>
       <td>${paid?'<span class="tag tag-ok">✓ จ่ายแล้ว'+(b.pay_method==='cash'?' 💵':'')+'</span>'
@@ -6782,7 +6784,7 @@ async function makeLabel(billId,btn){
 }
 
 /* ==================== เฟส 2: รับยอด + สลิป ==================== */
-let spBillId=null, spSlipRef=null, spDupBills=[], spOthers=[];
+let spBillId=null, spSlipRef=null, spDupBills=[], spOthers=[], spSlipOk=null;
 /* อ่าน QR จากรูปสลิป (มาตรฐานสลิปธนาคารไทยมีรหัสอ้างอิงไม่ซ้ำกัน) */
 async function decodeSlipQR(file){
   const img=await new Promise(res=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>res(null);i.src=URL.createObjectURL(file);});
@@ -6890,6 +6892,36 @@ async function checkSlip(file){
     box.style.background='#e8f6f0';box.style.color='#0f7a5c';
     box.innerHTML='✅ <b>อ่าน QR สลิปได้</b> และยังไม่เคยใช้ในระบบ · รหัสอ้างอิง: <span style="font-size:11px">'+esc(spSlipRef.slice(0,40))+'…</span>';
   }
+  await slipokCheck(raw);
+}
+/* ตรวจสลิปกับ SlipOK ผ่าน Edge Function (ถ้ายังไม่ติดตั้ง = ข้ามเงียบ ๆ ใช้งานแบบเดิมได้) */
+async function slipokCheck(raw){
+  spSlipOk=null;
+  const box=document.getElementById('sp-slipok');if(!box)return;
+  box.style.display='block';box.style.background='#faf5ee';box.style.color='#666';
+  box.textContent='🏦 กำลังตรวจสลิปกับ SlipOK…';
+  try{
+    const amtStr=document.getElementById('sp-amount').value;
+    const expect=amtStr!==''?(Number(amtStr)||0):spExpected();
+    const {data:vr,error:ve}=await db.functions.invoke('slipok-verify',{body:{data:raw}});
+    if(ve||!vr){box.style.background='#f4f0ea';box.style.color='#8a7a66';
+      box.innerHTML='ℹ️ ยังไม่ได้เชื่อม SlipOK (ติดตั้ง Edge Function "slipok-verify" ก่อน) — ตรวจด้วยตาตามปกติ';return;}
+    if(vr.ok){
+      spSlipOk=vr;
+      const a=vr.amount!=null?Number(vr.amount):null;
+      const match=a!=null&&Math.abs(a-expect)<0.01;
+      box.style.background=match?'#e1f5ee':'#fff7e0';box.style.color=match?'#0f6e56':'#8a6d00';
+      box.innerHTML='🏦 <b>SlipOK: สลิปจริง ✓</b>'+(a!=null?' ยอด ฿'+fmt(a):'')
+        +(vr.sender?'<br>จาก '+esc(vr.sender):'')+(vr.receiver?' → '+esc(vr.receiver):'')
+        +(vr.transDate?'<br>เวลาโอน '+esc(String(vr.transDate))+' '+esc(String(vr.transTime||'')):'')
+        +(match?'<br>✅ ยอดตรงกับที่ต้องรับ':'<br>⚠️ ยอดไม่ตรงกับที่ต้องรับ (฿'+fmt(expect)+')');
+    }else{
+      spSlipOk=vr;
+      box.style.background='#fdeeee';box.style.color='#b52020';
+      box.innerHTML='🚨 <b>SlipOK ตรวจไม่ผ่าน:</b> '+esc(vr.error||'ไม่ทราบสาเหตุ')+'<br>อย่าเพิ่งตัดยอด — เช็คเงินเข้าบัญชีจริงก่อน';
+    }
+  }catch(e){box.style.background='#f4f0ea';box.style.color='#8a7a66';
+    box.innerHTML='ℹ️ ตรวจ SlipOK ไม่ได้ ('+esc(String(e.message||e))+') — ตรวจด้วยตาตามปกติ';}
 }
 async function markPaid(id,btn){
   const b=bills.find(x=>x.id===id);if(!b)return;
@@ -6926,8 +6958,8 @@ async function markPaid(id,btn){
   const f=document.getElementById('sp-file');f.value='';
   const pv=document.getElementById('sp-preview');pv.style.display='none';pv.src='';
   f.onchange=()=>{if(f.files[0]){pv.src=URL.createObjectURL(f.files[0]);pv.style.display='block';checkSlip(f.files[0]);}
-    else{document.getElementById('sp-qr').style.display='none';spSlipRef=null;spDupBills=[];}};
-  document.getElementById('sp-qr').style.display='none';spSlipRef=null;spDupBills=[];
+    else{document.getElementById('sp-qr').style.display='none';spSlipRef=null;spDupBills=[];spSlipOk=null;var _so=document.getElementById('sp-slipok');if(_so)_so.style.display='none';}};
+  document.getElementById('sp-qr').style.display='none';spSlipRef=null;spDupBills=[];spSlipOk=null;var _so=document.getElementById('sp-slipok');if(_so)_so.style.display='none';
   document.getElementById('sp-amount').value='';
   document.getElementById('sp-amt-status').style.display='none';
   const mt=document.querySelector('input[name="sp-method"][value="transfer"]');
@@ -6960,7 +6992,7 @@ function spMethodUI(){
   const tw=document.getElementById('sp-m-transfer-w'),cw=document.getElementById('sp-m-cash-w');
   if(tw)tw.style.borderColor=m==='transfer'?'var(--accent,#c0201f)':'var(--line)';
   if(cw)cw.style.borderColor=m==='cash'?'var(--accent,#c0201f)':'var(--line)';
-  if(m==='cash'){spSlipRef=null;spDupBills=[];}
+  if(m==='cash'){spSlipRef=null;spDupBills=[];spSlipOk=null;var _so2=document.getElementById('sp-slipok');if(_so2)_so2.style.display='none';}
 }
 function spSum(){
   const el=document.getElementById('sp-sum');
@@ -6984,7 +7016,7 @@ function spAmtCheck(){
     box.innerHTML='🔺 <b>โอนเกิน ฿'+fmt(diff)+'</b> (ต้องรับ ฿'+fmt(exp)+' โอนมา ฿'+fmt(amt)+')<br>อาจโอนรวมบิลอื่น — ลองติ๊กบิลค้างด้านบนเพิ่ม หรือยืนยันปิดพร้อมบันทึกยอดรับจริง';
   }
 }
-function closeSlipModal(){document.getElementById('slip-modal').style.display='none';spBillId=null;spOthers=[];}
+function closeSlipModal(){document.getElementById('slip-modal').style.display='none';spBillId=null;spOthers=[];spSlipOk=null;}
 /* ==================== เช็คสลิปตกค้าง ==================== */
 let saFiles=[];
 async function saListSlips(prefix){
@@ -7095,6 +7127,22 @@ async function confirmPaid(btn){
     return;
   }
   if(spDupBills.length&&!confirm('🚨 สลิปนี้เคยใช้กับบิล '+spDupBills.map(d=>d.bill_no).join(', ')+' แล้ว\n\nยืนยันว่าเช็คเงินเข้าบัญชีจริงแล้ว และจะรับยอดต่อ?'))return;
+  // ด่าน SlipOK: ตรวจไม่ผ่าน/ยอดไม่ตรง ต้องยืนยันซ้ำก่อนตัดยอด
+  if(method==='transfer'&&spSlipOk){
+    if(spSlipOk.ok===false){
+      if(!confirm('🚨 SlipOK ตรวจสลิปไม่ผ่าน: '+(spSlipOk.error||'ไม่ทราบสาเหตุ')+'\n\nยืนยันว่าเช็คเงินเข้าบัญชีจริงแล้ว และจะตัดยอดต่อ?'))return;
+    }else if(spSlipOk.amount!=null){
+      const _as=document.getElementById('sp-amount').value;
+      const _exp=_as!==''?(Number(_as)||0):spExpected();
+      if(Math.abs(Number(spSlipOk.amount)-_exp)>0.009){
+        if(!confirm('⚠️ ยอดในสลิปจริง ฿'+fmt(spSlipOk.amount)+' ไม่ตรงกับยอดที่กำลังรับ ฿'+fmt(_exp)+'\n\nยืนยันตัดยอดต่อ?'))return;
+      }
+    }
+  }
+  const slipokTag=(base)=>{
+    const s=spSlipOk?(spSlipOk.ok?('SlipOK ✓'+(spSlipOk.transRef?' '+spSlipOk.transRef:'')):'SlipOK ✗ (ยืนยันเอง)'):null;
+    return [base,s].filter(Boolean).join(' · ')||null;
+  };
   const staff=document.getElementById('ac-staff').value.trim();
   btn.disabled=true;btn.textContent='กำลังบันทึก…';
   try{
@@ -7141,7 +7189,7 @@ async function confirmPaid(btn){
         await db.functions.invoke('line-push',{body:{to:b.customers.line_group_id,
           messages:[{type:'text',text:shopTag(b.customers)+'💰 รับยอดบางส่วน บิล '+b.bill_no+'\nรับแล้ว ฿'+fmt(newPaid)+' / ฿'+fmt(b.total)+'\nคงเหลือ ฿'+fmt(Number(b.total)-newPaid)+'\nขอบคุณ'+polite+' 🙏'}]}});
       }
-      await logPayment(b.id,amt,method,slipUrls,spSlipRef,staff,'จ่ายบางส่วน');
+      await logPayment(b.id,amt,method,slipUrls,spSlipRef,staff,slipokTag('จ่ายบางส่วน'));
       toast('บันทึกจ่ายบางส่วน '+b.bill_no+' — เหลือค้าง ฿'+fmt(Number(b.total)-newPaid));
       closeSlipModal(); loadBills();
       btn.disabled=false;btn.textContent='✓ ยืนยันรับยอด';
@@ -7157,7 +7205,7 @@ async function confirmPaid(btn){
       if(error)throw new Error('บันทึก '+tb.bill_no+' ไม่สำเร็จ: '+error.message);
       const thisAmt=targets.length===1&&amt!=null?amt:Number(tb.total)-Number(tb.paid_amount||0);
       await logPayment(tb.id,thisAmt,method,slipUrls,spSlipRef,staff,
-        targets.length>1?'ปิดพร้อมกัน '+targets.length+' บิล':null);
+        slipokTag(targets.length>1?'ปิดพร้อมกัน '+targets.length+' บิล':null));
     }
     const sumAll=targets.reduce((s,x)=>s+Number(x.total),0);
     if(b.customers?.line_group_id){
