@@ -6,13 +6,13 @@
 <meta name="robots" content="noindex,nofollow,noarchive">
 <title>Mix Fresh 168 — หลังบ้าน</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js" crossorigin="anonymous"></script>
 <script src="thai_postcode.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Mali:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -142,7 +142,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 }
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
@@ -7690,7 +7690,10 @@ async function alertOps(where,detail){
   }catch(e){console.warn('alertOps:',e);return false;}
   finally{opsSending=false;}
 }
-window.addEventListener('error',e=>{alertOps('โค้ดหน้าจอผิดพลาด',(e.message||'')+' @'+String(e.filename||'').split('/').pop()+':'+e.lineno);});
+window.addEventListener('error',e=>{
+  const masked=String(e.message||'')==='Script error.'&&!e.filename;   // error จากสคริปต์นอกที่เบราว์เซอร์ปิดบังรายละเอียด
+  alertOps('โค้ดหน้าจอผิดพลาด',masked?'Script error. (จากสคริปต์ภายนอก/ส่วนขยายเบราว์เซอร์ — ถ้าระบบยังใช้ได้ปกติ ไม่ต้องทำอะไร)':(e.message||'')+' @'+String(e.filename||'').split('/').pop()+':'+e.lineno);
+});
 window.addEventListener('unhandledrejection',e=>{const r=e.reason;alertOps('งานเบื้องหลังล้มเหลว',(r&&(r.message||r.error_description))||String(r||''));});
 
 /* ==================== แพลนการสั่งซื้อ ==================== */
