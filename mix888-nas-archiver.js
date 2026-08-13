@@ -21,7 +21,7 @@
 'use strict';
 
 /* ================= ตั้งค่า ================= */
-const NAS_ROOT   = '/volume1/Mix888';  // รันบน Synology NAS ใช้พาธแบบนี้ / รันบนคอม Windows ใช้ 'Z:\\Mix888'
+const NAS_ROOT   = '';                // เว้นว่าง = หาโฟลเดอร์ Mix888 บน NAS อัตโนมัติ (volume1-6) / หรือระบุเอง เช่น '/volume2/Mix888' หรือ 'Z:\\Mix888'
 const DAYS_BACK  = 45;                // ซิงก์บิลย้อนหลังกี่วัน (รอบแรกแนะนำตั้งเยอะ ๆ เช่น 400 แล้วค่อยลดลง)
 const EVERY_MIN  = 30;                // ซิงก์ซ้ำทุกกี่นาที
 const SUPABASE_URL = 'https://eqbzpgynzgdwvouuzfwt.supabase.co';
@@ -31,7 +31,23 @@ const SUPABASE_KEY = 'sb_publishable_HqLNQDwR4omYcb7BNUEKIw_vyHCo4N-';
 const fs   = require('fs');
 const path = require('path');
 
-const log = (...a) => console.log(new Date().toLocaleTimeString('th-TH'), ...a);
+const logLines = [];
+const log = (...a) => {
+  const line = new Date().toLocaleString('th-TH', {timeZone:'Asia/Bangkok'}) + ' ' + a.join(' ');
+  console.log(line);
+  logLines.push(line);
+};
+function flushLog(){   // เขียนผลรอบล่าสุดไว้ให้เปิดดูใน File Station ได้เลย
+  try{ fs.writeFileSync(path.join(__dirname, 'archiver-log.txt'), logLines.slice(-500).join('\r\n')); }catch(e){}
+}
+function resolveNasRoot(){
+  if(NAS_ROOT) return fs.existsSync(NAS_ROOT) ? NAS_ROOT : null;
+  for(let i=1; i<=6; i++){
+    const p = '/volume' + i + '/Mix888';
+    if(fs.existsSync(p)) return p;
+  }
+  return null;
+}
 
 function thDate(iso){                              // วันที่ตามเวลาไทย
   const s = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Bangkok',
@@ -75,17 +91,19 @@ async function download(url, dest){
 
 let running = false;
 async function syncOnce(){
-  if(running) return;
+  if(running) return true;
   running = true;
   const t0 = Date.now();
-  let saved = 0, skipped = 0, failed = 0;
+  let saved = 0, skipped = 0, failed = 0, ok = true;
   try{
-    if(!fs.existsSync(NAS_ROOT)){
-      log('❌ เปิดโฟลเดอร์ NAS ไม่ได้: ' + NAS_ROOT);
-      log('   ตรวจว่าแมพไดรฟ์/ต่อ NAS แล้ว หรือแก้ค่า NAS_ROOT หัวไฟล์นี้');
-      running = false;
-      return;
+    const ROOT = resolveNasRoot();
+    if(!ROOT){
+      log('❌ หาโฟลเดอร์ปลายทางไม่เจอ: ' + (NAS_ROOT || 'ลองแล้ว /volume1-6/Mix888'));
+      log('   แก้ค่า NAS_ROOT หัวไฟล์นี้ให้ตรงกับที่อยู่จริงของโฟลเดอร์ Mix888');
+      running = false; flushLog();
+      return false;
     }
+    log('ปลายทาง: ' + ROOT);
     const since = new Date(Date.now() - DAYS_BACK * 24 * 3600 * 1000).toISOString();
     const bills = await fetchBills(since);
     log('พบบิล ' + bills.length + ' ใบ (ย้อนหลัง ' + DAYS_BACK + ' วัน)');
@@ -93,7 +111,7 @@ async function syncOnce(){
     const byDay = {};   // โฟลเดอร์รายวัน → รายการบิล (ไว้ทำไฟล์สรุป)
     for(const b of bills){
       const {y, m, ddmmyyyy} = thDate(b.created_at);
-      const dayDir  = path.join(NAS_ROOT, y, m, ddmmyyyy);
+      const dayDir  = path.join(ROOT, y, m, ddmmyyyy);
       const billDir = path.join(dayDir, safeName(b.bill_no));
       (byDay[dayDir] = byDay[dayDir] || {ddmmyyyy, rows: []}).rows.push(b);
 
@@ -153,8 +171,11 @@ async function syncOnce(){
         + ' · มีอยู่แล้ว ' + skipped + (failed ? ' · โหลดพลาด ' + failed + ' (จะลองใหม่รอบหน้า)' : ''));
   }catch(e){
     log('❌ ซิงก์ไม่สำเร็จ: ' + (e.message || e));
+    ok = false;
   }
   running = false;
+  flushLog();
+  return ok;
 }
 
 console.log('==========================================================');
@@ -164,7 +185,7 @@ console.log('  ซิงก์ย้อนหลัง ' + DAYS_BACK + ' วั�
 console.log('  เปิดหน้าต่างนี้ทิ้งไว้ (ย่อได้ อย่าปิด) — ปิดแล้วเปิดใหม่ก็ซิงก์ต่อจากเดิมได้');
 console.log('==========================================================');
 if(process.argv.includes('--once')){
-  syncOnce().then(() => process.exit(0));       // โหมด Task Scheduler: ทำรอบเดียวแล้วจบ
+  syncOnce().then(ok => process.exit(ok ? 0 : 1));   // โหมด Task Scheduler: ทำรอบเดียวแล้วจบ (ล้ม = สถานะผิดปกติ)
 }else{
   syncOnce();
   setInterval(syncOnce, EVERY_MIN * 60 * 1000); // โหมดเปิดค้าง: ทำซ้ำเองเรื่อย ๆ
