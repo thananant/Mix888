@@ -1072,8 +1072,8 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <option value="มารับเอง">มารับเอง</option>
       </select>
       <select id="ac-ship" onchange="renderAccount()" title="กรองสถานะจัดส่ง"><option value="">ส่ง: ทั้งหมด</option><option value="pending">รอส่ง</option><option value="shipped">ส่งแล้ว</option><option value="cancelled">ยกเลิก</option></select>
-      <input type="date" id="ac-from" onchange="renderAccount()" title="ตั้งแต่วันที่">
-      <input type="date" id="ac-to" onchange="renderAccount()" title="ถึงวันที่">
+      <input type="date" id="ac-from" onchange="loadBills()" title="ตั้งแต่วันที่">
+      <input type="date" id="ac-to" onchange="loadBills()" title="ถึงวันที่">
       <input id="ac-q" placeholder="ค้นหาเลขบิล / ลูกค้า…" style="flex:1;min-width:150px" oninput="renderAccount()">
       <button class="btn-p mini" id="ac-issue-sel" onclick="acIssueSelected(this)" style="display:none">🧾 ออกบิลที่เลือก</button>
       <button class="btn-p mini" id="ac-pdf-sel" onclick="acPdfSelected(this)" style="display:none">📄 โหลด PDF ที่เลือก</button>
@@ -4425,10 +4425,17 @@ async function editCrmNote(id){
   toast(v.trim()?'📝 บันทึกโน้ตลูกค้าแล้ว':'ลบโน้ตแล้ว');
 }
 async function loadBills(){
-  const [{data,error},{data:po}]=await Promise.all([
-    db.from('bills')
+  // เลือกช่วงวันที่ = กรองที่ฐานข้อมูลโดยตรง (เดิมดึงแค่ 500 ใบล่าสุดแล้วค่อยกรองในหน้า ทำให้บิลเก่ากว่านั้นหายไปจากจอ)
+  const acFrom=(document.getElementById('ac-from')||{}).value||'';
+  const acTo=(document.getElementById('ac-to')||{}).value||'';
+  let bq=db.from('bills')
       .select('*, customers(code,name,branch_name,line_group_id,delivery_method,sale_name,sale_id), orders(order_no,pinned,op_note,carrier,extra_cost,extra_note,created_by)')
-      .order('created_at',{ascending:false}).limit(500),
+      .order('created_at',{ascending:false});
+  if(acFrom)bq=bq.gte('created_at',acFrom+'T00:00:00+07:00');
+  if(acTo)bq=bq.lte('created_at',acTo+'T23:59:59.999+07:00');
+  bq=bq.limit(acFrom||acTo?3000:500);
+  const [{data,error},{data:po}]=await Promise.all([
+    bq,
     db.from('orders')
       .select('id,order_no,total,created_at,pinned,op_note,carrier,extra_cost,extra_note,created_by, customers(code,name,delivery_method,sale_name,sale_id)')
       .eq('status','new').order('created_at',{ascending:false})
