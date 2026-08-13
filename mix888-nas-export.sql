@@ -31,6 +31,7 @@ begin
           'revision',       b.revision,
           'created_at',     b.created_at,
           'payment_status', b.payment_status,
+          'paid_amount',    b.paid_amount,
           'paid_at',        b.paid_at,
           'pay_method',     b.pay_method,
           'ship_status',    b.ship_status,

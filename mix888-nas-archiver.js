@@ -68,6 +68,30 @@ function extOf(url){
   return m ? '.' + m[1].toLowerCase() : '.jpg';
 }
 function csvCell(v){ return '"' + String(v ?? '').replace(/"/g, '""') + '"'; }
+// ป้ายสถานะจ่ายต่อท้ายชื่อโฟลเดอร์บิล (Windows ห้ามใช้ * ในชื่อ จึงใช้ ## แทน)
+const PAY_SUFFIXES = ['_จ่ายครบแล้ว', '_##จ่ายขาด##'];
+function paySuffix(b){
+  if((b.ship_status || 'pending') === 'cancelled') return '';
+  if(b.payment_status === 'paid') return '_จ่ายครบแล้ว';
+  if(Number(b.paid_amount || 0) > 0) return '_##จ่ายขาด##';
+  return '';
+}
+// หา/เปลี่ยนชื่อโฟลเดอร์บิลให้ตรงสถานะปัจจุบัน (ไฟล์ข้างในตามไปด้วย ไม่โหลดซ้ำ)
+function ensureBillDir(dayDir, b){
+  const base = safeName(b.bill_no);
+  const wantName = base + paySuffix(b);
+  const wantPath = path.join(dayDir, wantName);
+  for(const s of ['', ...PAY_SUFFIXES]){
+    const p = path.join(dayDir, base + s);
+    if(p !== wantPath && fs.existsSync(p) && !fs.existsSync(wantPath)){
+      try{
+        fs.renameSync(p, wantPath);
+        log('  📂 ' + base + s + ' → ' + wantName);
+      }catch(e){ log('  ⚠️ เปลี่ยนชื่อโฟลเดอร์ ' + base + ' ไม่ได้ — ' + e.message); }
+    }
+  }
+  return wantPath;
+}
 function safeName(s){ return String(s||'').replace(/[\\/:*?"<>|]/g, '_'); }
 
 async function api(pathAndQuery){
@@ -93,7 +117,7 @@ async function fetchBills(sinceISO){
     log('  ↳ ถ้ายังได้บิล 0 ใบตลอด: รันไฟล์ mix888-nas-export.sql ใน Supabase ก่อน');
   }
   const base = '/rest/v1/bills?select=';
-  const cols = 'id,bill_no,total,shipping_fee,discount,revision,created_at,payment_status,paid_at,pay_method,ship_status,image_url,page_urls,slip_url,customers(code,name,branch_name),orders(order_no)';
+  const cols = 'id,bill_no,total,shipping_fee,discount,revision,created_at,payment_status,paid_amount,paid_at,pay_method,ship_status,image_url,page_urls,slip_url,customers(code,name,branch_name),orders(order_no)';
   const tail = '&created_at=gte.' + encodeURIComponent(sinceISO) + '&order=created_at.asc&limit=10000';
   try{   // แบบมีประวัติการชำระ (สลิปหลายใบต่อบิล)
     return await api(base + encodeURIComponent(cols + ',payments(amount,created_at,slips)') + tail);
@@ -134,8 +158,9 @@ async function syncOnce(){
     for(const b of bills){
       const {y, m, ddmmyyyy} = thDate(b.created_at);
       const dayDir  = path.join(ROOT, y, m, ddmmyyyy);
-      const billDir = path.join(dayDir, safeName(b.bill_no));
       (byDay[dayDir] = byDay[dayDir] || {ddmmyyyy, rows: []}).rows.push(b);
+      const billDir = fs.existsSync(dayDir) ? ensureBillDir(dayDir, b)
+                    : path.join(dayDir, safeName(b.bill_no) + paySuffix(b));
 
       // รายการไฟล์ของบิลนี้: [url, ชื่อไฟล์ปลายทาง]
       const files = [];
@@ -176,7 +201,8 @@ async function syncOnce(){
         lines.push([i+1, b.bill_no, (b.orders || {}).order_no || '', c.code || '',
           (c.name || '') + (c.branch_name ? ' ' + c.branch_name : ''),
           Number(b.total || 0), Number(b.shipping_fee || 0), Number(b.discount || 0),
-          cancelled ? 'ยกเลิกบิล' : (b.payment_status === 'paid' ? 'จ่ายแล้ว' : 'ค้างจ่าย'),
+          cancelled ? 'ยกเลิกบิล' : b.payment_status === 'paid' ? 'จ่ายครบแล้ว'
+            : Number(b.paid_amount || 0) > 0 ? 'จ่ายขาด (รับแล้ว ' + Number(b.paid_amount) + ')' : 'ยังไม่จ่าย',
           b.pay_method === 'cash' ? 'เงินสด' : (b.pay_method === 'transfer' ? 'โอน' : ''),
           cancelled ? 'ยกเลิก' : (b.ship_status === 'shipped' ? 'ส่งแล้ว' : 'รอส่ง'),
           'v' + (b.revision || 1),
