@@ -6678,7 +6678,7 @@ async function makeLabel(billId,btn){
 }
 
 /* ==================== เฟส 2: รับยอด + สลิป ==================== */
-let spBillId=null, spSlipRef=null, spDupBills=[];
+let spBillId=null, spSlipRef=null, spDupBills=[], spOthers=[];
 /* อ่าน QR จากรูปสลิป (มาตรฐานสลิปธนาคารไทยมีรหัสอ้างอิงไม่ซ้ำกัน) */
 async function decodeSlipQR(file){
   const img=await new Promise(res=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>res(null);i.src=URL.createObjectURL(file);});
@@ -6787,16 +6787,30 @@ async function checkSlip(file){
     box.innerHTML='✅ <b>อ่าน QR สลิปได้</b> และยังไม่เคยใช้ในระบบ · รหัสอ้างอิง: <span style="font-size:11px">'+esc(spSlipRef.slice(0,40))+'…</span>';
   }
 }
-function markPaid(id,btn){
+async function markPaid(id,btn){
   const b=bills.find(x=>x.id===id);if(!b)return;
   const staff=document.getElementById('ac-staff').value.trim();
   if(!staff){toast('ใส่ชื่อผู้ตรวจก่อน จะได้รู้ว่าใครติ๊ก');return;}
   spBillId=id;
   document.getElementById('sp-no').textContent=b.bill_no;
   document.getElementById('sp-info').textContent=(b.customers?.name||'')+' · ยอด ฿'+fmt(b.total)+' · ผู้ตรวจ: '+staff;
-  // บิลค้างจ่ายอื่นของลูกค้าเดียวกัน — ติ๊กปิดพร้อมกันได้
-  const others=bills.filter(x=>x.id!==id&&x.customer_id===b.customer_id
-    &&x.payment_status!=='paid'&&(x.ship_status||'pending')!=='cancelled');
+  // บิลค้างจ่ายอื่นของลูกค้าเดียวกัน — ดึงจากฐานข้อมูลตรง ๆ ให้เห็นครบทุกใบ
+  // (เดิมกรองจากบิล 500 ใบล่าสุดที่โหลดมาแสดง ทำให้บิลค้างเก่า ๆ ไม่โผล่ให้ติ๊ก → ตัดบิลไม่ครบ)
+  let others=[];
+  try{
+    const {data:od,error:oe}=await db.from('bills')
+      .select('id,bill_no,total,paid_amount,created_at,customer_id,payment_status,ship_status')
+      .eq('customer_id',b.customer_id).neq('id',id)
+      .or('payment_status.is.null,payment_status.neq.paid')
+      .order('created_at',{ascending:true}).limit(300);
+    if(oe)throw oe;
+    others=(od||[]).filter(x=>(x.ship_status||'pending')!=='cancelled');
+  }catch(e){
+    console.warn('โหลดบิลค้างของลูกค้าจากฐานข้อมูลไม่สำเร็จ ใช้ข้อมูลในหน้าแทน',e);
+    others=bills.filter(x=>x.id!==id&&x.customer_id===b.customer_id
+      &&x.payment_status!=='paid'&&(x.ship_status||'pending')!=='cancelled');
+  }
+  spOthers=others;
   const wrap=document.getElementById('sp-others-wrap');
   wrap.style.display=others.length?'block':'none';
   document.getElementById('sp-others').innerHTML=others.map(x=>
@@ -6824,7 +6838,7 @@ function spExpected(){
   const b=bills.find(x=>x.id===spBillId);if(!b)return 0;
   let sum=Math.max(0,Number(b.total)-Number(b.paid_amount||0));
   document.querySelectorAll('.sp-other:checked').forEach(cb=>{
-    const x=bills.find(y=>y.id===Number(cb.value));
+    const x=spOthers.find(y=>y.id===Number(cb.value))||bills.find(y=>y.id===Number(cb.value));
     if(x)sum+=Math.max(0,Number(x.total)-Number(x.paid_amount||0));
   });
   return sum;
@@ -6866,7 +6880,7 @@ function spAmtCheck(){
     box.innerHTML='🔺 <b>โอนเกิน ฿'+fmt(diff)+'</b> (ต้องรับ ฿'+fmt(exp)+' โอนมา ฿'+fmt(amt)+')<br>อาจโอนรวมบิลอื่น — ลองติ๊กบิลค้างด้านบนเพิ่ม หรือยืนยันปิดพร้อมบันทึกยอดรับจริง';
   }
 }
-function closeSlipModal(){document.getElementById('slip-modal').style.display='none';spBillId=null;}
+function closeSlipModal(){document.getElementById('slip-modal').style.display='none';spBillId=null;spOthers=[];}
 /** บันทึกประวัติการชำระ 1 ครั้ง (เก็บสลิปได้หลายใบ) */
 async function logPayment(billId,amount,method,slips,ref,by,note){
   try{
@@ -6933,7 +6947,7 @@ async function confirmPaid(btn){
     // บิลทั้งหมดที่สลิปนี้ปิด (บิลหลัก + ที่ติ๊กเพิ่ม)
     const targets=[b];
     document.querySelectorAll('.sp-other:checked').forEach(cb=>{
-      const x=bills.find(y=>y.id===Number(cb.value));
+      const x=spOthers.find(y=>y.id===Number(cb.value))||bills.find(y=>y.id===Number(cb.value));
       if(x)targets.push(x);
     });
     const amtStr=document.getElementById('sp-amount').value;
