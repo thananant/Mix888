@@ -108,31 +108,22 @@ async function collect(cycle: { start: number; end: number }) {
   return { byGid, noLine };
 }
 
-function buildMessage(shops: Record<string, { c: any; inCycle: any[]; older: any[] }>, endMs: number): { text: string; total: number; count: number } {
-  const parts: string[] = ['📋 แจ้งยอดบิลค้างชำระ (ตัดยอด ' + thaiDateLabel(endMs) + ' เวลา 18:00 น.)'];
-  let grand = 0, cnt = 0;
+function buildShopMessage(s: { c: any; inCycle: any[]; older: any[] }, endMs: number): { text: string; total: number; count: number } {
   const line = (b: any) => {
     const paid = Number(b.paid_amount || 0);
     return '• ' + b.bill_no + ' ค้าง ' + fmtB(outOf(b)) + (paid > EPS ? ' (จ่ายบางส่วนแล้ว ' + fmtB(paid) + ')' : '');
   };
   const cap = 15;
-  for (const code of Object.keys(shops).sort()) {
-    const s = shops[code];
-    const all = [...s.inCycle, ...s.older];
-    if (!all.length) continue;
-    const sum = all.reduce((t, b) => t + outOf(b), 0);
-    grand += sum; cnt += all.length;
-    let block = '【' + code + ' ' + (s.c.name || '') + (s.c.branch_name ? ' • ' + s.c.branch_name : '') + '】';
-    if (s.inCycle.length) block += '\n' + s.inCycle.slice(0, cap).map(line).join('\n')
-      + (s.inCycle.length > cap ? '\n…อีก ' + (s.inCycle.length - cap) + ' ใบ' : '');
-    if (s.older.length) block += '\nค้างยกมาจากรอบก่อน:\n' + s.older.slice(0, cap).map(line).join('\n')
-      + (s.older.length > cap ? '\n…อีก ' + (s.older.length - cap) + ' ใบ' : '');
-    block += '\nรวม ' + all.length + ' บิล ค้าง ' + fmtB(sum);
-    parts.push(block);
-  }
-  if (Object.keys(shops).length > 1) parts.push('รวมทุกร้านในกลุ่ม ' + cnt + ' บิล ค้าง ' + fmtB(grand));
-  parts.push(CLOSING);
-  return { text: parts.join('\n\n'), total: grand, count: cnt };
+  const all = [...s.inCycle, ...s.older];
+  const sum = all.reduce((t, b) => t + outOf(b), 0);
+  let text = '📋 แจ้งยอดบิลค้างชำระ (ตัดยอด ' + thaiDateLabel(endMs) + ' เวลา 18:00 น.)\n'
+    + '【' + s.c.code + ' ' + (s.c.name || '') + (s.c.branch_name ? ' • ' + s.c.branch_name : '') + '】';
+  if (s.inCycle.length) text += '\n' + s.inCycle.slice(0, cap).map(line).join('\n')
+    + (s.inCycle.length > cap ? '\n…อีก ' + (s.inCycle.length - cap) + ' ใบ' : '');
+  if (s.older.length) text += '\nค้างยกมาจากรอบก่อน:\n' + s.older.slice(0, cap).map(line).join('\n')
+    + (s.older.length > cap ? '\n…อีก ' + (s.older.length - cap) + ' ใบ' : '');
+  text += '\nรวม ' + all.length + ' บิล ค้าง ' + fmtB(sum) + '\n\n' + CLOSING;
+  return { text, total: sum, count: all.length };
 }
 
 async function centralNotify(text: string) {
@@ -153,20 +144,25 @@ async function run(force: string | null, resend: boolean, dryRun: boolean) {
 
   const { byGid, noLine } = await collect(cycle);
   const preview: any[] = [];
-  let groups = 0, bills = 0, total = 0, failed = 0;
+  let groups = 0, shopsSent = 0, bills = 0, total = 0, failed = 0;
 
   for (const gid of Object.keys(byGid)) {
-    const m = buildMessage(byGid[gid], cycle.end);
-    if (!m.count) continue;
-    groups++; bills += m.count; total += m.total;
-    if (dryRun) { preview.push({ group: gid.slice(0, 8) + '…', bills: m.count, total: m.total }); continue; }
-    try { await linePush(gid, m.text); }
-    catch (e) { failed++; console.error('push fail', gid, e); }
+    const shops = byGid[gid];
+    let sentInGroup = false;
+    for (const code of Object.keys(shops).sort()) {   // กลุ่มที่ผูกหลายสาขา → แจ้งแยกทีละสาขา
+      const m = buildShopMessage(shops[code], cycle.end);
+      if (!m.count) continue;
+      bills += m.count; total += m.total; shopsSent++; sentInGroup = true;
+      if (dryRun) { preview.push({ group: gid.slice(0, 8) + '…', shop: code, bills: m.count, total: m.total }); continue; }
+      try { await linePush(gid, m.text); }
+      catch (e) { failed++; console.error('push fail', gid, code, e); }
+    }
+    if (sentInGroup) groups++;
   }
 
   if (!dryRun) {
     await sbUpsertSetting('billing_reminder_last', cycle.key);
-    let sum = '📢 แจ้งยอดบิลค้างรอบ ' + thaiDateLabel(cycle.end) + ' แล้ว\nส่ง ' + groups + ' กลุ่ม · ' + bills + ' บิล · รวมค้าง ' + fmtB(total)
+    let sum = '📢 แจ้งยอดบิลค้างรอบ ' + thaiDateLabel(cycle.end) + ' แล้ว\nส่ง ' + groups + ' กลุ่ม · ' + shopsSent + ' สาขา · ' + bills + ' บิล · รวมค้าง ' + fmtB(total)
       + (failed ? '\n⚠️ ส่งไม่สำเร็จ ' + failed + ' กลุ่ม' : '');
     if (noLine.length) {
       const codes = [...new Set(noLine.map((b: any) => b.customers?.code || '?'))];
@@ -177,7 +173,7 @@ async function run(force: string | null, resend: boolean, dryRun: boolean) {
   return {
     sent: !dryRun, cycle: cycle.key,
     window: { from: new Date(cycle.start).toISOString(), to: new Date(cycle.end).toISOString() },
-    groups, bills, totalOutstanding: +total.toFixed(2), failed,
+    groups, shops: shopsSent, bills, totalOutstanding: +total.toFixed(2), failed,
     customersWithoutLine: [...new Set(noLine.map((b: any) => b.customers?.code || '?'))],
     ...(dryRun ? { note: 'โหมดดูตัวอย่าง ยังไม่ส่งจริง — เพิ่ม &send=1 เพื่อส่งจริง', preview } : {}),
   };
