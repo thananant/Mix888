@@ -89,7 +89,7 @@ function cycleFor(force: string | null) {
 async function collect(cycle: { start: number; end: number }) {
   const rows = await sbGet(
     'bills?select=id,bill_no,total,paid_amount,payment_status,ship_status,created_at,' +
-    'customers!inner(code,name,branch_name,line_group_id)' +
+    'customers!inner(code,name,branch_name,line_group_id,hide_prices)' +
     '&payment_status=neq.paid' +
     '&created_at=lte.' + encodeURIComponent(new Date(cycle.end).toISOString()) +
     '&order=created_at.asc&limit=5000');
@@ -98,14 +98,16 @@ async function collect(cycle: { start: number; end: number }) {
   // จัดกลุ่มตามกลุ่มไลน์ → ตามร้าน
   const byGid: Record<string, Record<string, { c: any; inCycle: any[]; older: any[] }>> = {};
   const noLine: any[] = [];
+  const hidden: any[] = [];
   for (const b of due) {
     const c = b.customers;
+    if (c?.hide_prices) { hidden.push(b); continue; }   // ร้านปิดราคา — ห้ามส่งยอดเงินเข้ากลุ่ม
     if (!c?.line_group_id) { noLine.push(b); continue; }
     const shop = ((byGid[c.line_group_id] ??= {})[c.code] ??= { c, inCycle: [], older: [] });
     if (new Date(b.created_at).getTime() > cycle.start) shop.inCycle.push(b);
     else shop.older.push(b);
   }
-  return { byGid, noLine };
+  return { byGid, noLine, hidden };
 }
 
 function buildShopMessage(s: { c: any; inCycle: any[]; older: any[] }, endMs: number): { text: string; total: number; count: number } {
@@ -142,7 +144,7 @@ async function run(force: string | null, resend: boolean, dryRun: boolean) {
   if (!dryRun && !resend && last?.[0]?.value === cycle.key)
     return { sent: false, reason: 'รอบนี้ (' + cycle.key + ') ส่งไปแล้ว — เพิ่ม &resend=1 ถ้าต้องการส่งซ้ำ' };
 
-  const { byGid, noLine } = await collect(cycle);
+  const { byGid, noLine, hidden } = await collect(cycle);
   const preview: any[] = [];
   let groups = 0, shopsSent = 0, bills = 0, total = 0, failed = 0;
 
@@ -168,6 +170,13 @@ async function run(force: string | null, resend: boolean, dryRun: boolean) {
       const codes = [...new Set(noLine.map((b: any) => b.customers?.code || '?'))];
       sum += '\n⚠️ ลูกค้าไม่มีกลุ่มไลน์ ' + codes.length + ' ราย (ตามเองด้วย): ' + codes.slice(0, 20).join(', ');
     }
+    if (hidden.length) {
+      // สรุปยอดค้างรายร้านให้ทีมงานตามเก็บทางส่วนตัว (ไม่ส่งเข้ากลุ่มลูกค้าเพราะปิดราคา)
+      const byShop: Record<string, number> = {};
+      hidden.forEach((b: any) => { const k = b.customers?.code || '?'; byShop[k] = (byShop[k] || 0) + outOf(b); });
+      sum += '\n🙈 ร้านปิดราคา ' + Object.keys(byShop).length + ' ราย ไม่ส่งแจ้งเข้ากลุ่ม (แจ้งเองทางส่วนตัว):\n'
+        + Object.keys(byShop).sort().map((k) => '• ' + k + ' ค้าง ' + fmtB(byShop[k])).join('\n');
+    }
     await centralNotify(sum);
   }
   return {
@@ -175,6 +184,7 @@ async function run(force: string | null, resend: boolean, dryRun: boolean) {
     window: { from: new Date(cycle.start).toISOString(), to: new Date(cycle.end).toISOString() },
     groups, shops: shopsSent, bills, totalOutstanding: +total.toFixed(2), failed,
     customersWithoutLine: [...new Set(noLine.map((b: any) => b.customers?.code || '?'))],
+    hiddenPriceCustomers: [...new Set(hidden.map((b: any) => b.customers?.code || '?'))],
     ...(dryRun ? { note: 'โหมดดูตัวอย่าง ยังไม่ส่งจริง — เพิ่ม &send=1 เพื่อส่งจริง', preview } : {}),
   };
 }
