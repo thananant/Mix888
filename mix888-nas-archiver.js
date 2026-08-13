@@ -27,6 +27,7 @@ const EVERY_MIN  = 30;                // ซิงก์ซ้ำทุกกี
 const SUPABASE_URL = 'https://eqbzpgynzgdwvouuzfwt.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_HqLNQDwR4omYcb7BNUEKIw_vyHCo4N-';
 const NAS_EXPORT_KEY = 'PASTE_NAS_EXPORT_KEY_HERE';   // รหัสลับให้ตรงกับที่รันในไฟล์ mix888-nas-export.sql
+const KEEP_A4_PAGES  = false;         // true = เก็บไฟล์บิลแบบแบ่งหน้า A4 ด้วย (เนื้อหาซ้ำกับใบเต็ม ปกติไม่จำเป็น)
 /* =========================================== */
 
 const fs   = require('fs');
@@ -166,8 +167,9 @@ async function syncOnce(){
       const files = [];
       const rev = b.revision || 1;
       if(b.image_url) files.push([b.image_url, safeName(b.bill_no) + '_บิล_v' + rev + extOf(b.image_url)]);
-      (Array.isArray(b.page_urls) ? b.page_urls : []).forEach((u, i) =>
-        files.push([u, safeName(b.bill_no) + '_บิลหน้า' + (i+1) + '_v' + rev + extOf(u)]));
+      if(KEEP_A4_PAGES)
+        (Array.isArray(b.page_urls) ? b.page_urls : []).forEach((u, i) =>
+          files.push([u, safeName(b.bill_no) + '_บิลหน้า' + (i+1) + '_v' + rev + extOf(u)]));
       const slipSet = [];
       (Array.isArray(b.payments) ? b.payments : []).forEach(p =>
         (Array.isArray(p.slips) ? p.slips : []).forEach(u => { if(u && !slipSet.includes(u)) slipSet.push(u); }));
