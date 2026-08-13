@@ -1061,6 +1061,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="fbtn" data-f="cancelled" onclick="setFilter('cancelled')">ยกเลิกบิล</button>
       <button class="fbtn" data-f="all" onclick="setFilter('all')">ทั้งหมด</button>
       <button class="fbtn" data-f="slip" onclick="setFilter('slip')">🧾 มีสลิป</button>
+      <button class="fbtn" onclick="openSlipAudit()">🕵️ สลิปตกค้าง</button>
       <select id="ac-sale" onchange="renderAccount()" title="กรองตามเซลล์">
         <option value="">เซลล์: ทั้งหมด</option>
       </select>
@@ -1240,6 +1241,21 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <p class="hint" style="margin:0 0 12px">นี่คือสิ่งที่จะถูกส่งจริงถ้ากดส่งสรุป ตรวจดูให้เรียบร้อยก่อน</p>
     <div id="pv-body"></div>
     <div style="margin-top:12px"><button class="btn-g" onclick="document.getElementById('preview-modal').style.display='none'">ปิด</button></div>
+  </div>
+</div>
+<!-- เช็คสลิปตกค้าง: สลิปที่อยู่ในระบบแต่ยังไม่ถูกใช้ตัดบิล -->
+<div id="slipaudit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#fff;border-radius:14px;max-width:860px;width:100%;padding:18px;margin:14px auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h3 style="margin:0;font-size:16px">🕵️ เช็คสลิปตกค้าง</h3>
+      <label class="chk" style="display:flex;gap:6px;align-items:center;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="sa-show-used" onchange="renderSlipAudit()"> แสดงสลิปที่ใช้ตัดบิลแล้วด้วย
+      </label>
+    </div>
+    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">สลิปทุกใบที่ถูกอัปเข้าระบบ เทียบกับประวัติการรับยอด — ใบไหนยังไม่เคยถูกใช้ตัดบิลจะขึ้นพื้นเหลือง</div>
+    <div id="sa-sum" style="font-size:13px;font-weight:600;margin-bottom:10px"></div>
+    <div id="sa-body"><div class="empty">กำลังโหลด…</div></div>
+    <div style="text-align:right;margin-top:12px"><button class="btn-g" onclick="document.getElementById('slipaudit-modal').style.display='none'">ปิด</button></div>
   </div>
 </div>
 <div id="payhist-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)this.style.display='none'">
@@ -3310,7 +3326,7 @@ async function drawBill(o,billNo,extra){
 
   // ── meta ฝั่งขวา (ยึดตำแหน่งบนสุด ไม่เลื่อนตามฝั่งซ้าย) ──
   x.fillStyle='#111';
-  const meta=[['วันที่:',new Date().toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'})],
+  const meta=[['วันที่:',(extra.issuedAt?new Date(extra.issuedAt):new Date()).toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'})],
               ['เลขที่:',billNo],
               ['ผู้สร้างรายการ:',info.creator]];
   meta.forEach(([lb,vl],i)=>{
@@ -4472,7 +4488,7 @@ async function downloadBillPDF(billId,btn,silent,opts){
   try{
     // ดึงข้อมูลบิลเต็ม (รวมค่าส่ง/ส่วนลด/ประเภท/เวอร์ชัน ให้ PDF ตรงกับบิลจริง)
     const {data:bill}=await db.from('bills')
-      .select('order_id,bill_no,shipping_fee,discount,total,revision,doc_type,seller_mode')
+      .select('order_id,bill_no,shipping_fee,discount,total,revision,doc_type,seller_mode,created_at')
       .eq('id',billId).single();
     if(!bill)throw new Error('ไม่พบบิล');
     if(!silent&&!opts){
@@ -4487,7 +4503,7 @@ async function downloadBillPDF(billId,btn,silent,opts){
     if(error||!o)throw new Error('โหลดข้อมูลบิลไม่ได้');
     const result=await drawBill(o,bill.bill_no,{
       shipFee:Number(bill.shipping_fee)||0,discount:Number(bill.discount)||0,
-      grand:Number(bill.total),revision:bill.revision||1,
+      grand:Number(bill.total),revision:bill.revision||1,issuedAt:bill.created_at,
       docType:opts.docType||bill.doc_type||'บิลเงินสด',sellerMode:opts.sellerMode||bill.seller_mode||'none'});
     const pdf=await billToPDF(result,bill.bill_no);
     pdf.save(bill.bill_no+'.pdf');
@@ -5158,7 +5174,7 @@ async function viewBill(id){
     ใช้กับบิลที่ระบบออกอัตโนมัติ (ยังไม่มีรูป) และล้างรูปเก่าที่มีข้อความแก้ไขค้าง */
 async function regenBillImages(billId){
   const {data:bill,error}=await db.from('bills')
-    .select('bill_no,order_id,shipping_fee,discount,total,revision,doc_type,seller_mode').eq('id',billId).single();
+    .select('bill_no,order_id,shipping_fee,discount,total,revision,doc_type,seller_mode,created_at').eq('id',billId).single();
   if(error||!bill)throw new Error('โหลดบิลไม่ได้');
   const {data:o}=await db.from('orders')
     .select('*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,map_link,receive_time,note,delivery_method,doc_type,bill_seller_mode,ship_shop_name,ship_receiver,ship_phone,ship_address), order_items(qty,price,amount,product_id,products(name,unit,sku,image_url))')
@@ -5166,7 +5182,7 @@ async function regenBillImages(billId){
   if(!o)throw new Error('ไม่พบออเดอร์');
   const result=await drawBill(o,bill.bill_no,{shipFee:Number(bill.shipping_fee)||0,discount:Number(bill.discount)||0,
     grand:Number(bill.total),revision:bill.revision||1,docType:bill.doc_type||'บิลเงินสด',
-    sellerMode:bill.seller_mode||'none'});
+    sellerMode:bill.seller_mode||'none',issuedAt:bill.created_at});
   const blob=await new Promise(res=>result.cv.toBlob(res,'image/jpeg',0.9));
   const path=bill.bill_no+'-'+rndTag(10)+'.jpg';
   const {error:upErr}=await db.storage.from('bills').upload(path,blob,{contentType:'image/jpeg',upsert:true});
@@ -6580,7 +6596,7 @@ async function saveEditBill(btn){
     const {data:o2}=await db.from('orders')
       .select('*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(qty,price,amount,product_id,products(name,unit))')
       .eq('id',o.id).single();
-    const result=await drawBill(o2,b.bill_no,{shipFee:ship,discount:disc,grand,revision:newRev,docType:b.doc_type||'บิลเงินสด',sellerMode:b.seller_mode||'none',editNote:(feesOnlyEdit&&!editNote)?'':editNote});
+    const result=await drawBill(o2,b.bill_no,{shipFee:ship,discount:disc,grand,revision:newRev,docType:b.doc_type||'บิลเงินสด',sellerMode:b.seller_mode||'none',editNote:(feesOnlyEdit&&!editNote)?'':editNote,issuedAt:b.created_at});
     const blob=await new Promise(res=>result.cv.toBlob(res,'image/png'));
     const path=b.bill_no+'_v'+newRev+'-'+rndTag(10)+'.png';
     const {error:upErr}=await db.storage.from('bills').upload(path,blob,{contentType:'image/png',upsert:true});
@@ -6881,6 +6897,66 @@ function spAmtCheck(){
   }
 }
 function closeSlipModal(){document.getElementById('slip-modal').style.display='none';spBillId=null;spOthers=[];}
+/* ==================== เช็คสลิปตกค้าง ==================== */
+let saFiles=[];
+async function saListSlips(prefix){
+  const out=[];let offset=0;
+  for(;;){
+    const {data,error}=await db.storage.from('slips').list(prefix||'',{limit:100,offset,sortBy:{column:'created_at',order:'desc'}});
+    if(error||!data||!data.length)break;
+    for(const f of data){
+      const full=(prefix?prefix+'/':'')+f.name;
+      if(f.id===null||f.metadata===null){out.push(...await saListSlips(full));}   // โฟลเดอร์ย่อย เช่น auto/
+      else out.push({path:full,at:f.created_at||null});
+    }
+    if(data.length<100)break;
+    offset+=data.length;
+  }
+  return out;
+}
+async function openSlipAudit(){
+  document.getElementById('slipaudit-modal').style.display='flex';
+  const body=document.getElementById('sa-body');
+  document.getElementById('sa-sum').textContent='';
+  body.innerHTML='<div class="empty">กำลังโหลดรายการสลิปทั้งหมด…</div>';
+  try{
+    const files=await saListSlips('');
+    // สลิปที่ถูกใช้แล้ว: จากประวัติการรับยอด (payments) + ช่องสลิปบนบิล
+    const used={};
+    try{
+      const {data:pays}=await db.from('payments').select('slips,bills(bill_no)').limit(5000);
+      (pays||[]).forEach(p=>{(Array.isArray(p.slips)?p.slips:[]).forEach(u=>{if(u&&!used[u])used[u]=(p.bills&&p.bills.bill_no)||'?';});});
+    }catch(e){console.warn('อ่าน payments ไม่ได้',e);}
+    try{
+      const {data:bs}=await db.from('bills').select('bill_no,slip_url').not('slip_url','is',null).limit(5000);
+      (bs||[]).forEach(b=>{if(b.slip_url&&!used[b.slip_url])used[b.slip_url]=b.bill_no;});
+    }catch(e){console.warn('อ่าน bills ไม่ได้',e);}
+    saFiles=files.map(f=>{
+      const url=db.storage.from('slips').getPublicUrl(f.path).data.publicUrl;
+      return {...f,url,usedBy:used[url]||null};
+    }).sort((a,b)=>new Date(b.at||0)-new Date(a.at||0));
+    renderSlipAudit();
+  }catch(e){body.innerHTML='<div class="empty">โหลดไม่สำเร็จ: '+esc(String(e.message||e))+'</div>';}
+}
+function renderSlipAudit(){
+  const showUsed=document.getElementById('sa-show-used').checked;
+  const body=document.getElementById('sa-body');
+  const un=saFiles.filter(f=>!f.usedBy);
+  document.getElementById('sa-sum').innerHTML='สลิปทั้งหมด '+saFiles.length+' ไฟล์ · <span style="color:#b58900">🟡 ยังไม่ถูกใช้ตัดบิล '+un.length+' ไฟล์</span>';
+  const list=showUsed?saFiles:un;
+  if(!list.length){body.innerHTML='<div class="empty">🎉 ไม่มีสลิปตกค้าง — สลิปทุกใบถูกใช้ตัดบิลแล้ว</div>';return;}
+  const fD=at=>at?new Date(at).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+  body.innerHTML='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">'
+    +list.slice(0,400).map(f=>
+      '<div style="border:1px solid var(--line,#eee);border-radius:10px;padding:8px'+(f.usedBy?'':';background:#fff7e0')+'">'
+      +'<img src="'+esc(f.url)+'" loading="lazy" onclick="showImgView(this.src)" style="width:100%;height:130px;object-fit:cover;border-radius:8px;cursor:zoom-in;background:#f6f0ec">'
+      +'<div style="font-size:11px;color:var(--muted);margin-top:5px">'+esc(fD(f.at))+'</div>'
+      +(f.usedBy
+        ?'<div style="font-size:12px;color:#0f7a5c;font-weight:600;margin-top:2px">✅ ใช้กับบิล '+esc(f.usedBy)+'</div>'
+        :'<div style="font-size:12px;color:#b58900;font-weight:700;margin-top:2px">🟡 ยังไม่ถูกใช้ตัดบิล</div>')
+      +'</div>').join('')+'</div>'
+    +(list.length>400?'<div style="font-size:12.5px;color:var(--muted);margin-top:8px">แสดง 400 รายการล่าสุดจากทั้งหมด '+list.length+'</div>':'');
+}
 /** บันทึกประวัติการชำระ 1 ครั้ง (เก็บสลิปได้หลายใบ) */
 async function logPayment(billId,amount,method,slips,ref,by,note){
   try{
