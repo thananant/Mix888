@@ -11,13 +11,17 @@
         IV2607090001_สลิป1.jpg        ← สลิปโอนที่ใช้ตัดบิลนี้
      <NAS_ROOT>\2026\07\09072026\สรุปบิล_09072026.csv  ← สรุปรายวัน (เปิดด้วย Excel)
 
-   วิธีใช้: ติดตั้ง Node.js แล้วดับเบิลคลิก mix888-nas-archiver.bat
-            เปิดทิ้งไว้ โปรแกรมจะซิงก์ทุก ๆ 30 นาทีอัตโนมัติ
+   วิธีใช้ (เลือกอย่างใดอย่างหนึ่ง):
+   ① บน Synology NAS: ลงแพ็กเกจ Node.js จาก Package Center แล้วตั้ง
+      Task Scheduler รันทุกชั่วโมง:  node /volume1/.../mix888-nas-archiver.js --once
+      (--once = ซิงก์ครั้งเดียวแล้วจบ ให้ Task Scheduler เป็นคนเรียกซ้ำ)
+   ② บนคอม Windows: ติดตั้ง Node.js แล้วดับเบิลคลิก mix888-nas-archiver.bat
+      เปิดทิ้งไว้ โปรแกรมจะซิงก์ทุก ๆ 30 นาทีอัตโนมัติ
    ============================================================ */
 'use strict';
 
 /* ================= ตั้งค่า ================= */
-const NAS_ROOT   = 'Z:\\Mix888';      // โฟลเดอร์ปลายทางบน NAS (แมพไดรฟ์ไว้ เช่น Z:) หรือใช้ '\\\\ชื่อNAS\\share\\Mix888'
+const NAS_ROOT   = '/volume1/Mix888';  // รันบน Synology NAS ใช้พาธแบบนี้ / รันบนคอม Windows ใช้ 'Z:\\Mix888'
 const DAYS_BACK  = 45;                // ซิงก์บิลย้อนหลังกี่วัน (รอบแรกแนะนำตั้งเยอะ ๆ เช่น 400 แล้วค่อยลดลง)
 const EVERY_MIN  = 30;                // ซิงก์ซ้ำทุกกี่นาที
 const SUPABASE_URL = 'https://eqbzpgynzgdwvouuzfwt.supabase.co';
@@ -159,5 +163,9 @@ console.log('  ปลายทาง: ' + NAS_ROOT);
 console.log('  ซิงก์ย้อนหลัง ' + DAYS_BACK + ' วัน · ทำซ้ำทุก ' + EVERY_MIN + ' นาที');
 console.log('  เปิดหน้าต่างนี้ทิ้งไว้ (ย่อได้ อย่าปิด) — ปิดแล้วเปิดใหม่ก็ซิงก์ต่อจากเดิมได้');
 console.log('==========================================================');
-syncOnce();
-setInterval(syncOnce, EVERY_MIN * 60 * 1000);
+if(process.argv.includes('--once')){
+  syncOnce().then(() => process.exit(0));       // โหมด Task Scheduler: ทำรอบเดียวแล้วจบ
+}else{
+  syncOnce();
+  setInterval(syncOnce, EVERY_MIN * 60 * 1000); // โหมดเปิดค้าง: ทำซ้ำเองเรื่อย ๆ
+}
