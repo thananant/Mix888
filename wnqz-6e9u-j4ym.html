@@ -266,8 +266,17 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="charts" style="margin-top:16px">
     <div class="card"><h3 class="ct">💰 ลูกหนี้ค้างชำระ (ตามอายุหนี้)</h3>
       <div id="ar-buckets" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px"></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+        <select id="ar-sale" onchange="arSetSale(this.value)" title="กรองตามเซลล์">
+          <option value="">เซลล์: ทั้งหมด</option>
+        </select>
+        <span style="flex:1"></span>
+        <button class="btn-s mini" onclick="arPageMove(-1)">◀</button>
+        <span id="ar-page" style="font-size:12.5px;color:var(--muted);min-width:64px;text-align:center">หน้า 1/1</span>
+        <button class="btn-s mini" onclick="arPageMove(1)">▶</button>
+      </div>
       <div style="overflow-x:auto;max-height:340px;overflow-y:auto"><table>
-        <thead><tr><th>ร้าน</th><th class="num">บิลค้าง</th><th class="num">ยอดค้าง</th><th class="num">ค้างนานสุด</th></tr></thead>
+        <thead><tr><th>ร้าน</th><th>เซลล์</th><th class="num">บิลค้าง</th><th class="num">ยอดค้าง</th><th class="num">ค้างนานสุด</th></tr></thead>
         <tbody id="ar-body"></tbody></table></div>
       <p class="hint" id="ar-note" style="margin-top:8px"></p>
     </div>
@@ -8206,7 +8215,7 @@ const AR_BUCKETS=[{k:'0-7',lo:0,hi:7,c:'#159b78'},{k:'8-15',lo:8,hi:15,c:'#8ba30
   {k:'16-30',lo:16,hi:30,c:'#e07b00'},{k:'31+',lo:31,hi:1e9,c:'#c0201f'}];
 function arDays(d,now){return Math.max(0,Math.floor(((now||Date.now())-new Date(d).getTime())/86400000));}
 function arBucketOf(days){return (AR_BUCKETS.find(b=>days>=b.lo&&days<=b.hi)||AR_BUCKETS[AR_BUCKETS.length-1]).k;}
-/** สรุปหนี้ค้าง: คืน {buckets, shops, total, count} — เรียงร้านตามยอดค้างมากสุด */
+/** สรุปหนี้ค้าง: คืน {buckets, shops, total, count} — เรียงร้านตามค้างนานสุด มาก→น้อย */
 function arSummarize(rows,now){
   const buckets={},shops={};
   AR_BUCKETS.forEach(b=>buckets[b.k]={count:0,sum:0});
@@ -8217,18 +8226,35 @@ function arSummarize(rows,now){
     const days=arDays(b.created_at,now), bk=arBucketOf(days);
     buckets[bk].count++;buckets[bk].sum+=out;total+=out;count++;
     const c=b.customers||{},key=c.code||'?';
-    const sh=shops[key]||(shops[key]={code:key,name:c.name||'',branch:c.branch_name||'',bills:0,sum:0,maxDays:0});
+    const sh=shops[key]||(shops[key]={code:key,name:c.name||'',branch:c.branch_name||'',sale:c.sale_name||'',bills:0,sum:0,maxDays:0});
     sh.bills++;sh.sum+=out;if(days>sh.maxDays)sh.maxDays=days;
   });
-  return {buckets,total,count,shops:Object.values(shops).sort((a,b)=>b.sum-a.sum)};
+  return {buckets,total,count,shops:Object.values(shops).sort((a,b)=>(b.maxDays-a.maxDays)||(b.sum-a.sum))};
 }
+let arRows=[],arSale='',arPage=1;
+const AR_PER_PAGE=20;
+function arSetSale(v){arSale=v;arPage=1;renderArAging();}
+function arPageMove(d){arPage+=d;renderArAging();}
 async function loadArAging(){
   const {data,error}=await db.from('bills')
-    .select('total,paid_amount,created_at,payment_status,ship_status,customers(code,name,branch_name)')
+    .select('total,paid_amount,created_at,payment_status,ship_status,customers(code,name,branch_name,sale_name)')
     .neq('payment_status','paid').limit(5000);
-  const box=document.getElementById('ar-buckets'),body=document.getElementById('ar-body'),note=document.getElementById('ar-note');
+  const note=document.getElementById('ar-note');
   if(error){note.textContent='โหลดข้อมูลลูกหนี้ไม่ได้: '+error.message;return;}
-  const rows=(data||[]).filter(b=>b.ship_status!=='cancelled');
+  arRows=(data||[]).filter(b=>b.ship_status!=='cancelled');
+  const sel=document.getElementById('ar-sale');
+  const names=[...new Set(arRows.map(b=>(b.customers&&b.customers.sale_name)||'').filter(Boolean))].sort((a,b)=>a.localeCompare(b,'th'));
+  const keep=arSale;
+  sel.innerHTML='<option value="">เซลล์: ทั้งหมด</option>'
+    +names.map(n=>'<option value="'+esc(n)+'">'+esc(n)+'</option>').join('')
+    +(arRows.some(b=>!(b.customers&&b.customers.sale_name))?'<option value="__none">(ไม่ระบุเซลล์)</option>':'');
+  if(keep&&[...sel.options].some(o=>o.value===keep)){sel.value=keep;}else{sel.value='';arSale='';}
+  renderArAging();
+}
+function renderArAging(){
+  const box=document.getElementById('ar-buckets'),body=document.getElementById('ar-body'),
+        note=document.getElementById('ar-note'),pinfo=document.getElementById('ar-page');
+  const rows=arSale?arRows.filter(b=>{const n=(b.customers&&b.customers.sale_name)||'';return arSale==='__none'?!n:n===arSale;}):arRows;
   const r=arSummarize(rows);
   box.innerHTML=AR_BUCKETS.map(b=>{
     const v=r.buckets[b.k];
@@ -8237,14 +8263,20 @@ async function loadArAging(){
       +'<div style="font-size:17px;font-weight:700;color:'+b.c+'">'+fmt(v.sum)+'</div>'
       +'<div style="font-size:11.5px;color:var(--muted)">'+v.count+' บิล</div></div>';
   }).join('');
-  body.innerHTML=r.shops.length?r.shops.slice(0,50).map(s=>{
+  const pages=Math.max(1,Math.ceil(r.shops.length/AR_PER_PAGE));
+  if(arPage>pages)arPage=pages;
+  if(arPage<1)arPage=1;
+  const start=(arPage-1)*AR_PER_PAGE, view=r.shops.slice(start,start+AR_PER_PAGE);
+  body.innerHTML=view.length?view.map(s=>{
     const col=s.maxDays>=31?'#c0201f':s.maxDays>=16?'#e07b00':'var(--muted)';
     return '<tr><td><b>'+esc(s.code)+'</b> '+esc(s.name)+(s.branch?' <span style="color:var(--muted)">• '+esc(s.branch)+'</span>':'')+'</td>'
+      +'<td>'+esc(s.sale||'-')+'</td>'
       +'<td class="num">'+s.bills+'</td><td class="num"><b>'+fmt(s.sum)+'</b></td>'
       +'<td class="num" style="color:'+col+'">'+s.maxDays+' วัน</td></tr>';
-  }).join(''):'<tr><td colspan="4" style="color:var(--muted)">ไม่มีบิลค้างชำระ 🎉</td></tr>';
+  }).join(''):'<tr><td colspan="5" style="color:var(--muted)">ไม่มีบิลค้างชำระ 🎉</td></tr>';
+  if(pinfo)pinfo.textContent='หน้า '+arPage+'/'+pages;
   note.textContent='รวม '+r.count+' บิล ยอดค้าง '+fmt(r.total)+' จาก '+r.shops.length+' ร้าน'
-    +(r.shops.length>50?' (แสดง 50 ร้านแรก เรียงตามยอดค้างมากสุด)':'')+' · นับอายุจากวันที่ออกบิล';
+    +(arSale?' (เฉพาะเซลล์ที่เลือก)':'')+' · เรียงตามค้างนานสุด มาก→น้อย · นับอายุจากวันที่ออกบิล';
 }
 
 /* ==================== สำรองข้อมูล ==================== */
