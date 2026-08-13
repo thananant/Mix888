@@ -50,11 +50,18 @@ function resolveNasRoot(){
   return null;
 }
 
-function thDate(iso){                              // วันที่ตามเวลาไทย
-  const s = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Bangkok',
-    year:'numeric', month:'2-digit', day:'2-digit'}).format(new Date(iso));
-  const [y, m, d] = s.split('-');
-  return {y, m, d, ddmmyyyy: d + m + y};
+// เวลาไทย = UTC+7 คงที่ — คำนวณเองตรง ๆ (Node บน NAS บางรุ่นไม่มีข้อมูล locale ไทย)
+function thDate(iso){
+  const d = new Date(new Date(iso).getTime() + 7*3600*1000);
+  const y  = String(d.getUTCFullYear());
+  const mo = String(d.getUTCMonth()+1).padStart(2,'0');
+  const dy = String(d.getUTCDate()).padStart(2,'0');
+  return {y, m: mo, d: dy, ddmmyyyy: dy + mo + y};
+}
+function thDateTimeStr(iso){
+  const d = new Date(new Date(iso).getTime() + 7*3600*1000);
+  return String(d.getUTCDate()).padStart(2,'0') + '/' + String(d.getUTCMonth()+1).padStart(2,'0') + '/'
+       + d.getUTCFullYear() + ' ' + String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0');
 }
 function extOf(url){
   const m = String(url||'').split('?')[0].match(/\.(png|jpe?g|webp|pdf)$/i);
@@ -173,7 +180,7 @@ async function syncOnce(){
           b.pay_method === 'cash' ? 'เงินสด' : (b.pay_method === 'transfer' ? 'โอน' : ''),
           cancelled ? 'ยกเลิก' : (b.ship_status === 'shipped' ? 'ส่งแล้ว' : 'รอส่ง'),
           'v' + (b.revision || 1),
-          new Date(b.created_at).toLocaleString('th-TH', {timeZone:'Asia/Bangkok'}),
+          thDateTimeStr(b.created_at),
           nslip].map(csvCell).join(','));
       });
       lines.push('');
