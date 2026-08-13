@@ -438,8 +438,19 @@ async function placeOrder(){
   document.getElementById('success').classList.add('show');
   notifyCentral(data,ci);
   notifyCustomerOrder(data,ci);
+  markStaffOrder(data);
   loadCatalog();
   allOrders=[]; // ให้โหลดใหม่เมื่อเปิดแท็บประวัติ
+}
+// เครื่องที่เคยล็อกอินหลังบ้าน = เครื่องพนักงาน → ประทับชื่อพนักงานเป็นผู้สั่งออเดอร์นี้
+// (ลูกค้าสั่งจากมือถือตัวเองจะไม่มีข้อมูลนี้ = ขึ้น "ลูกค้าสั่งเอง" ในหลังบ้าน)
+async function markStaffOrder(data){
+  try{
+    const raw=localStorage.getItem('mix888_user');if(!raw)return;
+    const u=JSON.parse(raw)||{};
+    const name=u.display_name||u.username;if(!name)return;
+    await db.rpc('mark_order_creator',{p_order_no:data.order_no,p_staff:name});
+  }catch(e){/* เงียบไว้ ไม่กระทบการสั่ง */}
 }
 // แจ้งกลุ่ม LINE ของลูกค้าเองว่ารับออเดอร์แล้ว
 async function notifyCustomerOrder(data,ci){
