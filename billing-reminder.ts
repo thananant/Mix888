@@ -22,6 +22,13 @@
 //           🧪 ทดสอบระบบ และไม่นับว่ารอบนี้ส่งแล้ว — รอบจริงตามเวลายังทำงานปกติ
 //    GET  <URL>?force=first&send=1         → บังคับส่งจริงทุกกลุ่มเดี๋ยวนี้
 //    (force=second = รอบสิ้นเดือน · เพิ่ม &resend=1 ถ้าจะส่งซ้ำรอบที่เคยส่งแล้ว)
+//
+//  ส่งย้อนหลังแบบเลือกช่วงวันเอง (ไม่กระทบรอบอัตโนมัติ):
+//    GET  <URL>?from=2026-07-01&to=2026-07-31            → ดูตัวอย่าง (ไม่ส่ง)
+//    GET  <URL>?from=2026-07-01&to=2026-07-31&send=1&only=SKG00198 → ทดสอบร้านเดียว
+//    GET  <URL>?from=2026-07-01&to=2026-07-31&send=1     → ส่งจริงทุกกลุ่ม
+//    นับบิลที่ออกในช่วงวันดังกล่าว (เวลาไทย ทั้งวัน) ที่ยังค้างจ่ายอยู่ตอนนี้
+//    บิลค้างที่เก่ากว่าช่วง จะแนบเป็น "ค้างยกมาจากรอบก่อน" เหมือนรอบปกติ
 // ============================================================
 
 const LINE_TOKEN =
@@ -85,7 +92,23 @@ function cycleFor(force: string | null) {
   // 18:00 ไทย = 11:00 UTC — ช่วงรอบคือ (start, end]  (18:01 → 18:00)
   const start = which === 'first' ? Date.UTC(y, mo, 0, 11, 0, 0) : Date.UTC(y, mo, 15, 11, 0, 0);
   const end   = which === 'first' ? Date.UTC(y, mo, 15, 11, 0, 0) : Date.UTC(y, mo, lastDay, 11, 0, 0);
-  return { which, start, end, key: 'br-' + which + '-' + y + '-' + String(mo + 1).padStart(2, '0') };
+  return { which, start, end, key: 'br-' + which + '-' + y + '-' + String(mo + 1).padStart(2, '0'),
+    label: 'ตัดยอด ' + thaiDateLabel(end) + ' เวลา 18:00 น.' };
+}
+
+/** รอบแบบเลือกช่วงวันเอง เช่น from=2026-07-01 to=2026-07-31 (เวลาไทย ทั้งวัน) */
+function cycleCustom(fromStr: string, toStr: string) {
+  const p = (s: string) => {
+    const m = String(s).trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m ? { y: +m[1], mo: +m[2] - 1, d: +m[3] } : null;
+  };
+  const f = p(fromStr), t = p(toStr);
+  if (!f || !t) return { error: 'รูปแบบวันที่ไม่ถูกต้อง — ใช้ from=YYYY-MM-DD&to=YYYY-MM-DD เช่น from=2026-07-01&to=2026-07-31' };
+  const start = Date.UTC(f.y, f.mo, f.d, 0, 0, 0) - 7 * 3600e3 - 1;          // เที่ยงคืนไทยของวันแรก (ขอบเปิด)
+  const end   = Date.UTC(t.y, t.mo, t.d, 23, 59, 59, 999) - 7 * 3600e3;      // สิ้นวันไทยของวันสุดท้าย
+  if (end <= start) return { error: 'ช่วงวันไม่ถูกต้อง (from ต้องไม่เกิน to)' };
+  return { which: 'custom' as const, start, end, key: 'br-custom-' + fromStr + '-' + toStr,
+    label: 'บิลช่วง ' + thaiDateLabel(start + 1) + ' – ' + thaiDateLabel(end) };
 }
 
 // ---------- รวบรวมบิลค้าง ----------
@@ -113,7 +136,7 @@ async function collect(cycle: { start: number; end: number }) {
   return { byGid, noLine, hidden };
 }
 
-function buildShopMessage(s: { c: any; inCycle: any[]; older: any[] }, endMs: number): { text: string; total: number; count: number } {
+function buildShopMessage(s: { c: any; inCycle: any[]; older: any[] }, label: string): { text: string; total: number; count: number } {
   const line = (b: any) => {
     const paid = Number(b.paid_amount || 0);
     return '• ' + b.bill_no + ' ค้าง ' + fmtB(outOf(b)) + (paid > EPS ? ' (จ่ายบางส่วนแล้ว ' + fmtB(paid) + ')' : '');
@@ -121,7 +144,7 @@ function buildShopMessage(s: { c: any; inCycle: any[]; older: any[] }, endMs: nu
   const cap = 15;
   const all = [...s.inCycle, ...s.older];
   const sum = all.reduce((t, b) => t + outOf(b), 0);
-  let text = '📋 แจ้งยอดบิลค้างชำระ (ตัดยอด ' + thaiDateLabel(endMs) + ' เวลา 18:00 น.)\n'
+  let text = '📋 แจ้งยอดบิลค้างชำระ (' + label + ')\n'
     + '【' + s.c.code + ' ' + (s.c.name || '') + (s.c.branch_name ? ' • ' + s.c.branch_name : '') + '】';
   if (s.inCycle.length) text += '\n' + s.inCycle.slice(0, cap).map(line).join('\n')
     + (s.inCycle.length > cap ? '\n…อีก ' + (s.inCycle.length - cap) + ' ใบ' : '');
@@ -140,12 +163,21 @@ async function centralNotify(text: string) {
 }
 
 // ---------- ทำงานจริง ----------
-async function run(force: string | null, resend: boolean, dryRun: boolean, only: string | null = null) {
-  const cycle = cycleFor(force);
-  if (!cycle) return { sent: false, reason: 'วันนี้ไม่ใช่วันแจ้ง (แจ้งเฉพาะวันที่ 16 และวันสุดท้ายของเดือน)' };
-  const last = await sbGet('settings?key=eq.billing_reminder_last&select=value');
-  if (!dryRun && !resend && !only && last?.[0]?.value === cycle.key)
-    return { sent: false, reason: 'รอบนี้ (' + cycle.key + ') ส่งไปแล้ว — เพิ่ม &resend=1 ถ้าต้องการส่งซ้ำ' };
+async function run(force: string | null, resend: boolean, dryRun: boolean, only: string | null = null,
+                   fromStr: string | null = null, toStr: string | null = null) {
+  let cycle: any;
+  const custom = !!(fromStr || toStr);
+  if (custom) {
+    if (!fromStr || !toStr) return { sent: false, reason: 'ต้องใส่ทั้ง from และ to เช่น ?from=2026-07-01&to=2026-07-31' };
+    cycle = cycleCustom(fromStr, toStr);
+    if (cycle.error) return { sent: false, reason: cycle.error };
+  } else {
+    cycle = cycleFor(force);
+    if (!cycle) return { sent: false, reason: 'วันนี้ไม่ใช่วันแจ้ง (แจ้งเฉพาะวันที่ 16 และวันสุดท้ายของเดือน)' };
+    const last = await sbGet('settings?key=eq.billing_reminder_last&select=value');
+    if (!dryRun && !resend && !only && last?.[0]?.value === cycle.key)
+      return { sent: false, reason: 'รอบนี้ (' + cycle.key + ') ส่งไปแล้ว — เพิ่ม &resend=1 ถ้าต้องการส่งซ้ำ' };
+  }
 
   const { byGid, noLine, hidden } = await collect(cycle);
   const preview: any[] = [];
@@ -156,7 +188,7 @@ async function run(force: string | null, resend: boolean, dryRun: boolean, only:
     let sentInGroup = false;
     for (const code of Object.keys(shops).sort()) {   // กลุ่มที่ผูกหลายสาขา → แจ้งแยกทีละสาขา
       if (only && code.toLowerCase() !== only.toLowerCase()) continue;   // โหมดทดสอบร้านเดียว
-      const m = buildShopMessage(shops[code], cycle.end);
+      const m = buildShopMessage(shops[code], cycle.label);
       if (!m.count) continue;
       bills += m.count; total += m.total; shopsSent++; sentInGroup = true;
       if (dryRun) { preview.push({ group: gid.slice(0, 8) + '…', shop: code, bills: m.count, total: m.total }); continue; }
@@ -186,8 +218,8 @@ async function run(force: string | null, resend: boolean, dryRun: boolean, only:
   }
 
   if (!dryRun) {
-    await sbUpsertSetting('billing_reminder_last', cycle.key);
-    let sum = '📢 แจ้งยอดบิลค้างรอบ ' + thaiDateLabel(cycle.end) + ' แล้ว\nส่ง ' + groups + ' กลุ่ม · ' + shopsSent + ' สาขา · ' + bills + ' บิล · รวมค้าง ' + fmtB(total)
+    if (!custom) await sbUpsertSetting('billing_reminder_last', cycle.key);   // รอบเลือกวันเองไม่แตะตัวกันซ้ำของรอบอัตโนมัติ
+    let sum = '📢 แจ้งยอดบิลค้าง (' + cycle.label + ') แล้ว\nส่ง ' + groups + ' กลุ่ม · ' + shopsSent + ' สาขา · ' + bills + ' บิล · รวมค้าง ' + fmtB(total)
       + (failed ? '\n⚠️ ส่งไม่สำเร็จ ' + failed + ' กลุ่ม' : '');
     if (noLine.length) {
       const codes = [...new Set(noLine.map((b: any) => b.customers?.code || '?'))];
@@ -208,6 +240,7 @@ async function run(force: string | null, resend: boolean, dryRun: boolean, only:
     groups, shops: shopsSent, bills, totalOutstanding: +total.toFixed(2), failed,
     customersWithoutLine: [...new Set(noLine.map((b: any) => b.customers?.code || '?'))],
     hiddenPriceCustomers: [...new Set(hidden.map((b: any) => b.customers?.code || '?'))],
+    ...(custom ? { mode: 'custom', customNote: 'รอบเลือกวันเอง — ไม่บล็อก/ไม่กระทบรอบอัตโนมัติวันที่ 16 และสิ้นเดือน' } : {}),
     ...(dryRun ? { note: 'โหมดดูตัวอย่าง ยังไม่ส่งจริง — เพิ่ม &send=1 เพื่อส่งจริง', preview } : {}),
   };
 }
@@ -221,11 +254,11 @@ Deno.serve(async (req) => {
       const send = u.searchParams.get('send') === '1';
       const resend = u.searchParams.get('resend') === '1';
       const only = u.searchParams.get('only');
-      return J(await run(force, resend, !send, only));
+      return J(await run(force, resend, !send, only, u.searchParams.get('from'), u.searchParams.get('to')));
     }
     let body: any = {};
     try { body = await req.json(); } catch { /* cron ส่ง {} */ }
-    return J(await run(body.force ?? null, !!body.resend, false, body.only ?? null));
+    return J(await run(body.force ?? null, !!body.resend, false, body.only ?? null, body.from ?? null, body.to ?? null));
   } catch (e) {
     console.error(e);
     return J({ ok: false, error: String((e as Error)?.message || e) });
