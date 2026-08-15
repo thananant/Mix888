@@ -17,7 +17,10 @@
 //  ทดสอบ (เปิดใน browser):
 //    GET  <URL ฟังก์ชัน>                    → ดูสถานะ/รอบของวันนี้ (ไม่ส่งจริง)
 //    GET  <URL>?force=first                → ดูตัวอย่างรอบวันที่ 16 (ไม่ส่งจริง)
-//    GET  <URL>?force=first&send=1         → บังคับส่งจริงเดี๋ยวนี้ (ไว้ทดสอบ)
+//    GET  <URL>?force=first&send=1&only=SKG00198
+//         → ทดสอบส่งจริง "เฉพาะร้านเดียว" (ใส่รหัสร้านที่ต้องการ) ข้อความขึ้นหัวว่า
+//           🧪 ทดสอบระบบ และไม่นับว่ารอบนี้ส่งแล้ว — รอบจริงตามเวลายังทำงานปกติ
+//    GET  <URL>?force=first&send=1         → บังคับส่งจริงทุกกลุ่มเดี๋ยวนี้
 //    (force=second = รอบสิ้นเดือน · เพิ่ม &resend=1 ถ้าจะส่งซ้ำรอบที่เคยส่งแล้ว)
 // ============================================================
 
@@ -137,11 +140,11 @@ async function centralNotify(text: string) {
 }
 
 // ---------- ทำงานจริง ----------
-async function run(force: string | null, resend: boolean, dryRun: boolean) {
+async function run(force: string | null, resend: boolean, dryRun: boolean, only: string | null = null) {
   const cycle = cycleFor(force);
   if (!cycle) return { sent: false, reason: 'วันนี้ไม่ใช่วันแจ้ง (แจ้งเฉพาะวันที่ 16 และวันสุดท้ายของเดือน)' };
   const last = await sbGet('settings?key=eq.billing_reminder_last&select=value');
-  if (!dryRun && !resend && last?.[0]?.value === cycle.key)
+  if (!dryRun && !resend && !only && last?.[0]?.value === cycle.key)
     return { sent: false, reason: 'รอบนี้ (' + cycle.key + ') ส่งไปแล้ว — เพิ่ม &resend=1 ถ้าต้องการส่งซ้ำ' };
 
   const { byGid, noLine, hidden } = await collect(cycle);
@@ -152,14 +155,34 @@ async function run(force: string | null, resend: boolean, dryRun: boolean) {
     const shops = byGid[gid];
     let sentInGroup = false;
     for (const code of Object.keys(shops).sort()) {   // กลุ่มที่ผูกหลายสาขา → แจ้งแยกทีละสาขา
+      if (only && code.toLowerCase() !== only.toLowerCase()) continue;   // โหมดทดสอบร้านเดียว
       const m = buildShopMessage(shops[code], cycle.end);
       if (!m.count) continue;
       bills += m.count; total += m.total; shopsSent++; sentInGroup = true;
       if (dryRun) { preview.push({ group: gid.slice(0, 8) + '…', shop: code, bills: m.count, total: m.total }); continue; }
-      try { await linePush(gid, m.text); }
+      try { await linePush(gid, (only ? '🧪 (ทดสอบระบบ — ข้อความตัวอย่าง)\n' : '') + m.text); }
       catch (e) { failed++; console.error('push fail', gid, code, e); }
     }
     if (sentInGroup) groups++;
+  }
+
+  // โหมดทดสอบร้านเดียว: ไม่บันทึกว่ารอบนี้ส่งแล้ว และไม่สรุปเข้ากลุ่มกลาง
+  if (only) {
+    let note = 'โหมดทดสอบร้านเดียว (' + only + ') — ไม่นับว่ารอบนี้ส่งแล้ว รอบจริงตามเวลายังทำงานปกติ';
+    if (!shopsSent) {
+      const low = only.toLowerCase();
+      const inHidden = hidden.some((b: any) => (b.customers?.code || '').toLowerCase() === low);
+      const inNoLine = noLine.some((b: any) => (b.customers?.code || '').toLowerCase() === low);
+      note = inHidden ? 'ร้าน ' + only + ' ตั้งปิดราคาไว้ ระบบไม่ส่งยอดเข้ากลุ่มลูกค้า'
+        : inNoLine ? 'ร้าน ' + only + ' ยังไม่ได้ผูกกลุ่มไลน์'
+        : 'ไม่พบบิลค้างของร้าน ' + only + ' ในรอบนี้ (เช็ครหัสร้านอีกที)';
+    }
+    return {
+      sent: !dryRun && shopsSent > 0, testShop: only, cycle: cycle.key,
+      window: { from: new Date(cycle.start).toISOString(), to: new Date(cycle.end).toISOString() },
+      groups, shops: shopsSent, bills, totalOutstanding: +total.toFixed(2), failed, note,
+      ...(dryRun ? { preview } : {}),
+    };
   }
 
   if (!dryRun) {
@@ -197,11 +220,12 @@ Deno.serve(async (req) => {
       const force = u.searchParams.get('force');
       const send = u.searchParams.get('send') === '1';
       const resend = u.searchParams.get('resend') === '1';
-      return J(await run(force, resend, !send));
+      const only = u.searchParams.get('only');
+      return J(await run(force, resend, !send, only));
     }
     let body: any = {};
     try { body = await req.json(); } catch { /* cron ส่ง {} */ }
-    return J(await run(body.force ?? null, !!body.resend, false));
+    return J(await run(body.force ?? null, !!body.resend, false, body.only ?? null));
   } catch (e) {
     console.error(e);
     return J({ ok: false, error: String((e as Error)?.message || e) });
