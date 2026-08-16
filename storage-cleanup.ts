@@ -96,56 +96,74 @@ async function lineCentral(text: string) {
 }
 
 async function run(doDelete: boolean, max: number) {
-  const d2 = new Date().toISOString();   // ยืนยันแล้วลบได้ทันที (archiver ตรวจว่าไฟล์ลง NAS ครบจริงก่อนยืนยัน)
+  // ทำเป็นรอบ ๆ (รอบละ `max` ใบ) วนจนหมดคิวหรือครบงบเวลา — บิลเยอะแค่ไหนก็ระบายหมด
+  // ไม่ทับถม และยังจบก่อนชนเพดานเวลาของ Edge Function เสมอ
+  const started = Date.now();
+  const TIME_BUDGET = 100e3;   // ~100 วินาทีต่อการเรียกหนึ่งครั้ง (เพดานจริงของ Supabase สูงกว่านี้มาก)
   const cols = 'id,bill_no,image_url,page_urls,slip_url,payment_status,ship_status,nas_saved_at,created_at';
-  // ชุดที่ 1: จ่ายครบ + NAS ยืนยันแล้ว
-  const paidQ = await sbGet('bills?select=' + cols
-    + '&payment_status=eq.paid&storage_cleaned_at=is.null'
-    + '&nas_saved_at=not.is.null&nas_saved_at=lt.' + encodeURIComponent(d2)
-    + '&order=created_at.asc&limit=' + max);
-  // ชุดที่ 2: บิลยกเลิก — ลบได้ทันที (ไม่ต้องรอ NAS ไม่มีอะไรต้องเก็บ)
-  const cancelQ = await sbGet('bills?select=' + cols
-    + '&ship_status=eq.cancelled&storage_cleaned_at=is.null'
-    + '&order=created_at.asc&limit=' + Math.max(10, Math.floor(max / 2)));
-  const targets = [...paidQ, ...cancelQ].slice(0, max);
-
-  let billsDone = 0, filesDeleted = 0, failed = 0;
+  let billsDone = 0, filesDeleted = 0, failed = 0, candidates = 0, queueLeft = false;
   const preview: any[] = [];
   const errors: string[] = [];
-  for (const b of targets) {
-    try {
-      const billFiles = await listBillFiles(b.bill_no);
-      const slipPaths: string[] = [];
-      const pays = await sbGet('payments?select=slips&bill_id=eq.' + b.id).catch(() => []);
-      for (const p of (pays || [])) for (const u of (Array.isArray(p.slips) ? p.slips : [])) {
-        const sp = pathInBucket(u, 'slips'); if (sp && !slipPaths.includes(sp)) slipPaths.push(sp);
-      }
-      const mainSlip = pathInBucket(b.slip_url, 'slips');
-      if (mainSlip && !slipPaths.includes(mainSlip)) slipPaths.push(mainSlip);
 
-      if (!doDelete) { preview.push({ bill: b.bill_no, billFiles: billFiles.length, slips: slipPaths.length }); continue; }
-      filesDeleted += await deleteObjects('bills', billFiles);
-      filesDeleted += await deleteObjects('slips', slipPaths);
-      // image_url ในตาราง bills ห้ามเป็น null — ใช้ค่าว่างแทน (หลังบ้านมอง '' = ไม่มีรูป → วาดใหม่เอง)
-      await sbPatch('bills?id=eq.' + b.id,
-        { storage_cleaned_at: new Date().toISOString(), image_url: '', page_urls: [] });
-      billsDone++;
-    } catch (e) {
-      failed++;
-      const msg = String((e as Error)?.message || e).slice(0, 220);
-      if (errors.length < 5 && !errors.some(x => x.startsWith(msg.slice(0, 40)))) errors.push(b.bill_no + ': ' + msg);
-      console.error('bill ' + b.bill_no + ':', e);
+  while (true) {
+    const d2 = new Date().toISOString();   // ยืนยันแล้วลบได้ทันที (archiver ตรวจไฟล์ครบก่อนยืนยัน)
+    // ชุดที่ 1: จ่ายครบ + NAS ยืนยันแล้ว
+    const paidQ = await sbGet('bills?select=' + cols
+      + '&payment_status=eq.paid&storage_cleaned_at=is.null'
+      + '&nas_saved_at=not.is.null&nas_saved_at=lt.' + encodeURIComponent(d2)
+      + '&order=created_at.asc&limit=' + max);
+    // ชุดที่ 2: บิลยกเลิก — ลบได้ทันที (ไม่ต้องรอ NAS ไม่มีอะไรต้องเก็บ)
+    const cancelQ = await sbGet('bills?select=' + cols
+      + '&ship_status=eq.cancelled&storage_cleaned_at=is.null'
+      + '&order=created_at.asc&limit=' + Math.max(10, Math.floor(max / 2)));
+    const targets = [...paidQ, ...cancelQ].slice(0, max);
+    candidates += targets.length;
+    let doneThisRound = 0;
+
+    for (const b of targets) {
+      try {
+        const billFiles = await listBillFiles(b.bill_no);
+        const slipPaths: string[] = [];
+        const pays = await sbGet('payments?select=slips&bill_id=eq.' + b.id).catch(() => []);
+        for (const p of (pays || [])) for (const u of (Array.isArray(p.slips) ? p.slips : [])) {
+          const sp = pathInBucket(u, 'slips'); if (sp && !slipPaths.includes(sp)) slipPaths.push(sp);
+        }
+        const mainSlip = pathInBucket(b.slip_url, 'slips');
+        if (mainSlip && !slipPaths.includes(mainSlip)) slipPaths.push(mainSlip);
+
+        if (!doDelete) { preview.push({ bill: b.bill_no, billFiles: billFiles.length, slips: slipPaths.length }); continue; }
+        filesDeleted += await deleteObjects('bills', billFiles);
+        filesDeleted += await deleteObjects('slips', slipPaths);
+        // image_url ในตาราง bills ห้ามเป็น null — ใช้ค่าว่างแทน (หลังบ้านมอง '' = ไม่มีรูป → วาดใหม่เอง)
+        await sbPatch('bills?id=eq.' + b.id,
+          { storage_cleaned_at: new Date().toISOString(), image_url: '', page_urls: [] });
+        billsDone++; doneThisRound++;
+      } catch (e) {
+        failed++;
+        const msg = String((e as Error)?.message || e).slice(0, 220);
+        if (errors.length < 5 && !errors.some(x => x.startsWith(msg.slice(0, 40)))) errors.push(b.bill_no + ': ' + msg);
+        console.error('bill ' + b.bill_no + ':', e);
+      }
     }
+
+    if (!doDelete) break;                                    // โหมดดูตัวอย่าง: รอบเดียวพอ
+    if (!targets.length) break;                              // หมดคิว
+    if (!doneThisRound) { queueLeft = true; break; }         // รอบนี้ลบไม่สำเร็จเลย — หยุดกันวนฟรี
+    if (targets.length < max) break;                         // คิวเหลือน้อยกว่าหนึ่งรอบ = เก็บหมดแล้ว
+    if (Date.now() - started > TIME_BUDGET) { queueLeft = true; break; }   // ครบงบเวลา — คืนถัดไปทำต่อ
   }
+
   if (doDelete && billsDone > 0) {
     await lineCentral('🧹 เคลียร์รูปเก่าออกจาก Supabase แล้ว ' + billsDone + ' บิล (' + filesDeleted + ' ไฟล์)'
-      + (failed ? ' · พลาด ' + failed + ' บิล (จะลองใหม่คืนถัดไป)' : '') + '\nสำเนาทั้งหมดอยู่ใน NAS · รูปบิลวาดใหม่ได้เสมอ');
+      + (failed ? ' · พลาด ' + failed + ' บิล (จะลองใหม่คืนถัดไป)' : '')
+      + (queueLeft ? ' · ยังมีคิวเหลือ คืนถัดไปทำต่อ' : '')
+      + '\nสำเนาทั้งหมดอยู่ใน NAS · รูปบิลวาดใหม่ได้เสมอ');
   }
   return {
     mode: doDelete ? 'ลบจริง' : 'ดูตัวอย่าง (เพิ่ม ?run=1 เพื่อลบจริง)',
-    candidates: targets.length, billsCleaned: billsDone, filesDeleted, failed,
+    candidates, billsCleaned: billsDone, filesDeleted, failed,
     ...(errors.length ? { errors } : {}),
-    remainingHint: targets.length >= max ? 'ยังมีคิวเหลือ — รอบถัดไปจะลบต่อ (หรือเพิ่ม &max=200)' : 'เคลียร์หมดคิวแล้ว',
+    remainingHint: queueLeft ? 'ยังมีคิวเหลือ/ติดขัด — รอบถัดไปทำต่ออัตโนมัติ' : 'เคลียร์หมดคิวแล้ว',
     ...(doDelete ? {} : { preview: preview.slice(0, 50) }),
   };
 }
