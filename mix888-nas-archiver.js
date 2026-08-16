@@ -169,6 +169,7 @@ async function syncOnce(){
     log('พบบิล ' + bills.length + ' ใบ (ย้อนหลัง ' + DAYS_BACK + ' วัน)');
 
     const byDay = {};   // โฟลเดอร์รายวัน → รายการบิล (ไว้ทำไฟล์สรุป)
+    const confirmIds = [];   // บิลที่ไฟล์ครบบน NAS แล้ว — แจ้งกลับให้ระบบลบรูปออกจาก Supabase ได้
     for(const b of bills){
       const {y, m, ddmmyyyy} = thDate(b.created_at);
       const dayDir  = path.join(ROOT, y, m, ddmmyyyy);
@@ -195,12 +196,27 @@ async function syncOnce(){
 
       if(!files.length) continue;
       fs.mkdirSync(billDir, {recursive: true});
+      let billFailed = 0;
       for(const [url, name] of files){
         const dest = path.join(billDir, name);
         if(fs.existsSync(dest)){ skipped++; continue; }
         try{ await download(url, dest); saved++; log('  💾 ' + path.join(ddmmyyyy, safeName(b.bill_no), name)); }
-        catch(e){ failed++; log('  ⚠️ โหลดไม่ได้ ' + b.bill_no + ' ' + name + ' — ' + e.message); }
+        catch(e){ failed++; billFailed++; log('  ⚠️ โหลดไม่ได้ ' + b.bill_no + ' ' + name + ' — ' + e.message); }
       }
+      if(!billFailed && b.id != null) confirmIds.push(b.id);   // ครบทุกไฟล์ = ยืนยันได้
+    }
+
+    // แจ้งระบบว่าบิลเหล่านี้อยู่ใน NAS ครบแล้ว (เปิดทางให้ตัวลบรูปเก่าใน Supabase ทำงาน)
+    if(confirmIds.length){
+      try{
+        const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/nas_confirm_saved', {
+          method: 'POST',
+          headers: {apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY,
+                    'Content-Type': 'application/json'},
+          body: JSON.stringify({p_key: NAS_EXPORT_KEY, p_ids: confirmIds})});
+        if(!r.ok) throw new Error('RPC ' + r.status + ': ' + (await r.text()).slice(0, 120));
+        log('🧾 ยืนยันเก็บเข้า NAS แล้ว ' + confirmIds.length + ' บิล');
+      }catch(e){ log('⚠️ แจ้งยืนยัน NAS ไม่สำเร็จ — ' + e.message + ' (รัน mix888-storage-cleanup.sql ใน Supabase หรือยัง?)'); }
     }
 
     // ไฟล์สรุปรายวัน (เขียนทับทุกครั้ง ให้สถานะจ่าย/ส่งเป็นปัจจุบันเสมอ)
