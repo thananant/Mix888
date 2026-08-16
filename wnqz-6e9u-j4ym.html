@@ -533,7 +533,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="card">
     <div class="row" style="margin-bottom:12px;align-items:center">
       <input id="c-search" placeholder="ค้นหาลูกค้า…" style="flex:1;min-width:200px" oninput="renderCustomers()">
-      <button class="btn-s mini" id="c-noline-btn" onclick="toggleNoLine()" title="กดเพื่อดูเฉพาะร้านที่ยังไม่ผูกกลุ่มไลน์">🔗 ยังไม่ผูกกลุ่ม</button>
+      <button class="btn-s mini" id="c-noline-btn" onclick="openNoLineModal()" title="กดดูรายชื่อร้านที่ยังไม่ผูกกลุ่มไลน์ แยกตามเซลล์">🔗 ยังไม่ผูกกลุ่ม</button>
       <span class="count" id="c-count"></span>
     </div>
     <div style="overflow-x:auto">
@@ -1278,6 +1278,19 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px" id="up-hint">นับจากวันที่ออกบิล · กดที่เดือนเพื่อดูรายบิล</div>
     <div id="up-body" style="overflow-x:auto"><div class="empty">กำลังโหลด…</div></div>
+  </div>
+</div>
+<div id="noline-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#fff;border-radius:14px;max-width:720px;width:100%;padding:18px;margin:14px auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h3 style="margin:0;font-size:16px" id="nl-head">🔗 ร้านที่ยังไม่ผูกกลุ่มไลน์</h3>
+      <div style="display:flex;gap:8px">
+        <button class="btn-s mini" onclick="document.getElementById('noline-modal').style.display='none';custNoLineOnly=true;renderCustomers()">กรองในตาราง</button>
+        <button class="btn-g mini" onclick="document.getElementById('noline-modal').style.display='none'">ปิด</button>
+      </div>
+    </div>
+    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">แยกตามเซลล์ผู้ดูแล — ให้เซลล์เข้ากลุ่มไลน์ของร้านแล้วพิมพ์ "ผูกกลุ่ม รหัสร้าน" · ร้านที่ไม่ผูกจะไม่ได้รับบิล/แจ้งยอดอัตโนมัติ</div>
+    <div id="nl-body"></div>
   </div>
 </div>
 <div id="ebreq-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)this.style.display='none'">
@@ -2490,6 +2503,23 @@ async function loadCustomers(){
 }
 let custNoLineOnly=false;
 function toggleNoLine(){custNoLineOnly=!custNoLineOnly;renderCustomers();}
+/* หน้าต่างสรุปร้านที่ยังไม่ผูกกลุ่มไลน์ แยกตามเซลล์ */
+function openNoLineModal(){
+  const list=customers.filter(c=>c.active!==false&&!c.line_group_id);
+  document.getElementById('nl-head').textContent='🔗 ร้านที่ยังไม่ผูกกลุ่มไลน์ '+list.length+' ราย';
+  const by={};
+  list.forEach(c=>{const s=c.sale_name||'ไม่ระบุเซลล์';(by[s]=by[s]||[]).push(c);});
+  const names=Object.keys(by).sort((a,b)=>by[b].length-by[a].length||a.localeCompare(b,'th'));
+  document.getElementById('nl-body').innerHTML=list.length?names.map(nm=>
+    '<div style="border:1px solid var(--line,#eee);border-radius:12px;padding:10px 12px;margin-bottom:8px">'
+    +'<div style="font-weight:700;margin-bottom:6px">'+esc(nm)+' <span class="tag tag-low">'+by[nm].length+' ราย</span></div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:6px">'
+    +by[nm].sort((a,b)=>String(a.code).localeCompare(String(b.code)))
+      .map(c=>'<span style="border:1px solid var(--line,#eee);border-radius:8px;padding:3px 8px;font-size:12.5px"><b>'+esc(c.code)+'</b> '+esc(c.name)+(c.branch_name?' <span style="color:var(--muted)">• '+esc(c.branch_name)+'</span>':'')+'</span>').join('')
+    +'</div></div>').join('')
+    :'<div class="empty">ทุกร้านผูกกลุ่มไลน์ครบแล้ว 🎉</div>';
+  document.getElementById('noline-modal').style.display='flex';
+}
 function renderCustomers(){
   const q=(document.getElementById('c-search').value||'').toLowerCase();
   let list=customers.filter(c=>!q||c.name.toLowerCase().includes(q)||c.code.toLowerCase().includes(q));
