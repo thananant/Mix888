@@ -141,6 +141,79 @@ async function fetchBills(sinceISO){
   }
 }
 
+/* ============ สำรองข้อมูลทั้งระบบลง NAS (วันละครั้ง) ============
+   ดึงทุกตาราง (ลูกค้า ราคา ออเดอร์ บิล สต๊อก ฯลฯ) มาเก็บเป็นไฟล์ใน
+   <NAS_ROOT>/สำรองข้อมูล/YYYY-MM-DD/  · เก็บรายวันย้อนหลัง 14 วัน
+   ส่วนของวันที่ 1 ของทุกเดือนเก็บไว้ตลอดไป */
+const BACKUP_TABLES = ['customers','products','customer_prices','orders','order_items','bills',
+  'sales','warehouses','stock','stock_lots','stock_movements','stock_receives','stock_receive_items',
+  'transfers','transfer_items','stock_counts','stock_adjustments','conversions','quotations',
+  'sku_categories','settings','app_users','summary_log','payments','bill_edit_requests','slip_log','holidays'];
+
+async function dumpTable(table){
+  const rows = [];
+  for(let off = 0;; off += 5000){
+    const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/nas_backup_dump', {
+      method: 'POST',
+      headers: {apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json'},
+      body: JSON.stringify({p_key: NAS_EXPORT_KEY, p_table: table, p_limit: 5000, p_offset: off})});
+    if(!r.ok) throw new Error('RPC ' + r.status + ': ' + (await r.text()).slice(0, 120));
+    const page = await r.json();
+    if(page === null) return null;              // ตารางนี้ยังไม่ถูกสร้างในโปรเจกต์ — ข้าม
+    rows.push(...page);
+    if(page.length < 5000) break;
+  }
+  return rows;
+}
+
+async function dailyBackup(ROOT){
+  const t = thDate(new Date().toISOString());
+  const baseDir = path.join(ROOT, 'สำรองข้อมูล');
+  const dayDir  = path.join(baseDir, t.y + '-' + t.m + '-' + t.d);
+  const marker  = path.join(dayDir, '_เสร็จสมบูรณ์.txt');
+  if(fs.existsSync(marker)) return;             // วันนี้สำรองครบแล้ว
+  log('🗄️ เริ่มสำรองข้อมูลทั้งระบบของวันนี้…');
+  fs.mkdirSync(dayDir, {recursive: true});
+  const t0 = Date.now();
+  const lines = [];
+  let okCount = 0, failCount = 0;
+  for(const tb of BACKUP_TABLES){
+    try{
+      const rows = await dumpTable(tb);
+      if(rows === null){ lines.push(tb + ': - (ยังไม่มีตารางนี้)'); continue; }
+      fs.writeFileSync(path.join(dayDir, tb + '.json'), JSON.stringify(rows));
+      lines.push(tb + ': ' + rows.length + ' แถว');
+      okCount++;
+      if(tb === 'customers' && rows.length){    // ฉบับเปิดดูใน Excel ได้ทันที
+        const cols = ['code','name','branch_name','contact_name','phone','sale_name','delivery_method','billing_address','tax_id','line_group_id','note'];
+        const csv = [cols.map(csvCell).join(',')]
+          .concat(rows.map(c => cols.map(k => csvCell(c[k])).join(',')));
+        fs.writeFileSync(path.join(dayDir, 'ลูกค้า.csv'), '﻿' + csv.join('\r\n'));
+      }
+    }catch(e){ failCount++; lines.push(tb + ': ผิดพลาด — ' + e.message); log('  ⚠️ สำรอง ' + tb + ' ไม่ได้ — ' + e.message); }
+  }
+  if(failCount && !okCount){
+    log('❌ สำรองข้อมูลไม่ได้เลย (รัน mix888-nas-backup.sql ใน Supabase หรือยัง?)');
+    try{ fs.rmSync(dayDir, {recursive: true, force: true}); }catch(e){}
+    return;
+  }
+  fs.writeFileSync(path.join(dayDir, '_สรุป.txt'),
+    '﻿สำรองข้อมูล Mix Fresh 168 — ' + t.d + '/' + t.m + '/' + t.y + '\r\n'
+    + 'ใช้เวลา ' + Math.round((Date.now() - t0) / 1000) + ' วินาที\r\n\r\n' + lines.join('\r\n') + '\r\n');
+  if(!failCount) fs.writeFileSync(marker, 'สำรองครบ ' + okCount + ' ตาราง');   // พลาดบางตาราง = ไม่ปักธง รอบชั่วโมงถัดไปลองใหม่เอง
+  log('🗄️ สำรองข้อมูลเสร็จ ' + okCount + ' ตาราง' + (failCount ? ' · พลาด ' + failCount + ' (จะลองใหม่รอบถัดไป)' : ''));
+  // เก็บกวาด: รายวันเก็บ 14 วัน · โฟลเดอร์ของวันที่ 1 เก็บตลอดไป
+  try{
+    const keepMs = 14 * 24 * 3600 * 1000;
+    for(const name of fs.readdirSync(baseDir)){
+      const m = name.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if(!m || m[3] === '01') continue;
+      const age = Date.now() - Date.UTC(+m[1], +m[2] - 1, +m[3]);
+      if(age > keepMs){ fs.rmSync(path.join(baseDir, name), {recursive: true, force: true}); log('  🧹 ลบสำรองเก่า ' + name); }
+    }
+  }catch(e){ log('  ⚠️ เก็บกวาดสำรองเก่าไม่ได้ — ' + e.message); }
+}
+
 async function download(url, dest){
   const r = await fetch(url);
   if(!r.ok) throw new Error('โหลดไฟล์ไม่ได้ (' + r.status + ')');
@@ -249,6 +322,9 @@ async function syncOnce(){
       // BOM นำหน้าให้ Excel เปิดภาษาไทยไม่เพี้ยน
       fs.writeFileSync(path.join(dayDir, 'สรุปบิล_' + info.ddmmyyyy + '.csv'), '\uFEFF' + lines.join('\r\n'));
     }
+
+    // สำรองข้อมูลทั้งระบบ วันละครั้ง (พลาดไม่กระทบการเก็บบิล)
+    try{ await dailyBackup(ROOT); }catch(e){ log('⚠️ สำรองข้อมูลรายวันสะดุด: ' + (e.message || e)); }
 
     log('✅ ซิงก์เสร็จใน ' + Math.round((Date.now()-t0)/1000) + ' วิ — ไฟล์ใหม่ ' + saved
         + ' · มีอยู่แล้ว ' + skipped + (failed ? ' · โหลดพลาด ' + failed + ' (จะลองใหม่รอบหน้า)' : ''));
