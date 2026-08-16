@@ -533,6 +533,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="card">
     <div class="row" style="margin-bottom:12px;align-items:center">
       <input id="c-search" placeholder="ค้นหาลูกค้า…" style="flex:1;min-width:200px" oninput="renderCustomers()">
+      <button class="btn-s mini" id="c-noline-btn" onclick="toggleNoLine()" title="กดเพื่อดูเฉพาะร้านที่ยังไม่ผูกกลุ่มไลน์">🔗 ยังไม่ผูกกลุ่ม</button>
       <span class="count" id="c-count"></span>
     </div>
     <div style="overflow-x:auto">
@@ -2476,10 +2477,16 @@ async function loadCustomers(){
     }catch(e){console.warn('price counts',e);}
   })();
 }
+let custNoLineOnly=false;
+function toggleNoLine(){custNoLineOnly=!custNoLineOnly;renderCustomers();}
 function renderCustomers(){
   const q=(document.getElementById('c-search').value||'').toLowerCase();
-  const list=customers.filter(c=>!q||c.name.toLowerCase().includes(q)||c.code.toLowerCase().includes(q));
+  let list=customers.filter(c=>!q||c.name.toLowerCase().includes(q)||c.code.toLowerCase().includes(q));
+  const noLine=customers.filter(c=>c.active!==false&&!c.line_group_id);
+  if(custNoLineOnly)list=list.filter(c=>c.active!==false&&!c.line_group_id);
   document.getElementById('c-count').textContent=list.length+' ราย';
+  const nb=document.getElementById('c-noline-btn');
+  if(nb){nb.textContent=(custNoLineOnly?'✓ ':'')+'🔗 ยังไม่ผูกกลุ่ม '+noLine.length+' ราย';nb.style.background=custNoLineOnly?'#fdf6dd':'';}
   const pc=window._priceCounts||{};
   document.getElementById('c-body').innerHTML=list.map(c=>{
     const sname=saleName(c.sale_id)||c.sale_name;
