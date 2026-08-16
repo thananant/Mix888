@@ -7266,8 +7266,31 @@ async function checkSlip(file){
   box.textContent='🔍 กำลังอ่าน QR จากสลิป…';
   const raw=await decodeSlipQR(file);
   if(!raw){
-    box.style.background='#fff7e0';box.style.color='#8a6d00';
-    box.innerHTML='⚠️ <b>อ่าน QR จากรูปไม่ได้</b> — อาจเป็นรูปแคปไม่เต็มใบ/เบลอ/ถูกแก้ไข ตรวจยอดกับบัญชีด้วยตาก่อนยืนยัน';
+    // แผนสอง: ส่งรูปทั้งใบให้ SlipOK อ่านฝั่งเซิร์ฟเวอร์ (เก่งกว่าเครื่องเรา และตัดสินจริง/ปลอมในตัว)
+    box.style.background='#faf5ee';box.style.color='#666';
+    box.innerHTML='🔍 อ่าน QR ฝั่งเครื่องไม่ได้ — กำลังส่งรูปให้ SlipOK ช่วยอ่าน…';
+    const vr=await slipokCheckImage(file);
+    if(vr&&vr.ok){
+      spSlipRef='SLIPOK:'+String(vr.transRef||'').slice(0,180);   // เลขอ้างอิงธุรกรรม — ใช้กันสลิปเวียน
+      try{
+        const {data:dup}=await db.from('bills').select('bill_no,customers(name)')
+          .eq('slip_ref',spSlipRef).limit(5);
+        spDupBills=dup||[];
+      }catch(e){console.warn('dup check',e);}
+      if(spDupBills.length){
+        box.style.background='#fdeeee';box.style.color='#b52020';
+        box.innerHTML='🚨 <b>สลิปนี้เคยถูกใช้แล้ว!</b> กับบิล: '
+          +spDupBills.map(d=>d.bill_no+' ('+(d.customers?.name||'')+')').join(', ')
+          +'<br>ระวังสลิปเวียน — เช็คเงินเข้าบัญชีจริงก่อนยืนยัน';
+      }else{
+        box.style.background='#e8f6f0';box.style.color='#0f7a5c';
+        box.innerHTML='✅ <b>SlipOK อ่านสลิปจากรูปได้</b> และยังไม่เคยใช้ในระบบ · อ้างอิง: <span style="font-size:11px">'+esc(String(vr.transRef||''))+'</span>';
+      }
+    }else{
+      box.style.background='#fff7e0';box.style.color='#8a6d00';
+      box.innerHTML='⚠️ <b>สลิปใบนี้ไม่มี QR หรืออ่านไม่ได้</b> (พบบ่อยกับโอนผ่านเว็บแบงก์กิ้ง/บัญชีบริษัท/ตู้ ATM)'
+        +'<br>ระบบกลางตรวจอัตโนมัติไม่ได้ — <b>เช็คเงินเข้าบัญชีจริงก่อน</b> แล้วค่อยยืนยัน (ระบบจะบันทึกชื่อผู้ตรวจไว้)';
+    }
     return;
   }
   spSlipRef=raw.length>190?raw.slice(0,190):raw;
@@ -7316,6 +7339,42 @@ async function slipokCheck(raw){
     }
   }catch(e){box.style.background='#f4f0ea';box.style.color='#8a7a66';
     box.innerHTML='ℹ️ ตรวจ SlipOK ไม่ได้ ('+esc(String(e.message||e))+') — ตรวจด้วยตาตามปกติ';}
+}
+/* แผนสอง: ย่อรูปสลิปแล้วส่งทั้งใบให้ SlipOK อ่าน+ตรวจฝั่งเซิร์ฟเวอร์ (เมื่ออ่าน QR ฝั่งเครื่องไม่ได้) */
+async function slipokCheckImage(file){
+  spSlipOk=null;
+  const box=document.getElementById('sp-slipok');
+  try{
+    const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(file);});
+    const sc=Math.min(1,1400/Math.max(img.width,img.height));
+    const cv=document.createElement('canvas');
+    cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);
+    cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+    const b64=cv.toDataURL('image/jpeg',0.85);
+    const amtStr=document.getElementById('sp-amount').value;
+    const expect=amtStr!==''?(Number(amtStr)||0):spExpected();
+    if(box){box.style.display='block';box.style.background='#faf5ee';box.style.color='#666';box.textContent='🏦 กำลังตรวจสลิปกับ SlipOK (จากรูป)…';}
+    const {data:vr,error:ve}=await db.functions.invoke('slipok-verify',{body:{imageBase64:b64}});
+    if(ve||!vr){if(box){box.style.background='#f4f0ea';box.style.color='#8a7a66';
+      box.innerHTML='ℹ️ ตรวจ SlipOK จากรูปไม่ได้ — ตรวจด้วยตาตามปกติ';}return null;}
+    spSlipOk=vr;
+    if(box){
+      if(vr.ok){
+        const a=vr.amount!=null?Number(vr.amount):null;
+        const match=a!=null&&Math.abs(a-expect)<0.01;
+        box.style.background=match?'#e1f5ee':'#fff7e0';box.style.color=match?'#0f6e56':'#8a6d00';
+        box.innerHTML='🏦 <b>SlipOK: สลิปจริง ✓</b> (อ่านจากรูป)'+(a!=null?' ยอด ฿'+fmt(a):'')
+          +(vr.sender?'<br>จาก '+esc(vr.sender):'')+(vr.receiver?' → '+esc(vr.receiver):'')
+          +(match?'<br>✅ ยอดตรงกับที่ต้องรับ':'<br>⚠️ ยอดไม่ตรงกับที่ต้องรับ (฿'+fmt(expect)+')');
+      }else{
+        box.style.background='#f4f0ea';box.style.color='#8a7a66';
+        box.innerHTML='ℹ️ SlipOK อ่านจากรูปไม่ได้: '+esc(vr.error||'')+'';
+      }
+    }
+    return vr;
+  }catch(e){console.warn('slipok image',e);
+    if(box){box.style.background='#f4f0ea';box.style.color='#8a7a66';box.innerHTML='ℹ️ ตรวจจากรูปไม่ได้ ('+esc(String(e.message||e))+')';}
+    return null;}
 }
 async function markPaid(id,btn){
   const b=bills.find(x=>x.id===id);if(!b)return;
