@@ -121,11 +121,18 @@ begin
   end if;
 
   -- ล้างรูปเก่า (ฝั่งเว็บจะวาดเวอร์ชันใหม่แล้วอัปเข้ามาแทน — ถ้าพลาด รูปวาดใหม่ได้เสมอ)
+  -- หมายเหตุ: บางคอลัมน์ตั้งห้ามเป็น null — ใช้ค่าว่างแทน
   update bills set
     total = v_grand, shipping_fee = coalesce(p_ship,0), discount = coalesce(p_disc,0),
     revision = v_rev, edit_note = nullif(p_note,''), payment_status = v_status,
-    image_url = null, page_urls = null
+    image_url = ''
     where id = p_bill;
+  begin
+    update bills set page_urls = '[]'::jsonb where id = p_bill;
+  exception when others then
+    -- เผื่อโปรเจกต์ที่คอลัมน์เป็นชนิด array
+    update bills set page_urls = '{}' where id = p_bill;
+  end;
 
   return jsonb_build_object('new_rev', v_rev, 'grand', v_grand, 'sub', v_sub,
     'payment_status', v_status, 'prev_status', b.payment_status,
