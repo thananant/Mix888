@@ -42,7 +42,8 @@ async function sbGet(qs: string): Promise<any[]> {
   return await r.json();
 }
 async function sbPatch(qs: string, body: unknown) {
-  const r = await fetch(SB_URL + '/rest/v1/' + qs, { method: 'PATCH', headers: H, body: JSON.stringify(body) });
+  const r = await fetch(SB_URL + '/rest/v1/' + qs, {
+    method: 'PATCH', headers: { ...H, Prefer: 'return=minimal' }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error('db patch: ' + (await r.text()).slice(0, 200));
 }
 
@@ -69,8 +70,17 @@ async function deleteObjects(bucket: string, names: string[]): Promise<number> {
   const r = await fetch(SB_URL + '/storage/v1/object/' + bucket, {
     method: 'DELETE', headers: H, body: JSON.stringify({ prefixes: names }),
   });
-  if (!r.ok) throw new Error('delete ' + bucket + ': ' + (await r.text()).slice(0, 200));
-  return names.length;
+  if (r.ok) return names.length;
+  const firstErr = (await r.text()).slice(0, 200);
+  // ลบแบบยกชุดไม่ผ่าน (เช่นบางไฟล์ถูกลบไปก่อนแล้ว) → ไล่ลบทีละไฟล์ ไฟล์ที่หายแล้ว (404) ถือว่าจบ
+  let done = 0;
+  for (const n of names) {
+    const r1 = await fetch(SB_URL + '/storage/v1/object/' + bucket + '/' + n.split('/').map(encodeURIComponent).join('/'),
+      { method: 'DELETE', headers: H });
+    if (r1.ok || r1.status === 404 || r1.status === 400) done++;
+    else throw new Error('delete ' + bucket + '/' + n + ': ' + (await r1.text()).slice(0, 150) + ' | bulk: ' + firstErr);
+  }
+  return done;
 }
 async function lineCentral(text: string) {
   try {
@@ -87,22 +97,21 @@ async function lineCentral(text: string) {
 
 async function run(doDelete: boolean, max: number) {
   const d2 = new Date(Date.now() - 2 * 86400e3).toISOString();
-  const d7 = new Date(Date.now() - 7 * 86400e3).toISOString();
   const cols = 'id,bill_no,image_url,page_urls,slip_url,payment_status,ship_status,nas_saved_at,created_at';
   // ชุดที่ 1: จ่ายครบ + NAS ยืนยันแล้วเกิน 2 วัน
   const paidQ = await sbGet('bills?select=' + cols
     + '&payment_status=eq.paid&storage_cleaned_at=is.null'
     + '&nas_saved_at=not.is.null&nas_saved_at=lt.' + encodeURIComponent(d2)
     + '&order=created_at.asc&limit=' + max);
-  // ชุดที่ 2: บิลยกเลิกเกิน 7 วัน (ไม่ต้องรอ NAS — ไม่มีอะไรต้องเก็บ)
+  // ชุดที่ 2: บิลยกเลิก — ลบได้ทันที (ไม่ต้องรอ NAS ไม่มีอะไรต้องเก็บ)
   const cancelQ = await sbGet('bills?select=' + cols
     + '&ship_status=eq.cancelled&storage_cleaned_at=is.null'
-    + '&created_at=lt.' + encodeURIComponent(d7)
     + '&order=created_at.asc&limit=' + Math.max(10, Math.floor(max / 2)));
   const targets = [...paidQ, ...cancelQ].slice(0, max);
 
   let billsDone = 0, filesDeleted = 0, failed = 0;
   const preview: any[] = [];
+  const errors: string[] = [];
   for (const b of targets) {
     try {
       const billFiles = await listBillFiles(b.bill_no);
@@ -120,7 +129,12 @@ async function run(doDelete: boolean, max: number) {
       await sbPatch('bills?id=eq.' + b.id,
         { storage_cleaned_at: new Date().toISOString(), image_url: null, page_urls: null });
       billsDone++;
-    } catch (e) { failed++; console.error('bill ' + b.bill_no + ':', e); }
+    } catch (e) {
+      failed++;
+      const msg = String((e as Error)?.message || e).slice(0, 220);
+      if (errors.length < 5 && !errors.some(x => x.startsWith(msg.slice(0, 40)))) errors.push(b.bill_no + ': ' + msg);
+      console.error('bill ' + b.bill_no + ':', e);
+    }
   }
   if (doDelete && billsDone > 0) {
     await lineCentral('🧹 เคลียร์รูปเก่าออกจาก Supabase แล้ว ' + billsDone + ' บิล (' + filesDeleted + ' ไฟล์)'
@@ -129,6 +143,7 @@ async function run(doDelete: boolean, max: number) {
   return {
     mode: doDelete ? 'ลบจริง' : 'ดูตัวอย่าง (เพิ่ม ?run=1 เพื่อลบจริง)',
     candidates: targets.length, billsCleaned: billsDone, filesDeleted, failed,
+    ...(errors.length ? { errors } : {}),
     remainingHint: targets.length >= max ? 'ยังมีคิวเหลือ — รอบถัดไปจะลบต่อ (หรือเพิ่ม &max=200)' : 'เคลียร์หมดคิวแล้ว',
     ...(doDelete ? {} : { preview: preview.slice(0, 50) }),
   };
