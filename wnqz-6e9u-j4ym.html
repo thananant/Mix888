@@ -1898,22 +1898,74 @@ function renderUnpaidMonths(){
   document.getElementById('up-head').textContent='⏳ ยอดค้างจ่าย แยกรายเดือน';
   document.getElementById('up-body').innerHTML=keys.length?
     '<table><thead><tr><th>เดือนที่ออกบิล</th><th class="num">บิลค้าง</th><th class="num">ยอดค้าง</th><th></th></tr></thead><tbody>'
-    +keys.map(k=>'<tr style="cursor:pointer" onclick="renderUnpaidBills('+k+')"><td><b>'+upLabel(k)+'</b></td><td class="num">'+by[k].n+'</td><td class="num"><b>'+fmt(by[k].sum)+'</b></td><td style="color:var(--muted);text-align:right">ดูรายบิล ›</td></tr>').join('')
+    +keys.map(k=>'<tr style="cursor:pointer" onclick="renderUnpaidSales('+k+')"><td><b>'+upLabel(k)+'</b></td><td class="num">'+by[k].n+'</td><td class="num"><b>'+fmt(by[k].sum)+'</b></td><td style="color:var(--muted);text-align:right">ดูรายเซลล์ ›</td></tr>').join('')
     +'<tr style="border-top:2px solid var(--line)"><td><b>รวมทั้งหมด</b></td><td class="num"><b>'+tN+'</b></td><td class="num"><b>'+fmt(tSum)+'</b></td><td></td></tr></tbody></table>'
     :'<div class="empty">ไม่มีบิลค้างชำระ 🎉</div>';
 }
-function renderUnpaidBills(k){
-  const list=arRows.filter(b=>((Number(b.total)||0)-(Number(b.paid_amount)||0))>0&&upKey(b.created_at)===k)
-    .sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
-  document.getElementById('up-head').textContent='⏳ บิลค้างจ่าย เดือน '+upLabel(k);
+/* เจาะ 4 ชั้น: เดือน → เซลล์ → ร้าน → รายบิล */
+let upCtx={k:0,saleIdx:0,sales:[],shops:[]};
+const upOut=b=>(Number(b.total)||0)-(Number(b.paid_amount)||0);
+const upSaleOf=b=>(b.customers&&b.customers.sale_name)||'ไม่ระบุเซลล์';
+function upBillsOfMonth(k){return arRows.filter(b=>upOut(b)>0&&upKey(b.created_at)===k);}
+function renderUnpaidSales(k){
+  upCtx.k=k;
+  const by={};
+  upBillsOfMonth(k).forEach(b=>{
+    const s=upSaleOf(b);
+    (by[s]=by[s]||{sum:0,n:0,shops:new Set()});
+    by[s].sum+=upOut(b);by[s].n++;by[s].shops.add((b.customers&&b.customers.code)||'?');
+  });
+  upCtx.sales=Object.entries(by).map(([nm,v])=>({nm,sum:v.sum,n:v.n,nshops:v.shops.size})).sort((a,b)=>b.sum-a.sum);
+  const tSum=upCtx.sales.reduce((s,x)=>s+x.sum,0), tN=upCtx.sales.reduce((s,x)=>s+x.n,0);
+  document.getElementById('up-head').textContent='⏳ บิลค้างจ่าย เดือน '+upLabel(k)+' — แยกตามเซลล์';
   document.getElementById('up-body').innerHTML=
     '<button class="btn-g mini" onclick="renderUnpaidMonths()" style="margin-bottom:8px">‹ กลับรายเดือน</button>'
-    +'<table><thead><tr><th>เลขบิล</th><th>ร้าน</th><th>วันที่</th><th class="num">ยอดบิล</th><th class="num">จ่ายแล้ว</th><th class="num">ค้าง</th></tr></thead><tbody>'
-    +list.map(b=>{const c=b.customers||{};const d=new Date(new Date(b.created_at).getTime()+7*3600000);
-      const paid=Number(b.paid_amount)||0, out=(Number(b.total)||0)-paid;
-      return '<tr><td><b>'+esc(b.bill_no||'-')+'</b></td><td>'+esc(c.code||'')+' '+esc(c.name||'')+(c.branch_name?' <span style="color:var(--muted)">• '+esc(c.branch_name)+'</span>':'')+'</td>'
+    +'<table><thead><tr><th>เซลล์</th><th class="num">ร้านที่ค้าง</th><th class="num">บิลค้าง</th><th class="num">ยอดค้าง</th><th></th></tr></thead><tbody>'
+    +upCtx.sales.map((s,i)=>'<tr style="cursor:pointer" onclick="renderUnpaidShops('+i+')"><td><b>'+esc(s.nm)+'</b></td>'
+      +'<td class="num">'+s.nshops+'</td><td class="num">'+s.n+'</td><td class="num"><b>'+fmt(s.sum)+'</b></td>'
+      +'<td style="color:var(--muted);text-align:right">ดูรายร้าน ›</td></tr>').join('')
+    +'<tr style="border-top:2px solid var(--line)"><td><b>รวม</b></td><td></td><td class="num"><b>'+tN+'</b></td><td class="num"><b>'+fmt(tSum)+'</b></td><td></td></tr>'
+    +'</tbody></table>';
+}
+function renderUnpaidShops(saleIdx){
+  const sale=upCtx.sales[saleIdx];if(!sale)return;
+  upCtx.saleIdx=saleIdx;
+  const by={};
+  upBillsOfMonth(upCtx.k).filter(b=>upSaleOf(b)===sale.nm).forEach(b=>{
+    const c=b.customers||{},code=c.code||'?';
+    (by[code]=by[code]||{code,name:c.name||'',branch:c.branch_name||'',sum:0,n:0});
+    by[code].sum+=upOut(b);by[code].n++;
+  });
+  upCtx.shops=Object.values(by).sort((a,b)=>b.sum-a.sum);
+  document.getElementById('up-head').textContent='⏳ ค้างจ่าย '+upLabel(upCtx.k)+' — เซลล์ '+sale.nm;
+  document.getElementById('up-body').innerHTML=
+    '<button class="btn-g mini" onclick="renderUnpaidSales('+upCtx.k+')" style="margin-bottom:8px">‹ กลับรายเซลล์</button>'
+    +'<table><thead><tr><th>ร้าน</th><th class="num">บิลค้าง</th><th class="num">ยอดค้าง</th><th></th></tr></thead><tbody>'
+    +upCtx.shops.map((s,i)=>'<tr style="cursor:pointer" onclick="renderUnpaidShopBills('+i+')"><td><b>'+esc(s.code)+'</b> '+esc(s.name)
+      +(s.branch?' <span style="color:var(--muted)">• '+esc(s.branch)+'</span>':'')+'</td>'
+      +'<td class="num">'+s.n+'</td><td class="num"><b>'+fmt(s.sum)+'</b></td>'
+      +'<td style="color:var(--muted);text-align:right">ดูบิล ›</td></tr>').join('')
+    +'<tr style="border-top:2px solid var(--line)"><td><b>รวม</b></td><td class="num"><b>'+upCtx.shops.reduce((s,x)=>s+x.n,0)+'</b></td>'
+    +'<td class="num"><b>'+fmt(upCtx.shops.reduce((s,x)=>s+x.sum,0))+'</b></td><td></td></tr>'
+    +'</tbody></table>';
+}
+function renderUnpaidShopBills(shopIdx){
+  const sale=upCtx.sales[upCtx.saleIdx],shop=upCtx.shops[shopIdx];if(!sale||!shop)return;
+  const list=upBillsOfMonth(upCtx.k)
+    .filter(b=>upSaleOf(b)===sale.nm&&((b.customers&&b.customers.code)||'?')===shop.code)
+    .sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+  document.getElementById('up-head').textContent='⏳ '+shop.code+' '+shop.name+' — บิลค้าง '+upLabel(upCtx.k);
+  document.getElementById('up-body').innerHTML=
+    '<button class="btn-g mini" onclick="renderUnpaidShops('+upCtx.saleIdx+')" style="margin-bottom:8px">‹ กลับรายร้าน</button>'
+    +'<table><thead><tr><th>เลขบิล</th><th>วันที่</th><th class="num">ยอดบิล</th><th class="num">จ่ายแล้ว</th><th class="num">ค้าง</th></tr></thead><tbody>'
+    +list.map(b=>{const d=new Date(new Date(b.created_at).getTime()+7*3600000);
+      const paid=Number(b.paid_amount)||0, out=upOut(b);
+      return '<tr><td><b>'+esc(b.bill_no||'-')+'</b></td>'
         +'<td>'+d.getUTCDate()+' '+TH_MONTHS[d.getUTCMonth()]+'</td>'
-        +'<td class="num">'+fmt(b.total)+'</td><td class="num">'+(paid?fmt(paid):'-')+'</td><td class="num" style="color:#c0201f"><b>'+fmt(out)+'</b></td></tr>';}).join('')
+        +'<td class="num">'+fmt(b.total)+'</td><td class="num">'+(paid?fmt(paid):'-')+'</td>'
+        +'<td class="num" style="color:#c0201f"><b>'+fmt(out)+'</b></td></tr>';}).join('')
+    +'<tr style="border-top:2px solid var(--line)"><td><b>รวม '+list.length+' บิล</b></td><td></td><td></td><td></td>'
+    +'<td class="num" style="color:#c0201f"><b>'+fmt(list.reduce((s,b)=>s+upOut(b),0))+'</b></td></tr>'
     +'</tbody></table>';
 }
 
