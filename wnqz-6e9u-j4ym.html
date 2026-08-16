@@ -1073,6 +1073,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="fbtn" data-f="all" onclick="setFilter('all')">ทั้งหมด</button>
       <button class="fbtn" data-f="slip" onclick="setFilter('slip')">🧾 มีสลิป</button>
       <button class="fbtn" onclick="openSlipAudit()">🕵️ สลิปตกค้าง</button>
+      <button class="fbtn" id="ebr-btn" onclick="openEditApprovals()" style="display:none">🛎️ คำขอแก้บิล</button>
       <select id="ac-sale" onchange="renderAccount()" title="กรองตามเซลล์">
         <option value="">เซลล์: ทั้งหมด</option>
       </select>
@@ -1277,6 +1278,16 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px" id="up-hint">นับจากวันที่ออกบิล · กดที่เดือนเพื่อดูรายบิล</div>
     <div id="up-body" style="overflow-x:auto"><div class="empty">กำลังโหลด…</div></div>
+  </div>
+</div>
+<div id="ebreq-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#fff;border-radius:14px;max-width:640px;width:100%;padding:18px;margin:14px auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h3 style="margin:0;font-size:16px">🛎️ คำขอแก้บิล (รอ admin อนุมัติ)</h3>
+      <button class="btn-g mini" onclick="document.getElementById('ebreq-modal').style.display='none'">ปิด</button>
+    </div>
+    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">คำขอจากพนักงานที่แก้บิลซึ่งส่งของแล้วหรือรับยอดแล้ว — อนุมัติแล้วระบบจะแก้บิล ปรับสต๊อก และคิดสถานะจ่ายใหม่ให้ทันที</div>
+    <div id="ebreq-body"><div class="empty">กำลังโหลด…</div></div>
   </div>
 </div>
 <div id="newcust-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)this.style.display='none'">
@@ -4695,6 +4706,7 @@ async function checkScheduledAnnounce(){
 }
 setTimeout(checkScheduledAnnounce,15000);
 setInterval(checkScheduledAnnounce,10*60*1000);
+setInterval(()=>{try{refreshEditReqBadge();}catch(e){}},10*60*1000);   // ป้ายคำขอแก้บิลของ admin อัปเดตเองทุก 10 นาที
 
 async function togglePin(orderId,cur){
   const {error}=await db.from('orders').update({pinned:!cur}).eq('id',orderId);
@@ -6749,10 +6761,17 @@ async function cancelOrder(orderId,btn){
   }catch(e){toast(String(e.message||e));}
   btn.disabled=false;
 }
+function ebIsAdmin(){return !!(currentUser&&currentUser.role==='admin');}
+function ebNeedsApproval(b){return b.ship_status==='shipped'||Number(b.paid_amount||0)>0.009||b.payment_status==='paid';}
 async function openEditBill(billId){
   const b=bills.find(x=>x.id===billId);if(!b)return;
   if((b.ship_status||'pending')==='cancelled'){toast('บิลถูกยกเลิกแล้ว แก้ไม่ได้');return;}
-  ebFeesOnly=(b.ship_status==='shipped');  // ส่งแล้ว: แก้ได้เฉพาะค่าส่ง/ส่วนลด
+  // บิลส่งแล้ว/รับยอดแล้ว: พนักงานแก้เป็น "คำขอ" รอ admin — ถ้ามีคำขอค้างอยู่แล้ว ไม่ให้ยื่นซ้ำ
+  if(ebNeedsApproval(b)&&!ebIsAdmin()){
+    const {data:pend}=await db.from('bill_edit_requests').select('id,requested_by').eq('bill_id',b.id).eq('status','pending').limit(1);
+    if(pend&&pend.length){toast('บิลนี้มีคำขอแก้รออนุมัติอยู่แล้ว (โดย '+(pend[0].requested_by||'-')+') — รอ admin ตัดสินก่อน');return;}
+  }
+  ebFeesOnly=false;   // เปิดแก้ทุกรายการทุกสถานะ (บิลส่งแล้ว/รับยอดแล้ว มีขั้นอนุมัติคุม)
   const {data:o,error}=await db.from('orders')
     .select('*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(id,product_id,qty,price,amount,products(name,unit))')
     .eq('id',b.order_id).single();
@@ -6769,14 +6788,18 @@ async function openEditBill(billId){
   document.getElementById('eb-prodlist').innerHTML=products.filter(p=>p.active!==false)
     .map(p=>`<option value="${esc(p.sku)} · ${esc(p.name)}"></option>`).join('');
   ebRender();
-  // โหมดส่งแล้ว: ซ่อนส่วนเพิ่มสินค้า + แจ้งเหตุผล
   const addRow=document.getElementById('eb-add-search')?.closest('div')?.parentElement;
-  if(addRow)addRow.style.display=ebFeesOnly?'none':'flex';
+  if(addRow)addRow.style.display='flex';
+  const needAppr=ebNeedsApproval(b), admin=ebIsAdmin();
   const hintEl=document.querySelector('#editbill-modal .hint');
-  if(hintEl)hintEl.textContent=ebFeesOnly
-    ?'บิลนี้จัดส่งแล้ว — แก้ได้เฉพาะค่าขนส่ง/ส่วนลด เพื่อคำนวณยอดบิลใหม่ (จำนวนและรายการสินค้าแก้ไม่ได้เพราะสต๊อกถูกตัดไปแล้ว)'
-    :'แก้ได้ทุกรายการ · ระบบจะปรับยอดจองสต๊อกให้อัตโนมัติ และสร้างรูปบิลเวอร์ชันใหม่';
+  if(hintEl)hintEl.textContent=!needAppr
+    ?'แก้ได้ทุกรายการ · ระบบจะปรับยอดจองสต๊อกให้อัตโนมัติ และสร้างรูปบิลเวอร์ชันใหม่'
+    :(b.ship_status==='shipped'?'บิลนี้จัดส่งแล้ว — แก้จำนวนสินค้าได้ ระบบจะปรับสต๊อกตามส่วนต่าง':'บิลนี้มีการรับยอดแล้ว')
+      +(Number(b.paid_amount||0)>0.009?' · ลูกค้าจ่ายไว้ ฿'+fmt(b.paid_amount)+' ระบบจะคิดสถานะค้าง/จ่ายครบใหม่ให้':'')
+      +(admin?' · คุณเป็น admin แก้แล้วมีผลทันที':' · การแก้จะถูกส่งเป็นคำขอให้ admin กดอนุมัติก่อน');
   ebOrderMode=false;ebModeUI(false);
+  const saveBtn=document.getElementById('eb-save');
+  if(saveBtn)saveBtn.textContent=(needAppr&&!admin)?'📨 ส่งคำขอแก้บิล (รอ admin อนุมัติ)':'💾 บันทึก + ออกบิลใหม่ (v.ถัดไป)';
   document.getElementById('editbill-modal').style.display='flex';
 }
 function closeEditBill(){document.getElementById('editbill-modal').style.display='none';ebState=null;}
@@ -6832,48 +6855,109 @@ function ebTotals(){
   document.getElementById('eb-sub').textContent=fmt(sub);
   document.getElementById('eb-grand').textContent=fmt(Math.max(0,sub+ship-disc));
 }
+/** เก็บทุกอย่างที่แก้ไว้เป็นก้อนเดียว — ใช้ทั้งบันทึกตรงและส่งเป็นคำขอรออนุมัติ */
+function ebBuildPayload(){
+  const b=ebState.bill,o=ebState.order;
+  const ship=Number(document.getElementById('eb-ship').value)||0;
+  const disc=Number(document.getElementById('eb-disc').value)||0;
+  const editNote=document.getElementById('eb-note').value.trim();
+  const itemsChanged=ebState.removed.length>0
+    ||ebState.items.some(it=>!it.id||it.qty!==it.orig_qty||it.price!==(it.orig_price??it.price));
+  const sub=ebState.items.reduce((s,it)=>s+it.qty*it.price,0);
+  const removedInfo=ebState.removed.map(rid=>{
+    const x=o.order_items.find(i=>i.id===rid);
+    return {id:rid,product_id:x?.product_id??null,qty:Number(x?.qty||0)};
+  });
+  return {billId:b.id,billNo:b.bill_no,revision:b.revision||1,orderId:o.id,
+    items:ebState.items.map(it=>({id:it.id||null,product_id:it.product_id,qty:it.qty,price:it.price,orig_qty:it.orig_qty,name:it.name})),
+    removed:removedInfo,ship,disc,editNote,itemsChanged,sub,grand:Math.max(0,sub+ship-disc)};
+}
+
 async function saveEditBill(btn){
   if(!ebState)return;
   if(!ebState.items.length){toast(ebOrderMode?'ออเดอร์ต้องมีอย่างน้อย 1 รายการ':'บิลต้องมีอย่างน้อย 1 รายการ');return;}
   if(ebOrderMode)return saveEditOrder(btn);
-  const editNote=document.getElementById('eb-note').value.trim();
-  // แก้เฉพาะค่าส่ง/ส่วนลด (รายการสินค้าไม่ขยับ) = ไม่ใช่การแก้เนื้อบิล → ไม่บังคับเหตุผล ไม่ขึ้น 🔴
-  const itemsChanged=ebState.removed.length>0
-    ||ebState.items.some(it=>!it.id||it.qty!==it.orig_qty||it.price!==(it.orig_price??it.price));
-  const feesOnlyEdit=!itemsChanged;
+  const b=ebState.bill;
+  const p=ebBuildPayload();
+  const needAppr=ebNeedsApproval(b), admin=ebIsAdmin();
+  const paid=Number(b.paid_amount||0);
+  const summary='ยอด ฿'+fmt(b.total)+' → ฿'+fmt(p.grand)
+    +(p.itemsChanged?' · แก้รายการสินค้า':' · แก้ค่าส่ง/ส่วนลด')
+    +(b.ship_status==='shipped'?' · บิลส่งของแล้ว':'')
+    +(paid>0.009?' · ลูกค้าจ่ายไว้ ฿'+fmt(paid):'');
   btn.disabled=true;btn.textContent='กำลังบันทึก…';
   try{
-    const b=ebState.bill,o=ebState.order;
-    const sub=ebState.items.reduce((s,it)=>s+it.qty*it.price,0);
-    const ship=Number(document.getElementById('eb-ship').value)||0;
-    const disc=Number(document.getElementById('eb-disc').value)||0;
-    const grand=Math.max(0,sub+ship-disc);
-    const newRev=(b.revision||1)+1;
+    if(needAppr&&!admin){
+      // พนักงาน: ส่งเป็นคำขอ รอ admin อนุมัติ
+      const who=currentUser?.display_name||currentUser?.username||'-';
+      const {error:qe}=await db.from('bill_edit_requests').insert({bill_id:b.id,bill_no:b.bill_no,payload:p,summary,requested_by:who});
+      if(qe)throw new Error('ส่งคำขอไม่สำเร็จ: '+qe.message+' (admin รัน mix888-bill-edit-approval.sql หรือยัง?)');
+      if(appSettings.line_central_group){
+        try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
+          messages:[{type:'text',text:'🛎️ คำขอแก้บิล '+b.bill_no+' จาก '+who+'\n'+summary+'\n→ เข้าหลังบ้าน หน้า บัญชี กดปุ่ม 🛎️ คำขอแก้บิล เพื่ออนุมัติ/ไม่อนุมัติ'}]}});}catch(e){console.warn('notify',e);}
+      }
+      toast('📨 ส่งคำขอแก้บิล '+b.bill_no+' ให้ admin อนุมัติแล้ว');
+      closeEditBill(); refreshEditReqBadge();
+    }else{
+      if(needAppr){   // admin แก้บิลส่งแล้ว/รับยอดแล้ว: สรุปผลกระทบให้เห็นก่อนยืนยัน
+        let msg='บิลนี้'+(b.ship_status==='shipped'?'จัดส่งแล้ว':'มีการรับยอดแล้ว')+'\n'+summary;
+        if(paid>0.009)msg+='\nสถานะหลังแก้: '+(paid+0.01>=p.grand?'จ่ายครบ':'ค้างจ่าย ฿'+fmt(Math.max(0,p.grand-paid)));
+        if(p.itemsChanged&&b.ship_status==='shipped')msg+='\nระบบจะปรับสต๊อกตามจำนวนที่เปลี่ยน (จะให้เลือกคลัง)';
+        if(!confirm(msg+'\n\nยืนยันแก้บิลเลยไหม?')){btn.disabled=false;btn.textContent='💾 บันทึก + ออกบิลใหม่ (v.ถัดไป)';return;}
+      }
+      const res=await applyBillEdit(p,{interactive:true});
+      toast('แก้บิล '+b.bill_no+' เป็น v.'+res.newRev+' แล้ว ✓'+(res.payNote||''));
+      closeEditBill(); loadBills(); loadProducts();
+    }
+  }catch(e){toast(String(e.message||e));}
+  btn.disabled=false;btn.textContent='💾 บันทึก + ออกบิลใหม่ (v.ถัดไป)';
+}
 
-    if(!ebFeesOnly){
-    // 1) ปรับยอดจองสต๊อกตามส่วนต่างจำนวน
+/** ลงมือแก้บิลจริงตาม payload — ใช้ทั้งตอน admin บันทึกตรง และตอนกดอนุมัติคำขอ */
+async function applyBillEdit(p,opts={}){
+  const {data:b,error:bErr}=await db.from('bills').select('*').eq('id',p.billId).single();
+  if(bErr||!b)throw new Error('โหลดบิลไม่ได้: '+(bErr?.message||''));
+  if((b.ship_status||'pending')==='cancelled')throw new Error('บิล '+b.bill_no+' ถูกยกเลิกไปแล้ว');
+  if((b.revision||1)!==(p.revision||1)&&!opts.skipRevGuard)
+    throw new Error('บิล '+b.bill_no+' ถูกแก้เป็นเวอร์ชันใหม่กว่าตอนยื่นคำขอแล้ว — เปิดบิลล่าสุดแล้วแก้ใหม่');
+  const shipped=b.ship_status==='shipped';
+  const {data:o,error:oErr}=await db.from('orders')
+    .select('id, order_items(id,product_id,qty)')
+    .eq('id',b.order_id).single();
+  if(oErr||!o)throw new Error('โหลดออเดอร์ไม่ได้: '+(oErr?.message||''));
+
+  if(p.itemsChanged){
+    // ส่วนต่างจำนวนต่อสินค้า (รวมรายการที่ลบ)
     const delta={};
-    ebState.items.forEach(it=>{delta[it.product_id]=(delta[it.product_id]||0)+(it.qty-it.orig_qty);});
-    // รายการที่ถูกลบ: คืนจองทั้งจำนวนเดิม
-    for(const rid of ebState.removed){
-      const orig=o.order_items.find(x=>x.id===rid);
-      if(orig)delta[orig.product_id]=(delta[orig.product_id]||0)-Number(orig.qty);
+    p.items.forEach(it=>{delta[it.product_id]=(delta[it.product_id]||0)+(it.qty-(it.orig_qty??it.qty));});
+    p.removed.forEach(r=>{if(r.product_id!=null)delta[r.product_id]=(delta[r.product_id]||0)-Number(r.qty||0);});
+    if(!shipped){
+      // ยังไม่ส่งของ: ปรับยอดจองสต๊อก (แบบเดิม)
+      for(const [pid,d] of Object.entries(delta)){
+        if(!d)continue;
+        const {data:pr}=await db.from('products').select('reserved_qty').eq('id',pid).single();
+        const nv=Math.max(0,Number(pr?.reserved_qty||0)+d);
+        const {error:re}=await db.from('products').update({reserved_qty:nv}).eq('id',pid);
+        if(re)throw new Error('ปรับจองสต๊อกไม่สำเร็จ: '+re.message);
+      }
+    }else if(Object.values(delta).some(d=>d)){
+      // ส่งของแล้ว: ปรับสต๊อกจริงตามส่วนต่าง (เลือกคลังเหมือนตอนกดส่ง)
+      let wid=opts.warehouseId;
+      if(!wid)wid=await pickWarehouse('แก้บิล '+b.bill_no+' (ส่งของแล้ว) — ปรับสต๊อกที่คลังไหน?');
+      if(!wid)throw new Error('ยกเลิก: ยังไม่ได้เลือกคลังสำหรับปรับสต๊อก');
+      for(const [pid,d] of Object.entries(delta)){
+        if(!d)continue;
+        const {error:ae}=await db.rpc('bill_edit_stock_adjust',{p_product:Number(pid),p_delta:d,p_warehouse:wid,p_note:'แก้บิล '+b.bill_no+' หลังส่ง',p_ref:o.id});
+        if(ae)throw new Error('ปรับสต๊อกไม่สำเร็จ: '+ae.message+' (admin รัน mix888-bill-edit-approval.sql หรือยัง?)');
+        if(d>0){try{await db.rpc('fifo_take',{p_product:Number(pid),p_qty:d});}catch(e){console.warn('fifo',e);}}
+      }
     }
-    for(const [pid,d] of Object.entries(delta)){
-      if(!d)continue;
-      const {data:pr}=await db.from('products').select('reserved_qty').eq('id',pid).single();
-      const nv=Math.max(0,Number(pr?.reserved_qty||0)+d);
-      const {error:re}=await db.from('products').update({reserved_qty:nv}).eq('id',pid);
-      if(re)throw new Error('ปรับจองสต๊อกไม่สำเร็จ: '+re.message);
-    }
-
-    // 2) order_items: ลบ / อัปเดต / เพิ่ม
-    if(ebState.removed.length){
-      const {error:de}=await db.from('order_items').delete().in('id',ebState.removed);
+    // รายการ: ลบ / อัปเดต / เพิ่ม (amount เป็น generated column — DB คำนวณเอง)
+    if(p.removed.length){
+      const {error:de}=await db.from('order_items').delete().in('id',p.removed.map(r=>r.id));
       if(de)throw new Error('ลบรายการไม่สำเร็จ: '+de.message);
     }
-    for(const it of ebState.items){
-      // amount เป็น generated column (qty×price) — ห้ามส่งไป DB จะคำนวณเอง
+    for(const it of p.items){
       const rec={qty:it.qty,price:it.price};
       if(it.id){
         const {error:ue}=await db.from('order_items').update(rec).eq('id',it.id);
@@ -6883,39 +6967,131 @@ async function saveEditBill(btn){
         if(ie)throw new Error('เพิ่มรายการไม่สำเร็จ: '+ie.message);
       }
     }
-    // 3) ยอดออเดอร์
-    await db.from('orders').update({total:sub}).eq('id',o.id);
-    } // end !ebFeesOnly
+    await db.from('orders').update({total:p.sub}).eq('id',o.id);
+  }
 
-    // 4) วาดบิลใหม่ (เวอร์ชันใหม่)
-    const {data:o2}=await db.from('orders')
-      .select('*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(qty,price,amount,product_id,products(name,unit))')
-      .eq('id',o.id).single();
-    const result=await drawBill(o2,b.bill_no,{shipFee:ship,discount:disc,grand,revision:newRev,docType:b.doc_type||'บิลเงินสด',sellerMode:b.seller_mode||'none',editNote:(feesOnlyEdit&&!editNote)?'':editNote,issuedAt:b.created_at});
-    const blob=await new Promise(res=>result.cv.toBlob(res,'image/png'));
-    const path=b.bill_no+'_v'+newRev+'-'+rndTag(10)+'.png';
-    const {error:upErr}=await db.storage.from('bills').upload(path,blob,{contentType:'image/png',upsert:true});
-    if(upErr)throw new Error('อัพรูปบิลไม่สำเร็จ: '+upErr.message);
-    const imageUrl=db.storage.from('bills').getPublicUrl(path).data.publicUrl;
-
-    // 5) อัปเดตบิล
-    const {error:be}=await db.from('bills').update({
-      total:grand,shipping_fee:ship,discount:disc,revision:newRev,image_url:imageUrl,page_urls:await uploadA4Pages(result,b.bill_no),edit_note:(feesOnlyEdit&&!editNote)?null:editNote
-    }).eq('id',b.id);
-    if(be)throw new Error('อัปเดตบิลไม่สำเร็จ: '+be.message);
-
-    // 6) แจ้งลูกค้า (ถาม)
-    if(o2.customers?.line_group_id&&confirm('ส่งบิลฉบับแก้ไข (v.'+newRev+') เข้ากลุ่ม LINE ลูกค้าเลยไหม?')){
-      await db.functions.invoke('line-push',{body:{to:o2.customers.line_group_id,messages:[
-        {type:'image',originalContentUrl:imageUrl,previewImageUrl:imageUrl},
-        {type:'text',text:shopTag(o2.customers)+'🧾 บิลเลขที่ '+b.bill_no+' (แก้ไขครั้งที่ '+newRev+')'
-          +(ship?'\nค่าขนส่ง ฿'+fmt(ship):'')+(disc?'\nส่วนลด -฿'+fmt(disc):'')
-          +'\nยอดรวม ฿'+fmt(grand)+'\nขออภัยในความไม่สะดวกครับ 🙏'}]}});
+  // สถานะจ่ายคิดใหม่จากยอดใหม่ (บิลที่มีการรับยอดไว้แล้ว)
+  const grand=p.grand, newRev=(b.revision||1)+1, paid=Number(b.paid_amount||0);
+  const payFields={}; let payNote='';
+  if(paid>0.009||b.payment_status==='paid'){
+    const ns=paid+0.01>=grand?'paid':(paid>0.009?'partial':'unpaid');
+    if(ns!==b.payment_status){
+      payFields.payment_status=ns;
+      payNote=ns==='paid'?' · สถานะ: จ่ายครบแล้ว':' · กลับมาค้างจ่าย ฿'+fmt(Math.max(0,grand-paid));
     }
-    toast('แก้บิล '+b.bill_no+' เป็น v.'+newRev+' แล้ว ✓');
-    closeEditBill(); loadBills(); loadProducts();
+  }
+
+  // วาดบิลเวอร์ชันใหม่ (คงวันที่ออกบิลเดิม)
+  const feesOnlyEdit=!p.itemsChanged;
+  const {data:o2}=await db.from('orders')
+    .select('*, customers(id,code,name,line_group_id,branch_name,contact_name,phone,billing_address,tax_id,sale_name,receive_time), order_items(qty,price,amount,product_id,products(name,unit))')
+    .eq('id',b.order_id).single();
+  const result=await drawBill(o2,b.bill_no,{shipFee:p.ship,discount:p.disc,grand,revision:newRev,docType:b.doc_type||'บิลเงินสด',sellerMode:b.seller_mode||'none',editNote:(feesOnlyEdit&&!p.editNote)?'':p.editNote,issuedAt:b.created_at});
+  const blob=await new Promise(res=>result.cv.toBlob(res,'image/png'));
+  const path=b.bill_no+'_v'+newRev+'-'+rndTag(10)+'.png';
+  const {error:upErr}=await db.storage.from('bills').upload(path,blob,{contentType:'image/png',upsert:true});
+  if(upErr)throw new Error('อัพรูปบิลไม่สำเร็จ: '+upErr.message);
+  const imageUrl=db.storage.from('bills').getPublicUrl(path).data.publicUrl;
+
+  const {error:be}=await db.from('bills').update({
+    total:grand,shipping_fee:p.ship,discount:p.disc,revision:newRev,image_url:imageUrl,
+    page_urls:await uploadA4Pages(result,b.bill_no),edit_note:(feesOnlyEdit&&!p.editNote)?null:p.editNote,...payFields
+  }).eq('id',b.id);
+  if(be)throw new Error('อัปเดตบิลไม่สำเร็จ: '+be.message);
+
+  if(opts.interactive&&o2.customers?.line_group_id&&confirm('ส่งบิลฉบับแก้ไข (v.'+newRev+') เข้ากลุ่ม LINE ลูกค้าเลยไหม?')){
+    await db.functions.invoke('line-push',{body:{to:o2.customers.line_group_id,messages:[
+      {type:'image',originalContentUrl:imageUrl,previewImageUrl:imageUrl},
+      {type:'text',text:shopTag(o2.customers)+'🧾 บิลเลขที่ '+b.bill_no+' (แก้ไขครั้งที่ '+newRev+')'
+        +(p.ship?'\nค่าขนส่ง ฿'+fmt(p.ship):'')+(p.disc?'\nส่วนลด -฿'+fmt(p.disc):'')
+        +'\nยอดรวม ฿'+fmt(grand)+'\nขออภัยในความไม่สะดวกครับ 🙏'}]}});
+  }
+  return {newRev,grand,payNote,billNo:b.bill_no};
+}
+
+/* ---- คำขอแก้บิล: ปุ่ม/ป้ายนับ + หน้าต่างอนุมัติของ admin ---- */
+async function refreshEditReqBadge(){
+  const btn=document.getElementById('ebr-btn');if(!btn)return;
+  if(!ebIsAdmin()){btn.style.display='none';return;}
+  try{
+    const {data,error}=await db.from('bill_edit_requests').select('id').eq('status','pending').limit(100);
+    if(error)throw error;
+    const n=(data||[]).length;
+    btn.style.display='inline-block';
+    btn.textContent='🛎️ คำขอแก้บิล'+(n?' ('+n+')':'');
+    btn.style.background=n?'#fdf6dd':'';
+  }catch(e){btn.style.display='none';}   // ตารางยังไม่ถูกสร้าง — ซ่อนปุ่มไว้ก่อน
+}
+async function openEditApprovals(){
+  document.getElementById('ebreq-modal').style.display='flex';
+  await renderEditApprovals();
+}
+async function renderEditApprovals(){
+  const el=document.getElementById('ebreq-body');
+  el.innerHTML='<div class="empty">กำลังโหลด…</div>';
+  const {data,error}=await db.from('bill_edit_requests').select('*').order('id',{ascending:false}).limit(30);
+  if(error){el.innerHTML='<div class="empty">โหลดไม่ได้: '+esc(error.message)+' (รัน mix888-bill-edit-approval.sql หรือยัง?)</div>';return;}
+  const rows=data||[];
+  if(!rows.length){el.innerHTML='<div class="empty">ยังไม่มีคำขอแก้บิล</div>';return;}
+  el.innerHTML=rows.map(r=>{
+    const d=new Date(r.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+    const st=r.status==='pending'?'<span class="tag tag-low">รออนุมัติ</span>'
+      :r.status==='approved'?'<span class="tag tag-ok">อนุมัติแล้ว</span>':'<span class="tag tag-out">ไม่อนุมัติ</span>';
+    return '<div style="border:1px solid var(--line,#eee);border-radius:12px;padding:10px 12px;margin-bottom:8px'+(r.status==='pending'?';background:#fffdf4':'')+'">'
+      +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>'+esc(r.bill_no||('บิล #'+r.bill_id))+'</b>'+st
+      +'<span style="color:var(--muted);font-size:12.5px">ขอโดย '+esc(r.requested_by||'-')+' · '+d+'</span></div>'
+      +'<div style="font-size:13px;margin-top:4px">'+esc(r.summary||'')+'</div>'
+      +(r.status==='pending'
+        ?'<div style="margin-top:8px;display:flex;gap:8px"><button class="btn-ok mini" onclick="approveEditReq('+r.id+',this)">✅ อนุมัติ</button>'
+          +'<button class="btn-d mini" onclick="rejectEditReq('+r.id+',this)">❌ ไม่อนุมัติ</button></div>'
+        :(r.decided_by?'<div style="font-size:12px;color:var(--muted);margin-top:4px">ตัดสินโดย '+esc(r.decided_by)+(r.decide_note?' · '+esc(r.decide_note):'')+'</div>':''))
+      +'</div>';
+  }).join('');
+}
+async function approveEditReq(id,btn){
+  if(!ebIsAdmin()){toast('เฉพาะ admin เท่านั้น');return;}
+  btn.disabled=true;
+  try{
+    const {data:r,error}=await db.from('bill_edit_requests').select('*').eq('id',id).single();
+    if(error||!r)throw new Error('โหลดคำขอไม่ได้');
+    if(r.status!=='pending')throw new Error('คำขอนี้ถูกตัดสินไปแล้ว');
+    let res;
+    try{ res=await applyBillEdit(r.payload,{interactive:true}); }
+    catch(e){
+      if(String(e.message||'').includes('เวอร์ชันใหม่กว่า')
+        &&confirm(String(e.message)+'\n\nยืนยันใช้คำขอนี้ทับบิลเวอร์ชันล่าสุดต่อเลยไหม?')){
+        res=await applyBillEdit(r.payload,{interactive:true,skipRevGuard:true});
+      }else throw e;
+    }
+    const who=currentUser?.display_name||currentUser?.username||'admin';
+    await db.from('bill_edit_requests').update({status:'approved',decided_by:who,decided_at:new Date().toISOString()}).eq('id',id);
+    if(appSettings.line_central_group){
+      try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
+        messages:[{type:'text',text:'✅ อนุมัติคำขอแก้บิล '+(r.bill_no||'')+' → v.'+res.newRev+' (โดย '+who+')'+(res.payNote||'')}]}});}catch(e){console.warn('notify',e);}
+    }
+    toast('อนุมัติ + แก้บิล '+(r.bill_no||'')+' เป็น v.'+res.newRev+' แล้ว ✓'+(res.payNote||''));
+    renderEditApprovals(); refreshEditReqBadge(); loadBills(); loadProducts();
   }catch(e){toast(String(e.message||e));}
-  btn.disabled=false;btn.textContent='💾 บันทึก + ออกบิลใหม่ (v.ถัดไป)';
+  btn.disabled=false;
+}
+async function rejectEditReq(id,btn){
+  if(!ebIsAdmin()){toast('เฉพาะ admin เท่านั้น');return;}
+  const note=prompt('เหตุผลที่ไม่อนุมัติ (จะแจ้งทีมงานในกลุ่มไลน์กลาง):','');
+  if(note===null)return;
+  btn.disabled=true;
+  try{
+    const {data:r}=await db.from('bill_edit_requests').select('bill_no,status').eq('id',id).single();
+    if(r&&r.status!=='pending')throw new Error('คำขอนี้ถูกตัดสินไปแล้ว');
+    const who=currentUser?.display_name||currentUser?.username||'admin';
+    await db.from('bill_edit_requests').update({status:'rejected',decided_by:who,decide_note:note||null,decided_at:new Date().toISOString()}).eq('id',id);
+    if(appSettings.line_central_group){
+      try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
+        messages:[{type:'text',text:'❌ ไม่อนุมัติคำขอแก้บิล '+(r?.bill_no||'')+' (โดย '+who+')'+(note?'\nเหตุผล: '+note:'')}]}});}catch(e){console.warn('notify',e);}
+    }
+    toast('บันทึกไม่อนุมัติแล้ว');
+    renderEditApprovals(); refreshEditReqBadge();
+  }catch(e){toast(String(e.message||e));}
+  btn.disabled=false;
 }
 
 /* ==================== เฟส 2: ใบปะหน้า 100x150 ==================== */
@@ -8686,7 +8862,7 @@ async function startApp(){
   await Promise.all([loadProducts(),loadCustomers(),loadSales(),loadWhList(),loadSuppliers().catch(()=>{})]);  // ข้อมูลหลัก โหลดพร้อมกัน
   await Promise.all([loadOrders(),loadBills()]).catch(e=>toast('โหลดข้อมูลบางส่วนไม่สำเร็จ: '+(e?.message||e)));
   dashCoreReady=true; dashLocalCards();                   // การ์ดที่อิงข้อมูลหลัก ขึ้นตอนนี้
-  loadRcvHistory();loadUsers();loadTransfers();loadQuotes();loadSkuCats();
+  loadRcvHistory();loadUsers();loadTransfers();loadQuotes();loadSkuCats();refreshEditReqBadge();
 }
 (async function(){
   initRtimeSelects();
