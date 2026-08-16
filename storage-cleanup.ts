@@ -4,8 +4,8 @@
 //  (กู้พื้นที่ Storage — สำเนาจริงอยู่ใน NAS · รูปบิลวาดใหม่ได้เสมอ)
 //
 //  เงื่อนไขการลบ (ปลอดภัยสองชั้น):
-//  • บิลจ่ายครบ (paid) + โปรแกรม NAS ยืนยันว่าเก็บครบแล้วเกิน 2 วัน
-//  • บิลที่ยกเลิกเกิน 7 วัน (โฟลเดอร์บน NAS ถูกลบอยู่แล้ว ไม่มีอะไรต้องเก็บ)
+//  • บิลจ่ายครบ (paid) + โปรแกรม NAS ยืนยันว่าเก็บครบแล้วเกิน 1 ชั่วโมง
+//  • บิลที่ยกเลิก (ลบได้ทันที — โฟลเดอร์บน NAS ถูกลบอยู่แล้ว ไม่มีอะไรต้องเก็บ)
 //  ลบแล้วประทับ storage_cleaned_at กันประมวลผลซ้ำ + ตั้ง image_url ว่าง
 //  (ระบบหลังบ้านวาดรูปบิลใหม่อัตโนมัติเมื่อจำเป็น)
 //
@@ -96,9 +96,9 @@ async function lineCentral(text: string) {
 }
 
 async function run(doDelete: boolean, max: number) {
-  const d2 = new Date(Date.now() - 2 * 86400e3).toISOString();
+  const d2 = new Date(Date.now() - 3600e3).toISOString();   // ยืนยันมาแล้วเกิน 1 ชม. (archiver ตรวจไฟล์ครบก่อนยืนยันอยู่แล้ว)
   const cols = 'id,bill_no,image_url,page_urls,slip_url,payment_status,ship_status,nas_saved_at,created_at';
-  // ชุดที่ 1: จ่ายครบ + NAS ยืนยันแล้วเกิน 2 วัน
+  // ชุดที่ 1: จ่ายครบ + NAS ยืนยันแล้วเกิน 1 ชั่วโมง
   const paidQ = await sbGet('bills?select=' + cols
     + '&payment_status=eq.paid&storage_cleaned_at=is.null'
     + '&nas_saved_at=not.is.null&nas_saved_at=lt.' + encodeURIComponent(d2)
