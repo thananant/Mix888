@@ -126,8 +126,9 @@ async function run(doDelete: boolean, max: number) {
       if (!doDelete) { preview.push({ bill: b.bill_no, billFiles: billFiles.length, slips: slipPaths.length }); continue; }
       filesDeleted += await deleteObjects('bills', billFiles);
       filesDeleted += await deleteObjects('slips', slipPaths);
+      // image_url ในตาราง bills ห้ามเป็น null — ใช้ค่าว่างแทน (หลังบ้านมอง '' = ไม่มีรูป → วาดใหม่เอง)
       await sbPatch('bills?id=eq.' + b.id,
-        { storage_cleaned_at: new Date().toISOString(), image_url: null, page_urls: null });
+        { storage_cleaned_at: new Date().toISOString(), image_url: '', page_urls: [] });
       billsDone++;
     } catch (e) {
       failed++;
