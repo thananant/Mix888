@@ -359,11 +359,13 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div class="bc-emoji" style="display:flex;flex-wrap:wrap;gap:2px;margin:2px 0"></div>
       <textarea id="bc-text" rows="4" style="width:100%" placeholder="เช่น 📢 โปรโมชั่นประจำเดือน…"></textarea>
       <div style="display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap">
-        <label class="btn-g mini" style="cursor:pointer">🖼️ แนบรูป (ไม่บังคับ)<input type="file" id="bc-img" accept="image/*" style="display:none" onchange="bcPreview(this)"></label>
+        <label class="btn-g mini" style="cursor:pointer">🖼️ แนบรูป/วิดีโอ (ไม่บังคับ)<input type="file" id="bc-img" accept="image/png,image/jpeg,image/webp,video/mp4,video/quicktime" style="display:none" onchange="bcPreview(this)"></label>
         <span id="bc-img-name" style="font-size:12.5px;color:var(--muted)"></span>
-        <button class="btn-g mini" id="bc-img-clear" style="display:none" onclick="bcClearImg()">✕ เอารูปออก</button>
+        <button class="btn-g mini" id="bc-img-clear" style="display:none" onclick="bcClearImg()">✕ เอาออก</button>
+        <span style="font-size:11.5px;color:var(--muted)">รูป JPG/PNG · วิดีโอ MP4 ≤50MB · GIF ใช้ไม่ได้ (LINE ไม่รองรับ — แปลงเป็น MP4 แทน)</span>
       </div>
       <img id="bc-img-prev" style="display:none;max-width:180px;max-height:180px;border-radius:10px;border:1px solid var(--line);margin-bottom:8px">
+      <video id="bc-vid-prev" controls muted playsinline style="display:none;max-width:240px;border-radius:10px;border:1px solid var(--line);margin-bottom:8px"></video>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0">
         <input id="bc-search" placeholder="ค้นหาร้าน…" style="flex:1;min-width:160px" oninput="bcRender()">
         <select id="bc-sale" onchange="bcRender()"><option value="">เซลล์: ทั้งหมด</option></select>
@@ -2794,10 +2796,22 @@ function bcCount(){
 }
 function bcPreview(inp){
   const f=inp.files&&inp.files[0];if(!f)return;
+  if(f.type==='image/gif'){
+    bcClearImg();
+    toast('LINE ไม่รองรับ GIF — แปลงเป็นวิดีโอ MP4 สั้น ๆ แล้วแนบแทนได้ครับ');
+    return;
+  }
+  if(f.type.startsWith('video/')&&f.size>50*1024*1024){
+    bcClearImg();
+    toast('วิดีโอใหญ่เกิน 50MB — ตัด/ย่อให้เล็กลงก่อน');
+    return;
+  }
   bcImgFile=f;
-  document.getElementById('bc-img-name').textContent=f.name;
+  document.getElementById('bc-img-name').textContent=f.name+(f.type.startsWith('video/')?' (วิดีโอ)':'');
   document.getElementById('bc-img-clear').style.display='inline-block';
-  const p=document.getElementById('bc-img-prev');p.src=URL.createObjectURL(f);p.style.display='block';
+  const p=document.getElementById('bc-img-prev'),v=document.getElementById('bc-vid-prev');
+  if(f.type.startsWith('video/')){p.style.display='none';v.src=URL.createObjectURL(f);v.style.display='block';}
+  else{v.style.display='none';p.src=URL.createObjectURL(f);p.style.display='block';}
 }
 function bcClearImg(){
   bcImgFile=null;
@@ -2805,6 +2819,26 @@ function bcClearImg(){
   document.getElementById('bc-img-name').textContent='';
   document.getElementById('bc-img-clear').style.display='none';
   document.getElementById('bc-img-prev').style.display='none';
+  const v=document.getElementById('bc-vid-prev');if(v){v.style.display='none';v.removeAttribute('src');}
+}
+/* จับภาพเฟรมจากวิดีโอเป็น JPEG — LINE บังคับให้วิดีโอมีภาพตัวอย่างแนบเสมอ */
+function bcVideoFrame(file){
+  return new Promise((res,rej)=>{
+    const v=document.createElement('video');
+    v.muted=true;v.playsInline=true;v.preload='auto';
+    v.onloadeddata=()=>{try{v.currentTime=Math.min(0.5,(v.duration||1)/2);}catch(e){rej(e);}};
+    v.onseeked=()=>{
+      try{
+        const sc=Math.min(1,1280/Math.max(v.videoWidth||640,v.videoHeight||480));
+        const cv=document.createElement('canvas');
+        cv.width=Math.max(1,Math.round((v.videoWidth||640)*sc));cv.height=Math.max(1,Math.round((v.videoHeight||480)*sc));
+        cv.getContext('2d').drawImage(v,0,0,cv.width,cv.height);
+        cv.toBlob(b=>b?res(b):rej(new Error('ทำภาพตัวอย่างไม่ได้')),'image/jpeg',0.85);
+      }catch(e){rej(e);}
+    };
+    v.onerror=()=>rej(new Error('อ่านไฟล์วิดีโอไม่ได้ — ใช้ MP4 เท่านั้น'));
+    v.src=URL.createObjectURL(file);
+  });
 }
 async function bcSend(btn){
   if(bcSending)return;
@@ -2816,15 +2850,28 @@ async function bcSend(btn){
   const byGid={};
   targets.forEach(c=>{(byGid[c.line_group_id]=byGid[c.line_group_id]||[]).push(c.code);});
   const gids=Object.keys(byGid);
+  const isVid=bcImgFile&&bcImgFile.type.startsWith('video/');
   if(!confirm('จะส่งข้อความถึง '+targets.length+' ร้าน ('+gids.length+' กลุ่มไลน์)\n\n'
     +(text?('"'+text.slice(0,120)+(text.length>120?'…':'')+'"\n\n'):'')
-    +(bcImgFile?'พร้อมรูปแนบ 1 รูป\n\n':'')+'ยืนยันส่งเลยไหม?'))return;
+    +(bcImgFile?(isVid?'พร้อมวิดีโอแนบ 1 คลิป\n\n':'พร้อมรูปแนบ 1 รูป\n\n'):'')+'ยืนยันส่งเลยไหม?'))return;
   bcSending=true;btn.disabled=true;
   const st=document.getElementById('bc-status');
   try{
-    // อัปรูปครั้งเดียว ใช้ลิงก์เดียวกันทุกกลุ่ม
-    let imageUrl=null;
-    if(bcImgFile){
+    // อัปสื่อครั้งเดียว ใช้ลิงก์เดียวกันทุกกลุ่ม
+    let mediaMsg=null;
+    if(bcImgFile&&isVid){
+      st.textContent='กำลังเตรียมวิดีโอ…';
+      const frame=await bcVideoFrame(bcImgFile);              // LINE บังคับมีภาพตัวอย่าง
+      const tag='broadcast-'+Date.now()+'-'+rndTag(6);
+      st.textContent='กำลังอัปโหลดวิดีโอ…';
+      const {error:ve}=await db.storage.from('products').upload(tag+'.mp4',bcImgFile,{contentType:bcImgFile.type||'video/mp4',upsert:true});
+      if(ve)throw new Error('อัปวิดีโอไม่สำเร็จ: '+ve.message);
+      const {error:pe}=await db.storage.from('products').upload(tag+'-prev.jpg',frame,{contentType:'image/jpeg',upsert:true});
+      if(pe)throw new Error('อัปภาพตัวอย่างไม่สำเร็จ: '+pe.message);
+      mediaMsg={type:'video',
+        originalContentUrl:db.storage.from('products').getPublicUrl(tag+'.mp4').data.publicUrl,
+        previewImageUrl:db.storage.from('products').getPublicUrl(tag+'-prev.jpg').data.publicUrl};
+    }else if(bcImgFile){
       st.textContent='กำลังอัปโหลดรูป…';
       const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(bcImgFile);});
       const sc=Math.min(1,1600/Math.max(img.width,img.height));
@@ -2834,10 +2881,11 @@ async function bcSend(btn){
       const path='broadcast-'+Date.now()+'-'+rndTag(6)+'.jpg';
       const {error:ue}=await db.storage.from('products').upload(path,blob,{contentType:'image/jpeg',upsert:true});
       if(ue)throw new Error('อัปรูปไม่สำเร็จ: '+ue.message);
-      imageUrl=db.storage.from('products').getPublicUrl(path).data.publicUrl;
+      const u=db.storage.from('products').getPublicUrl(path).data.publicUrl;
+      mediaMsg={type:'image',originalContentUrl:u,previewImageUrl:u};
     }
     const messages=[];
-    if(imageUrl)messages.push({type:'image',originalContentUrl:imageUrl,previewImageUrl:imageUrl});
+    if(mediaMsg)messages.push(mediaMsg);
     if(text)messages.push({type:'text',text:text.slice(0,4900)});
     let ok=0,fail=0;const failed=[];
     for(let i=0;i<gids.length;i++){
@@ -2856,7 +2904,7 @@ async function bcSend(btn){
     if(appSettings.line_central_group){
       try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
         messages:[{type:'text',text:'📣 บรอดแคสต์โดย '+(currentUser?.display_name||currentUser?.username||'-')+'\nส่งแล้ว '+ok+'/'+gids.length+' กลุ่ม'
-          +(text?'\nข้อความ: '+text.slice(0,150):'')+(imageUrl?'\n(มีรูปแนบ)':'')}]}});}catch(e){}
+          +(text?'\nข้อความ: '+text.slice(0,150):'')+(mediaMsg?(mediaMsg.type==='video'?'\n(มีวิดีโอแนบ)':'\n(มีรูปแนบ)'):'')}]}});}catch(e){}
     }
     toast(fail?'ส่งไม่ครบ — เหลือ '+fail+' กลุ่ม กดส่งซ้ำได้':'📣 บรอดแคสต์สำเร็จ '+ok+' กลุ่ม');
   }catch(e){st.textContent='❌ '+(e.message||e);toast(String(e.message||e));}
