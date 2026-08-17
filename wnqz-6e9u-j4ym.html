@@ -534,6 +534,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div class="row" style="margin-bottom:12px;align-items:center">
       <input id="c-search" placeholder="ค้นหาลูกค้า…" style="flex:1;min-width:200px" oninput="renderCustomers()">
       <button class="btn-s mini" id="c-noline-btn" onclick="openNoLineModal()" title="กดดูรายชื่อร้านที่ยังไม่ผูกกลุ่มไลน์ แยกตามเซลล์">🔗 ยังไม่ผูกกลุ่ม</button>
+      <button class="btn-p mini" id="c-bcast-btn" onclick="openBroadcast()" style="display:none" title="ส่งข้อความหาลูกค้าหลายกลุ่มพร้อมกัน (เฉพาะ admin)">📣 บรอดแคสต์</button>
       <span class="count" id="c-count"></span>
     </div>
     <div style="overflow-x:auto">
@@ -1278,6 +1279,35 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px" id="up-hint">นับจากวันที่ออกบิล · กดที่เดือนเพื่อดูรายบิล</div>
     <div id="up-body" style="overflow-x:auto"><div class="empty">กำลังโหลด…</div></div>
+  </div>
+</div>
+<div id="bcast-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this&&!bcSending)this.style.display='none'">
+  <div style="background:#fff;border-radius:14px;max-width:780px;width:100%;padding:18px;margin:14px auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h3 style="margin:0;font-size:16px">📣 บรอดแคสต์ข้อความถึงลูกค้า</h3>
+      <button class="btn-g mini" onclick="if(!bcSending)document.getElementById('bcast-modal').style.display='none'">ปิด</button>
+    </div>
+    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">ส่งเข้ากลุ่มไลน์ของร้านที่เลือก · ร้านแม่/สาขาที่ใช้กลุ่มเดียวกันได้รับครั้งเดียว ไม่ส่งซ้ำ</div>
+    <label>ข้อความ</label>
+    <textarea id="bc-text" rows="4" style="width:100%" placeholder="เช่น 📢 โปรโมชั่นประจำเดือน…"></textarea>
+    <div style="display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap">
+      <label class="btn-g mini" style="cursor:pointer">🖼️ แนบรูป (ไม่บังคับ)<input type="file" id="bc-img" accept="image/*" style="display:none" onchange="bcPreview(this)"></label>
+      <span id="bc-img-name" style="font-size:12.5px;color:var(--muted)"></span>
+      <button class="btn-g mini" id="bc-img-clear" style="display:none" onclick="bcClearImg()">✕ เอารูปออก</button>
+    </div>
+    <img id="bc-img-prev" style="display:none;max-width:180px;max-height:180px;border-radius:10px;border:1px solid var(--line);margin-bottom:8px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0">
+      <input id="bc-search" placeholder="ค้นหาร้าน…" style="flex:1;min-width:160px" oninput="bcRender()">
+      <select id="bc-sale" onchange="bcRender()"><option value="">เซลล์: ทั้งหมด</option></select>
+      <button class="btn-s mini" onclick="bcCheckAll(true)">เลือกทั้งหมดที่แสดง</button>
+      <button class="btn-g mini" onclick="bcCheckAll(false)">ล้าง</button>
+      <span class="count" id="bc-count"></span>
+    </div>
+    <div id="bc-list" style="max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:8px"></div>
+    <div id="bc-status" style="font-size:13px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn-p" id="bc-send" onclick="bcSend(this)">📣 ส่งข้อความ</button>
+    </div>
   </div>
 </div>
 <div id="noline-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)this.style.display='none'">
@@ -2555,6 +2585,115 @@ async function loadCustomers(){
 }
 let custNoLineOnly=false;
 function toggleNoLine(){custNoLineOnly=!custNoLineOnly;renderCustomers();}
+/* ================= 📣 บรอดแคสต์ข้อความถึงลูกค้า (เฉพาะ admin) ================= */
+let bcSel=new Set(), bcSending=false, bcImgFile=null;
+function openBroadcast(){
+  if(!ebIsAdmin()){toast('เฉพาะ admin เท่านั้น');return;}
+  bcSel=new Set(); bcImgFile=null; bcSending=false;
+  document.getElementById('bc-text').value='';
+  document.getElementById('bc-search').value='';
+  document.getElementById('bc-status').textContent='';
+  bcClearImg();
+  const sel=document.getElementById('bc-sale');
+  const names=[...new Set(customers.filter(c=>c.active!==false&&c.line_group_id).map(c=>c.sale_name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'th'));
+  sel.innerHTML='<option value="">เซลล์: ทั้งหมด</option>'+names.map(n=>'<option value="'+esc(n)+'">'+esc(n)+'</option>').join('');
+  bcRender();
+  document.getElementById('bcast-modal').style.display='flex';
+}
+function bcTargets(){return customers.filter(c=>c.active!==false&&c.line_group_id);}
+function bcVisible(){
+  const q=(document.getElementById('bc-search').value||'').toLowerCase();
+  const sf=document.getElementById('bc-sale').value;
+  return bcTargets().filter(c=>(!q||String(c.name).toLowerCase().includes(q)||String(c.code).toLowerCase().includes(q))
+    &&(!sf||c.sale_name===sf));
+}
+function bcRender(){
+  const list=bcVisible();
+  document.getElementById('bc-list').innerHTML=list.length?list.map(c=>
+    '<label style="display:flex;gap:8px;align-items:center;padding:4px 2px;cursor:pointer;font-size:13.5px">'
+    +'<input type="checkbox" '+(bcSel.has(c.id)?'checked':'')+' onchange="bcToggle('+c.id+',this.checked)">'
+    +'<b>'+esc(c.code)+'</b> '+esc(c.name)+(c.branch_name?' <span style="color:var(--muted)">• '+esc(c.branch_name)+'</span>':'')
+    +(c.sale_name?' <span class="tag tag-low">'+esc(c.sale_name)+'</span>':'')+'</label>').join('')
+    :'<div class="empty">ไม่พบร้านตามที่ค้นหา (นับเฉพาะร้านที่ผูกกลุ่มไลน์แล้ว)</div>';
+  bcCount();
+}
+function bcToggle(id,on){if(on)bcSel.add(id);else bcSel.delete(id);bcCount();}
+function bcCheckAll(on){bcVisible().forEach(c=>{if(on)bcSel.add(c.id);else bcSel.delete(c.id);});bcRender();}
+function bcCount(){
+  const gids=new Set(bcTargets().filter(c=>bcSel.has(c.id)).map(c=>c.line_group_id));
+  document.getElementById('bc-count').textContent='เลือก '+bcSel.size+' ร้าน ('+gids.size+' กลุ่ม)';
+}
+function bcPreview(inp){
+  const f=inp.files&&inp.files[0];if(!f)return;
+  bcImgFile=f;
+  document.getElementById('bc-img-name').textContent=f.name;
+  document.getElementById('bc-img-clear').style.display='inline-block';
+  const p=document.getElementById('bc-img-prev');p.src=URL.createObjectURL(f);p.style.display='block';
+}
+function bcClearImg(){
+  bcImgFile=null;
+  const i=document.getElementById('bc-img');if(i)i.value='';
+  document.getElementById('bc-img-name').textContent='';
+  document.getElementById('bc-img-clear').style.display='none';
+  document.getElementById('bc-img-prev').style.display='none';
+}
+async function bcSend(btn){
+  if(bcSending)return;
+  const text=document.getElementById('bc-text').value.trim();
+  if(!text&&!bcImgFile){toast('พิมพ์ข้อความหรือแนบรูปก่อน');return;}
+  const targets=bcTargets().filter(c=>bcSel.has(c.id));
+  if(!targets.length){toast('ยังไม่ได้เลือกร้าน');return;}
+  // รวมร้านที่ใช้กลุ่มไลน์เดียวกัน — ส่งกลุ่มละครั้งเดียว
+  const byGid={};
+  targets.forEach(c=>{(byGid[c.line_group_id]=byGid[c.line_group_id]||[]).push(c.code);});
+  const gids=Object.keys(byGid);
+  if(!confirm('จะส่งข้อความถึง '+targets.length+' ร้าน ('+gids.length+' กลุ่มไลน์)\n\n'
+    +(text?('"'+text.slice(0,120)+(text.length>120?'…':'')+'"\n\n'):'')
+    +(bcImgFile?'พร้อมรูปแนบ 1 รูป\n\n':'')+'ยืนยันส่งเลยไหม?'))return;
+  bcSending=true;btn.disabled=true;
+  const st=document.getElementById('bc-status');
+  try{
+    // อัปรูปครั้งเดียว ใช้ลิงก์เดียวกันทุกกลุ่ม
+    let imageUrl=null;
+    if(bcImgFile){
+      st.textContent='กำลังอัปโหลดรูป…';
+      const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(bcImgFile);});
+      const sc=Math.min(1,1600/Math.max(img.width,img.height));
+      const cv=document.createElement('canvas');cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);
+      cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+      const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.88));
+      const path='broadcast-'+Date.now()+'-'+rndTag(6)+'.jpg';
+      const {error:ue}=await db.storage.from('products').upload(path,blob,{contentType:'image/jpeg',upsert:true});
+      if(ue)throw new Error('อัปรูปไม่สำเร็จ: '+ue.message);
+      imageUrl=db.storage.from('products').getPublicUrl(path).data.publicUrl;
+    }
+    const messages=[];
+    if(imageUrl)messages.push({type:'image',originalContentUrl:imageUrl,previewImageUrl:imageUrl});
+    if(text)messages.push({type:'text',text:text.slice(0,4900)});
+    let ok=0,fail=0;const failed=[];
+    for(let i=0;i<gids.length;i++){
+      st.textContent='กำลังส่ง… '+(i+1)+'/'+gids.length+' กลุ่ม';
+      try{
+        const {error}=await db.functions.invoke('line-push',{body:{to:gids[i],messages}});
+        if(error)throw error;
+        ok++;
+      }catch(e){fail++;failed.push(byGid[gids[i]].join('/'));console.warn('bcast',gids[i],e);}
+      await new Promise(r=>setTimeout(r,150));   // เว้นจังหวะ กันชนลิมิตฝั่ง LINE
+    }
+    st.innerHTML=fail?('⚠️ ส่งแล้ว '+ok+' กลุ่ม · ไม่สำเร็จ '+fail+' กลุ่ม ('+esc(failed.slice(0,8).join(', '))+(failed.length>8?'…':'')+') — กดส่งซ้ำเฉพาะที่เหลือได้')
+      :('✅ ส่งครบ '+ok+' กลุ่มเรียบร้อย');
+    if(!fail){bcSel=new Set();bcRender();}
+    else{bcSel=new Set(targets.filter(c=>failed.some(f=>f.includes(c.code))).map(c=>c.id));bcRender();}   // เหลือไว้เฉพาะที่พลาด กดส่งซ้ำได้
+    if(appSettings.line_central_group){
+      try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
+        messages:[{type:'text',text:'📣 บรอดแคสต์โดย '+(currentUser?.display_name||currentUser?.username||'-')+'\nส่งแล้ว '+ok+'/'+gids.length+' กลุ่ม'
+          +(text?'\nข้อความ: '+text.slice(0,150):'')+(imageUrl?'\n(มีรูปแนบ)':'')}]}});}catch(e){}
+    }
+    toast(fail?'ส่งไม่ครบ — เหลือ '+fail+' กลุ่ม กดส่งซ้ำได้':'📣 บรอดแคสต์สำเร็จ '+ok+' กลุ่ม');
+  }catch(e){st.textContent='❌ '+(e.message||e);toast(String(e.message||e));}
+  bcSending=false;btn.disabled=false;
+}
+
 /* หน้าต่างสรุปร้านที่ยังไม่ผูกกลุ่มไลน์ แยกตามเซลล์ */
 function openNoLineModal(){
   const list=customers.filter(c=>c.active!==false&&!c.line_group_id);
@@ -2580,6 +2719,8 @@ function renderCustomers(){
   document.getElementById('c-count').textContent=list.length+' ราย';
   const nb=document.getElementById('c-noline-btn');
   if(nb){nb.textContent=(custNoLineOnly?'✓ ':'')+'🔗 ยังไม่ผูกกลุ่ม '+noLine.length+' ราย';nb.style.background=custNoLineOnly?'#fdf6dd':'';}
+  const bb=document.getElementById('c-bcast-btn');
+  if(bb)bb.style.display=(typeof ebIsAdmin==='function'&&ebIsAdmin())?'inline-block':'none';
   const pc=window._priceCounts||{};
   document.getElementById('c-body').innerHTML=list.map(c=>{
     const sname=saleName(c.sale_id)||c.sale_name;
