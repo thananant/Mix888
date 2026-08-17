@@ -211,6 +211,13 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       </div>
     </div>
 
+    <div class="mgroup" data-g="promo">
+      <div class="mhead" onclick="toggleGroup('promo')"><span class="ic">📣</span>โปรโมชั่น<span class="chev">▾</span></div>
+      <div class="msub">
+        <div class="mi" data-page="bcast" onclick="showPage('bcast')"><span class="ic">💬</span>ส่งข้อความบรอดแคสต์</div>
+      </div>
+    </div>
+
     <div class="mgroup" data-g="user">
       <div class="mhead" onclick="toggleGroup('user')"><span class="ic">🔐</span>ผู้ใช้<span class="chev">▾</span></div>
       <div class="msub">
@@ -309,6 +316,35 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   </div>
 </div>
 
+<div class="page" id="page-bcast">
+  <div class="card" style="max-width:820px">
+    <h3 class="ct">📣 ส่งข้อความบรอดแคสต์</h3>
+    <div id="bc-gate" class="empty" style="display:none">หน้านี้ใช้ได้เฉพาะ admin — ติดต่อผู้ดูแลระบบ</div>
+    <div id="bc-form" style="display:none">
+      <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">ส่งเข้ากลุ่มไลน์ของร้านที่เลือก · ร้านแม่/สาขาที่ใช้กลุ่มเดียวกันได้รับครั้งเดียว ไม่ส่งซ้ำ · ทุกครั้งที่ส่งมีสรุปแจ้งเข้ากลุ่มไลน์กลาง</div>
+      <label>ข้อความ</label>
+      <textarea id="bc-text" rows="4" style="width:100%" placeholder="เช่น 📢 โปรโมชั่นประจำเดือน…"></textarea>
+      <div style="display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap">
+        <label class="btn-g mini" style="cursor:pointer">🖼️ แนบรูป (ไม่บังคับ)<input type="file" id="bc-img" accept="image/*" style="display:none" onchange="bcPreview(this)"></label>
+        <span id="bc-img-name" style="font-size:12.5px;color:var(--muted)"></span>
+        <button class="btn-g mini" id="bc-img-clear" style="display:none" onclick="bcClearImg()">✕ เอารูปออก</button>
+      </div>
+      <img id="bc-img-prev" style="display:none;max-width:180px;max-height:180px;border-radius:10px;border:1px solid var(--line);margin-bottom:8px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0">
+        <input id="bc-search" placeholder="ค้นหาร้าน…" style="flex:1;min-width:160px" oninput="bcRender()">
+        <select id="bc-sale" onchange="bcRender()"><option value="">เซลล์: ทั้งหมด</option></select>
+        <button class="btn-s mini" onclick="bcCheckAll(true)">เลือกทั้งหมดที่แสดง</button>
+        <button class="btn-g mini" onclick="bcCheckAll(false)">ล้าง</button>
+        <span class="count" id="bc-count"></span>
+      </div>
+      <div id="bc-list" style="max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:8px"></div>
+      <div id="bc-status" style="font-size:13px;margin-top:8px"></div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn-p" id="bc-send" onclick="bcSend(this)">📣 ส่งข้อความ</button>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="page" id="page-crm">
   <div class="pagehead"><h2>ลูกค้า CRM</h2><span class="date">ให้เซลล์ตามลูกค้าเก่ากลับมาซื้อซ้ำ</span></div>
   <div class="card">
@@ -534,7 +570,6 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div class="row" style="margin-bottom:12px;align-items:center">
       <input id="c-search" placeholder="ค้นหาลูกค้า…" style="flex:1;min-width:200px" oninput="renderCustomers()">
       <button class="btn-s mini" id="c-noline-btn" onclick="openNoLineModal()" title="กดดูรายชื่อร้านที่ยังไม่ผูกกลุ่มไลน์ แยกตามเซลล์">🔗 ยังไม่ผูกกลุ่ม</button>
-      <button class="btn-p mini" id="c-bcast-btn" onclick="openBroadcast()" style="display:none" title="ส่งข้อความหาลูกค้าหลายกลุ่มพร้อมกัน (เฉพาะ admin)">📣 บรอดแคสต์</button>
       <span class="count" id="c-count"></span>
     </div>
     <div style="overflow-x:auto">
@@ -1281,35 +1316,6 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div id="up-body" style="overflow-x:auto"><div class="empty">กำลังโหลด…</div></div>
   </div>
 </div>
-<div id="bcast-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this&&!bcSending)this.style.display='none'">
-  <div style="background:#fff;border-radius:14px;max-width:780px;width:100%;padding:18px;margin:14px auto">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-      <h3 style="margin:0;font-size:16px">📣 บรอดแคสต์ข้อความถึงลูกค้า</h3>
-      <button class="btn-g mini" onclick="if(!bcSending)document.getElementById('bcast-modal').style.display='none'">ปิด</button>
-    </div>
-    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">ส่งเข้ากลุ่มไลน์ของร้านที่เลือก · ร้านแม่/สาขาที่ใช้กลุ่มเดียวกันได้รับครั้งเดียว ไม่ส่งซ้ำ</div>
-    <label>ข้อความ</label>
-    <textarea id="bc-text" rows="4" style="width:100%" placeholder="เช่น 📢 โปรโมชั่นประจำเดือน…"></textarea>
-    <div style="display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap">
-      <label class="btn-g mini" style="cursor:pointer">🖼️ แนบรูป (ไม่บังคับ)<input type="file" id="bc-img" accept="image/*" style="display:none" onchange="bcPreview(this)"></label>
-      <span id="bc-img-name" style="font-size:12.5px;color:var(--muted)"></span>
-      <button class="btn-g mini" id="bc-img-clear" style="display:none" onclick="bcClearImg()">✕ เอารูปออก</button>
-    </div>
-    <img id="bc-img-prev" style="display:none;max-width:180px;max-height:180px;border-radius:10px;border:1px solid var(--line);margin-bottom:8px">
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0">
-      <input id="bc-search" placeholder="ค้นหาร้าน…" style="flex:1;min-width:160px" oninput="bcRender()">
-      <select id="bc-sale" onchange="bcRender()"><option value="">เซลล์: ทั้งหมด</option></select>
-      <button class="btn-s mini" onclick="bcCheckAll(true)">เลือกทั้งหมดที่แสดง</button>
-      <button class="btn-g mini" onclick="bcCheckAll(false)">ล้าง</button>
-      <span class="count" id="bc-count"></span>
-    </div>
-    <div id="bc-list" style="max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:8px"></div>
-    <div id="bc-status" style="font-size:13px;margin-top:8px"></div>
-    <div style="display:flex;gap:8px;margin-top:10px">
-      <button class="btn-p" id="bc-send" onclick="bcSend(this)">📣 ส่งข้อความ</button>
-    </div>
-  </div>
-</div>
 <div id="noline-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)this.style.display='none'">
   <div style="background:#fff;border-radius:14px;max-width:720px;width:100%;padding:18px;margin:14px auto">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1572,6 +1578,7 @@ function showPage(p){
   openActiveGroup();
   document.getElementById('page-'+p).classList.add('active');
   if(p==='dashboard') loadDashboard();
+  if(p==='bcast') initBroadcastPage();
   if(p==='crm') loadCRM();
   if(p==='custhist') loadCustHist();
   if(p==='custmap'){
@@ -2587,18 +2594,15 @@ let custNoLineOnly=false;
 function toggleNoLine(){custNoLineOnly=!custNoLineOnly;renderCustomers();}
 /* ================= 📣 บรอดแคสต์ข้อความถึงลูกค้า (เฉพาะ admin) ================= */
 let bcSel=new Set(), bcSending=false, bcImgFile=null;
-function openBroadcast(){
-  if(!ebIsAdmin()){toast('เฉพาะ admin เท่านั้น');return;}
-  bcSel=new Set(); bcImgFile=null; bcSending=false;
-  document.getElementById('bc-text').value='';
-  document.getElementById('bc-search').value='';
-  document.getElementById('bc-status').textContent='';
-  bcClearImg();
-  const sel=document.getElementById('bc-sale');
+function initBroadcastPage(){
+  const gate=document.getElementById('bc-gate'),form=document.getElementById('bc-form');
+  if(!ebIsAdmin()){gate.style.display='block';form.style.display='none';return;}
+  gate.style.display='none';form.style.display='block';
+  const sel=document.getElementById('bc-sale'),keep=sel.value;
   const names=[...new Set(customers.filter(c=>c.active!==false&&c.line_group_id).map(c=>c.sale_name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'th'));
   sel.innerHTML='<option value="">เซลล์: ทั้งหมด</option>'+names.map(n=>'<option value="'+esc(n)+'">'+esc(n)+'</option>').join('');
+  if(keep&&[...sel.options].some(o=>o.value===keep))sel.value=keep;
   bcRender();
-  document.getElementById('bcast-modal').style.display='flex';
 }
 function bcTargets(){return customers.filter(c=>c.active!==false&&c.line_group_id);}
 function bcVisible(){
@@ -2719,8 +2723,6 @@ function renderCustomers(){
   document.getElementById('c-count').textContent=list.length+' ราย';
   const nb=document.getElementById('c-noline-btn');
   if(nb){nb.textContent=(custNoLineOnly?'✓ ':'')+'🔗 ยังไม่ผูกกลุ่ม '+noLine.length+' ราย';nb.style.background=custNoLineOnly?'#fdf6dd':'';}
-  const bb=document.getElementById('c-bcast-btn');
-  if(bb)bb.style.display=(typeof ebIsAdmin==='function'&&ebIsAdmin())?'inline-block':'none';
   const pc=window._priceCounts||{};
   document.getElementById('c-body').innerHTML=list.map(c=>{
     const sname=saleName(c.sale_id)||c.sale_name;
