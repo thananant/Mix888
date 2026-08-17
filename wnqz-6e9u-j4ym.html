@@ -347,6 +347,13 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
           <button class="btn-s" onclick="bpScan(this)">🔎 ค้นหาร้านที่เข้าเกณฑ์</button>
           <span class="count" id="bp-sum"></span>
         </div>
+        <div id="bp-filter" style="display:none;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+          <input id="bp-shop-q" placeholder="🔎 ค้นหาชื่อร้าน / รหัส…" style="flex:1;min-width:170px" autocomplete="off" oninput="bpRender()">
+          <select id="bp-sale-f" onchange="bpRender()"><option value="">เซลล์: ทั้งหมด</option></select>
+          <button class="btn-s" onclick="bpCheckAll(true)">☑ เลือกทั้งหมดที่แสดง</button>
+          <button class="btn-s" onclick="bpCheckAll(false)">⬜ ไม่เลือกที่แสดง</button>
+          <span class="count" id="bp-filter-info"></span>
+        </div>
         <div id="bp-list" style="margin-top:8px"></div>
         <div id="bp-status" style="font-size:13px;margin-top:8px"></div>
         <div style="display:flex;gap:8px;margin-top:10px">
@@ -2667,7 +2674,7 @@ function initBroadcastPage(){
 
 /* ---- 🔥 โปรลดราคาสินค้า: หาเฉพาะร้านที่ถูกจัดสินค้าตัวนี้ และราคาปกติแพงกว่าโปร ---- */
 let bpRows=[],bpProd=null,bpSending=false,bpProdSel=null;
-function bpReset(){bpRows=[];document.getElementById('bp-list').innerHTML='';document.getElementById('bp-sum').textContent='';document.getElementById('bp-send').style.display='none';document.getElementById('bp-status').textContent='';}
+function bpReset(){bpRows=[];document.getElementById('bp-list').innerHTML='';document.getElementById('bp-sum').textContent='';document.getElementById('bp-send').style.display='none';document.getElementById('bp-status').textContent='';const f=document.getElementById('bp-filter');if(f)f.style.display='none';}
 /* ลิสต์ค้นหาสินค้าแบบวาดเอง — datalist ของเบราว์เซอร์ค้นภาษาไทยไม่ติดในหลายเครื่อง */
 function bpSuggest(){
   const q=(document.getElementById('bp-prod').value||'').trim().toLowerCase();
@@ -2729,26 +2736,46 @@ async function bpScan(btn){
     });
     bpRows.sort((a,b)=>(b.normal-promo)-(a.normal-promo));
     document.getElementById('bp-sum').textContent='เข้าเกณฑ์ '+bpRows.length+' ร้าน · ได้ราคาดีอยู่แล้วไม่ส่ง '+cheaper+' · ไม่ผูกกลุ่มไลน์ '+noline+(inactive?' · ปิดใช้งาน '+inactive:'');
+    const saleNames=[...new Set(bpRows.map(r=>r.c.sale_name||'-'))].sort((a,b)=>String(a).localeCompare(String(b),'th'));
+    document.getElementById('bp-sale-f').innerHTML='<option value="">เซลล์: ทั้งหมด</option>'+saleNames.map(s=>'<option>'+esc(s)+'</option>').join('');
+    document.getElementById('bp-shop-q').value='';
     bpRender();
     document.getElementById('bp-send').style.display=bpRows.length?'inline-block':'none';
     document.getElementById('bp-status').textContent='';
   }catch(e){toast('ค้นหาไม่สำเร็จ: '+(e.message||e));}
   btn.disabled=false;
 }
+function bpVisible(){
+  // ดัชนีของแถวที่ผ่านตัวกรองเซลล์ + คำค้นชื่อร้าน (อิงดัชนีจริงใน bpRows)
+  const q=((document.getElementById('bp-shop-q')||{}).value||'').trim().toLowerCase();
+  const sf=(document.getElementById('bp-sale-f')||{}).value||'';
+  const out=[];
+  bpRows.forEach((r,i)=>{
+    if(sf&&(r.c.sale_name||'-')!==sf)return;
+    if(q&&!(String(r.c.code||'').toLowerCase().includes(q)||String(r.c.name||'').toLowerCase().includes(q)||String(r.c.branch_name||'').toLowerCase().includes(q)))return;
+    out.push(i);
+  });
+  return out;
+}
+function bpCheckAll(on){bpVisible().forEach(i=>bpRows[i].sel=on);bpRender();}
 function bpRender(){
   const promo=Number(document.getElementById('bp-price').value);
+  const vis=bpVisible();
+  const f=document.getElementById('bp-filter');if(f)f.style.display=bpRows.length?'flex':'none';
   document.getElementById('bp-list').innerHTML=bpRows.length?
+    (vis.length?
     '<div style="overflow-x:auto;max-height:320px;overflow-y:auto"><table><thead><tr><th></th><th>ร้าน</th><th>เซลล์</th>'
     +'<th class="num">ราคาปกติของเขา</th><th class="num">ราคาโปร</th><th class="num">ลด</th><th class="num">ลด %</th><th></th></tr></thead><tbody>'
-    +bpRows.map((r,i)=>'<tr'+(r.sent===true?' style="background:#e8f6f0"':r.sent===false?' style="background:#fdeeee"':'')+'>'
+    +vis.map(i=>{const r=bpRows[i];return '<tr'+(r.sent===true?' style="background:#e8f6f0"':r.sent===false?' style="background:#fdeeee"':'')+'>'
       +'<td><input type="checkbox" '+(r.sel?'checked':'')+' onchange="bpRows['+i+'].sel=this.checked;bpCount()"></td>'
       +'<td><b>'+esc(r.c.code)+'</b> '+esc(r.c.name)+(r.c.branch_name?' <span style="color:var(--muted)">• '+esc(r.c.branch_name)+'</span>':'')+'</td>'
       +'<td>'+esc(r.c.sale_name||'-')+'</td>'
       +'<td class="num">฿'+fmt(r.normal)+'</td><td class="num"><b>฿'+fmt(promo)+'</b></td>'
       +'<td class="num" style="color:#0f6e56"><b>฿'+fmt(r.normal-promo)+'</b></td>'
       +'<td class="num">'+Math.round((r.normal-promo)/r.normal*100)+'%</td>'
-      +'<td>'+(r.sent===true?'✅ ส่งแล้ว':r.sent===false?'✗ ไม่สำเร็จ':'')+'</td></tr>').join('')
+      +'<td>'+(r.sent===true?'✅ ส่งแล้ว':r.sent===false?'✗ ไม่สำเร็จ':'')+'</td></tr>';}).join('')
     +'</tbody></table></div>'
+    :'<div class="empty">ไม่พบร้านตามที่ค้นหา/กรองไว้</div>')
     :'<div class="empty">ไม่มีร้านเข้าเกณฑ์ (ต้องถูกจัดสินค้าตัวนี้ไว้ และราคาปกติแพงกว่าโปร)</div>';
   bpCount();
 }
@@ -2756,6 +2783,8 @@ function bpCount(){
   const n=bpRows.filter(r=>r.sel).length;
   const b=document.getElementById('bp-send');
   if(b)b.textContent='🔥 ส่งโปรถึงร้านที่เลือก ('+n+')';
+  const inf=document.getElementById('bp-filter-info');
+  if(inf)inf.textContent=bpRows.length?('แสดง '+bpVisible().length+'/'+bpRows.length+' ร้าน · เลือกไว้ '+n):'';
 }
 async function bpSend(btn){
   if(bpSending)return;
