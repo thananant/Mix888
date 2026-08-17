@@ -321,8 +321,42 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <h3 class="ct">📣 ส่งข้อความบรอดแคสต์</h3>
     <div id="bc-gate" class="empty" style="display:none">หน้านี้ใช้ได้เฉพาะ admin — ติดต่อผู้ดูแลระบบ</div>
     <div id="bc-form" style="display:none">
+      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <button class="fbtn active" id="bc-tab-msg" onclick="bcMode('msg')">💬 ข้อความทั่วไป</button>
+        <button class="fbtn" id="bc-tab-promo" onclick="bcMode('promo')">🔥 โปรลดราคาสินค้า</button>
+      </div>
+
+      <div id="bc-mode-promo" style="display:none">
+        <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">เลือกสินค้าและราคาโปร — ระบบส่งเฉพาะร้านที่<b>ถูกจัดสินค้าตัวนี้ไว้</b> และ<b>ราคาปกติของเขาแพงกว่าโปร</b>เท่านั้น (ใครได้ถูกกว่า/เท่ากับโปรอยู่แล้ว ไม่ส่ง)</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div style="flex:2;min-width:220px"><label>สินค้า</label>
+            <input id="bp-prod" list="bp-prodlist" placeholder="พิมพ์ชื่อหรือ SKU…" style="width:100%" onchange="bpReset()"><datalist id="bp-prodlist"></datalist></div>
+          <div style="flex:1;min-width:110px"><label>ราคาโปร (฿)</label>
+            <input id="bp-price" type="number" min="0" step="0.01" style="width:100%" onchange="bpReset()"></div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
+          <div><label>เริ่ม</label><input id="bp-from" type="date"></div>
+          <div><label>ถึงวันที่</label><input id="bp-to" type="date"></div>
+          <div><label>หมดเขตเวลา</label><input id="bp-time" type="time" value="21:00"></div>
+        </div>
+        <label style="margin-top:6px">ข้อความเพิ่มเติม (ไม่บังคับ)</label>
+        <div class="bc-emoji" style="display:flex;flex-wrap:wrap;gap:2px;margin:2px 0"></div>
+        <textarea id="bp-note" rows="2" style="width:100%" placeholder="เช่น สั่งในลิงก์ประจำร้านได้เลยครับ"></textarea>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+          <button class="btn-s" onclick="bpScan(this)">🔎 ค้นหาร้านที่เข้าเกณฑ์</button>
+          <span class="count" id="bp-sum"></span>
+        </div>
+        <div id="bp-list" style="margin-top:8px"></div>
+        <div id="bp-status" style="font-size:13px;margin-top:8px"></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn-p" id="bp-send" style="display:none" onclick="bpSend(this)">🔥 ส่งโปรถึงร้านที่เลือก</button>
+        </div>
+      </div>
+
+      <div id="bc-mode-msg">
       <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">ส่งเข้ากลุ่มไลน์ของร้านที่เลือก · ร้านแม่/สาขาที่ใช้กลุ่มเดียวกันได้รับครั้งเดียว ไม่ส่งซ้ำ · ทุกครั้งที่ส่งมีสรุปแจ้งเข้ากลุ่มไลน์กลาง</div>
       <label>ข้อความ</label>
+      <div class="bc-emoji" style="display:flex;flex-wrap:wrap;gap:2px;margin:2px 0"></div>
       <textarea id="bc-text" rows="4" style="width:100%" placeholder="เช่น 📢 โปรโมชั่นประจำเดือน…"></textarea>
       <div style="display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap">
         <label class="btn-g mini" style="cursor:pointer">🖼️ แนบรูป (ไม่บังคับ)<input type="file" id="bc-img" accept="image/*" style="display:none" onchange="bcPreview(this)"></label>
@@ -342,6 +376,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="btn-p" id="bc-send" onclick="bcSend(this)">📣 ส่งข้อความ</button>
       </div>
+      </div><!-- /bc-mode-msg -->
     </div>
   </div>
 </div>
@@ -2594,15 +2629,145 @@ let custNoLineOnly=false;
 function toggleNoLine(){custNoLineOnly=!custNoLineOnly;renderCustomers();}
 /* ================= 📣 บรอดแคสต์ข้อความถึงลูกค้า (เฉพาะ admin) ================= */
 let bcSel=new Set(), bcSending=false, bcImgFile=null;
+const BC_EMOJIS=['😊','😄','🥰','😍','🤩','😆','😉','🙏','👍','💪','👏','🫶','❤️','🧡','💛','💚','🎉','🎊','✨','🌟','🔥','💥','⚡','⏰','❗','✅','📢','📣','💰','🛒','🛍️','🎁'];
+let bcModeCur='msg';
+function bcMode(m){
+  bcModeCur=m;
+  document.getElementById('bc-mode-msg').style.display=m==='msg'?'block':'none';
+  document.getElementById('bc-mode-promo').style.display=m==='promo'?'block':'none';
+  document.getElementById('bc-tab-msg').classList.toggle('active',m==='msg');
+  document.getElementById('bc-tab-promo').classList.toggle('active',m==='promo');
+}
+function bcEmoji(ch){
+  const el=bcModeCur==='msg'?document.getElementById('bc-text'):document.getElementById('bp-note');
+  const s=el.selectionStart??el.value.length, e=el.selectionEnd??el.value.length;
+  el.value=el.value.slice(0,s)+ch+el.value.slice(e);
+  el.focus();el.selectionStart=el.selectionEnd=s+ch.length;
+}
 function initBroadcastPage(){
   const gate=document.getElementById('bc-gate'),form=document.getElementById('bc-form');
   if(!ebIsAdmin()){gate.style.display='block';form.style.display='none';return;}
   gate.style.display='none';form.style.display='block';
+  document.querySelectorAll('.bc-emoji').forEach(bar=>{
+    if(!bar.dataset.done){bar.dataset.done='1';
+      bar.innerHTML=BC_EMOJIS.map(ch=>'<button type="button" style="border:none;background:none;font-size:19px;cursor:pointer;padding:1px 3px" onclick="bcEmoji(\''+ch+'\')">'+ch+'</button>').join('');}
+  });
   const sel=document.getElementById('bc-sale'),keep=sel.value;
   const names=[...new Set(customers.filter(c=>c.active!==false&&c.line_group_id).map(c=>c.sale_name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'th'));
   sel.innerHTML='<option value="">เซลล์: ทั้งหมด</option>'+names.map(n=>'<option value="'+esc(n)+'">'+esc(n)+'</option>').join('');
   if(keep&&[...sel.options].some(o=>o.value===keep))sel.value=keep;
+  const dl=document.getElementById('bp-prodlist');
+  if(dl)dl.innerHTML=products.filter(p=>p.active!==false).map(p=>'<option value="'+esc(p.sku)+' · '+esc(p.name)+'"></option>').join('');
+  const today=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
+  const f=document.getElementById('bp-from'),t=document.getElementById('bp-to');
+  if(f&&!f.value)f.value=today; if(t&&!t.value)t.value=today;
   bcRender();
+}
+
+/* ---- 🔥 โปรลดราคาสินค้า: หาเฉพาะร้านที่ถูกจัดสินค้าตัวนี้ และราคาปกติแพงกว่าโปร ---- */
+let bpRows=[],bpProd=null,bpSending=false;
+function bpReset(){bpRows=[];document.getElementById('bp-list').innerHTML='';document.getElementById('bp-sum').textContent='';document.getElementById('bp-send').style.display='none';document.getElementById('bp-status').textContent='';}
+function bpFindProd(){
+  const v=(document.getElementById('bp-prod').value||'').trim();
+  if(!v)return null;
+  const sku=v.split(' · ')[0].trim().toLowerCase();
+  return products.find(p=>String(p.sku).toLowerCase()===sku)
+      || products.find(p=>(String(p.sku)+' · '+String(p.name)).toLowerCase()===v.toLowerCase())
+      || products.find(p=>String(p.name).toLowerCase()===v.toLowerCase())||null;
+}
+function bpWindowLabel(){
+  const f=document.getElementById('bp-from').value,t=document.getElementById('bp-to').value,tm=document.getElementById('bp-time').value||'21:00';
+  const lb=s=>{const[y,m,d]=s.split('-');return Number(d)+' '+TH_MONTHS[Number(m)-1];};
+  if(!f||!t)return '';
+  return (f===t?('วันนี้ ('+lb(f)+')'):(lb(f)+' – '+lb(t)))+' หมดเขต '+tm+' น.';
+}
+async function bpScan(btn){
+  const p=bpFindProd(),promo=Number(document.getElementById('bp-price').value);
+  if(!p){toast('เลือกสินค้าจากรายการก่อน');return;}
+  if(!(promo>0)){toast('ใส่ราคาโปรก่อน');return;}
+  if(!document.getElementById('bp-from').value||!document.getElementById('bp-to').value){toast('เลือกช่วงวันที่ก่อน');return;}
+  btn.disabled=true;
+  try{
+    const {data:cps,error}=await db.from('customer_prices').select('customer_id,price').eq('product_id',p.id).limit(5000);
+    if(error)throw new Error(error.message);
+    bpProd=p;
+    const byId={};customers.forEach(c=>byId[c.id]=c);
+    let cheaper=0,noline=0,inactive=0;
+    bpRows=[];
+    (cps||[]).forEach(cp=>{
+      const c=byId[cp.customer_id];if(!c)return;
+      if(c.active===false){inactive++;return;}
+      const normal=(cp.price!=null&&cp.price!=='')?Number(cp.price):effPrice(p,c.price_group);
+      if(!(normal>promo)){cheaper++;return;}            // ได้ถูกกว่า/เท่ากับโปรอยู่แล้ว — ไม่ส่ง
+      if(!c.line_group_id){noline++;return;}
+      bpRows.push({c,normal,sel:true,sent:null});
+    });
+    bpRows.sort((a,b)=>(b.normal-promo)-(a.normal-promo));
+    document.getElementById('bp-sum').textContent='เข้าเกณฑ์ '+bpRows.length+' ร้าน · ได้ราคาดีอยู่แล้วไม่ส่ง '+cheaper+' · ไม่ผูกกลุ่มไลน์ '+noline+(inactive?' · ปิดใช้งาน '+inactive:'');
+    bpRender();
+    document.getElementById('bp-send').style.display=bpRows.length?'inline-block':'none';
+    document.getElementById('bp-status').textContent='';
+  }catch(e){toast('ค้นหาไม่สำเร็จ: '+(e.message||e));}
+  btn.disabled=false;
+}
+function bpRender(){
+  const promo=Number(document.getElementById('bp-price').value);
+  document.getElementById('bp-list').innerHTML=bpRows.length?
+    '<div style="overflow-x:auto;max-height:320px;overflow-y:auto"><table><thead><tr><th></th><th>ร้าน</th><th>เซลล์</th>'
+    +'<th class="num">ราคาปกติของเขา</th><th class="num">ราคาโปร</th><th class="num">ลด</th><th class="num">ลด %</th><th></th></tr></thead><tbody>'
+    +bpRows.map((r,i)=>'<tr'+(r.sent===true?' style="background:#e8f6f0"':r.sent===false?' style="background:#fdeeee"':'')+'>'
+      +'<td><input type="checkbox" '+(r.sel?'checked':'')+' onchange="bpRows['+i+'].sel=this.checked;bpCount()"></td>'
+      +'<td><b>'+esc(r.c.code)+'</b> '+esc(r.c.name)+(r.c.branch_name?' <span style="color:var(--muted)">• '+esc(r.c.branch_name)+'</span>':'')+'</td>'
+      +'<td>'+esc(r.c.sale_name||'-')+'</td>'
+      +'<td class="num">฿'+fmt(r.normal)+'</td><td class="num"><b>฿'+fmt(promo)+'</b></td>'
+      +'<td class="num" style="color:#0f6e56"><b>฿'+fmt(r.normal-promo)+'</b></td>'
+      +'<td class="num">'+Math.round((r.normal-promo)/r.normal*100)+'%</td>'
+      +'<td>'+(r.sent===true?'✅ ส่งแล้ว':r.sent===false?'✗ ไม่สำเร็จ':'')+'</td></tr>').join('')
+    +'</tbody></table></div>'
+    :'<div class="empty">ไม่มีร้านเข้าเกณฑ์ (ต้องถูกจัดสินค้าตัวนี้ไว้ และราคาปกติแพงกว่าโปร)</div>';
+  bpCount();
+}
+function bpCount(){
+  const n=bpRows.filter(r=>r.sel).length;
+  const b=document.getElementById('bp-send');
+  if(b)b.textContent='🔥 ส่งโปรถึงร้านที่เลือก ('+n+')';
+}
+async function bpSend(btn){
+  if(bpSending)return;
+  const promo=Number(document.getElementById('bp-price').value);
+  const targets=bpRows.filter(r=>r.sel&&r.sent!==true);
+  if(!bpProd||!targets.length){toast('ยังไม่ได้เลือกร้าน');return;}
+  const win=bpWindowLabel();
+  const note=document.getElementById('bp-note').value.trim();
+  const sample=shopTag(targets[0].c)+'🔥 โปรพิเศษเฉพาะร้านคุณ\n'+bpProd.name
+    +'\nจากราคาปกติ ฿'+fmt(targets[0].normal)+' → เหลือ ฿'+fmt(promo)+' (ลด ฿'+fmt(targets[0].normal-promo)+')'
+    +'\n⏰ '+win+(note?'\n'+note:'');
+  if(!confirm('จะส่งโปร "'+bpProd.name+'" ถึง '+targets.length+' ร้าน\nแต่ละร้านเห็นราคาปกติของตัวเอง เช่น:\n\n'+sample+'\n\nยืนยันส่งเลยไหม?'))return;
+  bpSending=true;btn.disabled=true;
+  const st=document.getElementById('bp-status');
+  let ok=0,fail=0;
+  for(let i=0;i<targets.length;i++){
+    const r=targets[i];
+    st.textContent='กำลังส่ง… '+(i+1)+'/'+targets.length;
+    const text=shopTag(r.c)+'🔥 โปรพิเศษเฉพาะร้านคุณ\n'+bpProd.name
+      +'\nจากราคาปกติ ฿'+fmt(r.normal)+' → เหลือ ฿'+fmt(promo)+' (ลด ฿'+fmt(r.normal-promo)+')'
+      +'\n⏰ '+win+(note?'\n'+note:'');
+    try{
+      const {error}=await db.functions.invoke('line-push',{body:{to:r.c.line_group_id,messages:[{type:'text',text:text.slice(0,4900)}]}});
+      if(error)throw error;
+      r.sent=true;ok++;
+    }catch(e){r.sent=false;fail++;console.warn('promo',r.c.code,e);}
+    await new Promise(x=>setTimeout(x,150));
+  }
+  bpRender();
+  st.innerHTML=fail?('⚠️ ส่งแล้ว '+ok+' ร้าน · ไม่สำเร็จ '+fail+' ร้าน (แถวสีแดง) — กดส่งซ้ำได้ ระบบข้ามร้านที่ได้แล้ว')
+    :('✅ ส่งครบ '+ok+' ร้านเรียบร้อย');
+  if(appSettings.line_central_group){
+    try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
+      messages:[{type:'text',text:'🔥 โปรบรอดแคสต์ "'+bpProd.name+'" ฿'+fmt(promo)+' ('+win+')\nโดย '+(currentUser?.display_name||currentUser?.username||'-')+' · ส่งแล้ว '+ok+'/'+targets.length+' ร้าน'}]}});}catch(e){}
+  }
+  toast(fail?'ส่งไม่ครบ — กดส่งซ้ำเฉพาะที่เหลือได้':'🔥 ส่งโปรครบ '+ok+' ร้าน');
+  bpSending=false;btn.disabled=false;bpCount();
 }
 function bcTargets(){return customers.filter(c=>c.active!==false&&c.line_group_id);}
 function bcVisible(){
