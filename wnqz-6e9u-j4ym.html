@@ -329,8 +329,9 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div id="bc-mode-promo" style="display:none">
         <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">เลือกสินค้าและราคาโปร — ระบบส่งเฉพาะร้านที่<b>ถูกจัดสินค้าตัวนี้ไว้</b> และ<b>ราคาปกติของเขาแพงกว่าโปร</b>เท่านั้น (ใครได้ถูกกว่า/เท่ากับโปรอยู่แล้ว ไม่ส่ง)</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <div style="flex:2;min-width:220px"><label>สินค้า</label>
-            <input id="bp-prod" list="bp-prodlist" placeholder="พิมพ์ชื่อหรือ SKU…" style="width:100%" onchange="bpReset()"><datalist id="bp-prodlist"></datalist></div>
+          <div style="flex:2;min-width:220px;position:relative"><label>สินค้า</label>
+            <input id="bp-prod" placeholder="พิมพ์ชื่อหรือ SKU…" style="width:100%" autocomplete="off" oninput="bpSuggest()" onfocus="bpSuggest()">
+            <div id="bp-sugg" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:50;background:#fff;border:1px solid var(--line,#ddd);border-radius:10px;max-height:260px;overflow-y:auto;box-shadow:0 6px 18px rgba(0,0,0,.12)"></div></div>
           <div style="flex:1;min-width:110px"><label>ราคาโปร (฿)</label>
             <input id="bp-price" type="number" min="0" step="0.01" style="width:100%" onchange="bpReset()"></div>
         </div>
@@ -2658,8 +2659,6 @@ function initBroadcastPage(){
   const names=[...new Set(customers.filter(c=>c.active!==false&&c.line_group_id).map(c=>c.sale_name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'th'));
   sel.innerHTML='<option value="">เซลล์: ทั้งหมด</option>'+names.map(n=>'<option value="'+esc(n)+'">'+esc(n)+'</option>').join('');
   if(keep&&[...sel.options].some(o=>o.value===keep))sel.value=keep;
-  const dl=document.getElementById('bp-prodlist');
-  if(dl)dl.innerHTML=products.filter(p=>p.active!==false).map(p=>'<option value="'+esc(p.sku)+' · '+esc(p.name)+'"></option>').join('');
   const today=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
   const f=document.getElementById('bp-from'),t=document.getElementById('bp-to');
   if(f&&!f.value)f.value=today; if(t&&!t.value)t.value=today;
@@ -2667,9 +2666,33 @@ function initBroadcastPage(){
 }
 
 /* ---- 🔥 โปรลดราคาสินค้า: หาเฉพาะร้านที่ถูกจัดสินค้าตัวนี้ และราคาปกติแพงกว่าโปร ---- */
-let bpRows=[],bpProd=null,bpSending=false;
+let bpRows=[],bpProd=null,bpSending=false,bpProdSel=null;
 function bpReset(){bpRows=[];document.getElementById('bp-list').innerHTML='';document.getElementById('bp-sum').textContent='';document.getElementById('bp-send').style.display='none';document.getElementById('bp-status').textContent='';}
+/* ลิสต์ค้นหาสินค้าแบบวาดเอง — datalist ของเบราว์เซอร์ค้นภาษาไทยไม่ติดในหลายเครื่อง */
+function bpSuggest(){
+  const q=(document.getElementById('bp-prod').value||'').trim().toLowerCase();
+  bpProdSel=null; bpReset();
+  const box=document.getElementById('bp-sugg');
+  if(!q){box.style.display='none';return;}
+  const hits=products.filter(p=>p.active!==false&&(String(p.name).toLowerCase().includes(q)||String(p.sku).toLowerCase().includes(q))).slice(0,30);
+  box.innerHTML=hits.length
+    ?hits.map(p=>'<div style="padding:7px 10px;cursor:pointer;border-bottom:1px solid var(--line,#f0f0f0)" onmousedown="bpPick('+p.id+')"><b>'+esc(p.sku)+'</b> '+esc(p.name)+' <span style="color:var(--muted)">฿'+fmt(p.base_price)+'</span></div>').join('')
+    :'<div style="padding:7px 10px;color:var(--muted)">ไม่พบสินค้าชื่อนี้</div>';
+  box.style.display='block';
+}
+function bpPick(id){
+  const p=products.find(x=>x.id===id);if(!p)return;
+  bpProdSel=p;
+  document.getElementById('bp-prod').value=p.sku+' · '+p.name;
+  document.getElementById('bp-sugg').style.display='none';
+  bpReset();
+}
+document.addEventListener('click',e=>{
+  const b=document.getElementById('bp-sugg');
+  if(b&&b.style.display!=='none'&&!e.target.closest('#bp-sugg')&&e.target.id!=='bp-prod')b.style.display='none';
+});
 function bpFindProd(){
+  if(bpProdSel)return bpProdSel;
   const v=(document.getElementById('bp-prod').value||'').trim();
   if(!v)return null;
   const sku=v.split(' · ')[0].trim().toLowerCase();
