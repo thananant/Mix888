@@ -215,6 +215,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div class="mhead" onclick="toggleGroup('promo')"><span class="ic">📣</span>โปรโมชั่น<span class="chev">▾</span></div>
       <div class="msub">
         <div class="mi" data-page="bcast" onclick="showPage('bcast')"><span class="ic">💬</span>ส่งข้อความบรอดแคสต์</div>
+        <div class="mi" data-page="promodetail" onclick="showPage('promodetail')"><span class="ic">📊</span>รายละเอียดการลดราคา</div>
       </div>
     </div>
 
@@ -403,6 +404,14 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       </div>
       </div><!-- /bc-mode-msg -->
     </div>
+  </div>
+</div>
+<div class="page" id="page-promodetail">
+  <div class="card" style="max-width:880px">
+    <h3 class="ct">📊 รายละเอียดการลดราคา</h3>
+    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">ผลของแต่ละโปร: ลดอะไร ให้ร้านไหนบ้าง ใครสั่งจริง สั่งไปเท่าไร และเทียบกับช่วงก่อนจัดโปร — ไว้ใช้วางแผนโปรรอบถัดไป</div>
+    <div id="pd-gate" class="empty" style="display:none">หน้านี้ใช้ได้เฉพาะ admin — ติดต่อผู้ดูแลระบบ</div>
+    <div id="pd-body" style="display:none"><div class="empty">กำลังโหลด…</div></div>
   </div>
 </div>
 <div class="page" id="page-crm">
@@ -1654,6 +1663,7 @@ function showPage(p){
   document.getElementById('page-'+p).classList.add('active');
   if(p==='dashboard') loadDashboard();
   if(p==='bcast') initBroadcastPage();
+  if(p==='promodetail') initPromoDetailPage();
   if(p==='crm') loadCRM();
   if(p==='custhist') loadCustHist();
   if(p==='custmap'){
@@ -2966,6 +2976,80 @@ async function bpCancelPromo(id,btn){
   if(error){toast('ยกเลิกไม่สำเร็จ: '+error.message);btn.disabled=false;return;}
   toast('ยกเลิกโปรแล้ว'+(data&&data.reverted!=null?' · คืนราคาเดิมให้ '+data.reverted+' ร้าน':''));
   bpLoadPromos();
+}
+
+/* ==================== 📊 รายละเอียดการลดราคา (วิเคราะห์ผลโปร) ==================== */
+let pdPromos=[];
+async function initPromoDetailPage(){
+  const gate=document.getElementById('pd-gate'),body=document.getElementById('pd-body');
+  const admin=!!(currentUser&&currentUser.role==='admin');
+  gate.style.display=admin?'none':'block';
+  body.style.display=admin?'block':'none';
+  if(!admin)return;
+  body.innerHTML='<div class="empty">กำลังโหลด…</div>';
+  const {data,error}=await db.from('promotions').select('*').order('id',{ascending:false}).limit(30);
+  if(error){body.innerHTML='<div class="empty">โหลดไม่ได้: '+esc(error.message)+' (รัน mix888-promotions.sql หรือยัง?)</div>';return;}
+  pdPromos=data||[];
+  if(!pdPromos.length){body.innerHTML='<div class="empty">ยังไม่เคยจัดโปร — เริ่มได้จากหน้า "ส่งข้อความบรอดแคสต์ → โปรลดราคาสินค้า"</div>';return;}
+  const chip=s=>s==='scheduled'?'<span class="tag tag-low">รอเริ่ม</span>'
+    :s==='active'?'<span class="tag tag-ok">กำลังลดราคา</span>'
+    :s==='done'?'<span class="tag">จบแล้ว</span>':'<span class="tag tag-out">ยกเลิก</span>';
+  const fD=x=>x?new Date(x).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'-';
+  body.innerHTML=pdPromos.map(p=>{
+    const cs=Array.isArray(p.customers)?p.customers:[];
+    const sentN=cs.filter(c=>c.sent===true).length;
+    return '<div style="border:1px solid var(--line,#eee);border-radius:12px;padding:12px 14px;margin-bottom:10px">'
+      +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>'+esc(p.product_name||'')+'</b> ฿'+fmt(p.promo_price)+' '+chip(p.status)
+      +(p.apply_price?'<span class="tag" style="background:#e8f6f0;color:#0f6e56">💸 แก้ราคาจริง</span>':'<span class="tag">📣 แจ้งอย่างเดียว</span>')+'</div>'
+      +'<div style="font-size:12.5px;color:var(--muted);margin-top:3px">⏰ '+esc(p.win_label||(fD(p.starts_at)+' – '+fD(p.ends_at)))
+      +' · ให้ '+cs.length+' ร้าน · ข้อความถึง '+sentN+' ร้าน'
+      +(p.created_by?' · โดย '+esc(p.created_by):'')+(p.note?'<br>📝 '+esc(p.note):'')+'</div>'
+      +'<div id="pd-r-'+p.id+'" style="margin-top:8px"><button class="btn-s mini" onclick="pdOpen('+p.id+',this)">📈 ดูผลโปรนี้ — ใครสั่งบ้าง สั่งเท่าไร</button></div>'
+      +'</div>';
+  }).join('');
+}
+async function pdOpen(id,btn){
+  const p=pdPromos.find(x=>x.id===id);if(!p)return;
+  btn.disabled=true;btn.textContent='กำลังคำนวณ…';
+  const box=document.getElementById('pd-r-'+id);
+  const nQ=n=>Number(n||0).toLocaleString('th-TH');
+  try{
+    const {data,error}=await db.rpc('promo_report',{p_id:id});
+    if(error)throw new Error(error.message);
+    const during=(data&&data.during)||[],before=(data&&data.before)||{};
+    const cs=Array.isArray(p.customers)?p.customers:[];
+    const byId={};during.forEach(d=>{byId[d.customer_id]=d;});
+    // ทุกร้านที่ได้โปร — ที่สั่งขึ้นก่อน (ยอดมาก→น้อย) ร้านที่ยังไม่สั่งต่อท้ายไว้ตามติด
+    const rows=cs.map(c=>{
+      const d=byId[c.customer_id]||{};
+      const cust=(typeof customers!=='undefined'&&customers.find(x=>x.id===c.customer_id))||null;
+      return {code:c.code||(cust&&cust.code)||'',name:c.name||(cust&&cust.name)||('ลูกค้า #'+c.customer_id),
+        sale:(cust&&cust.sale_name)||'-',sent:c.sent===true,
+        orders:Number(d.orders)||0,qty:Number(d.qty)||0,amount:Number(d.amount)||0};
+    }).sort((a,b)=>b.amount-a.amount||b.orders-a.orders);
+    const buyers=rows.filter(r=>r.orders>0);
+    const totQty=buyers.reduce((s,r)=>s+r.qty,0),totAmt=buyers.reduce((s,r)=>s+r.amount,0),totOrd=buyers.reduce((s,r)=>s+r.orders,0);
+    const bQty=Number(before.qty)||0,bAmt=Number(before.amount)||0,bShops=Number(before.shops)||0;
+    const up=bQty>0?Math.round((totQty-bQty)/bQty*100):null;
+    box.innerHTML=
+      '<div style="display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 6px;font-size:13.5px">'
+      +'<span>🛒 ร้านที่สั่ง <b>'+buyers.length+'/'+cs.length+'</b>'+(cs.length?' ('+Math.round(buyers.length/cs.length*100)+'%)':'')+'</span>'
+      +'<span>📦 สั่งรวม <b>'+nQ(totQty)+'</b> หน่วย · '+totOrd+' ออเดอร์</span>'
+      +'<span>💰 ยอดเงิน <b>฿'+fmt(totAmt)+'</b></span></div>'
+      +'<div style="font-size:12.5px;color:var(--muted);margin-bottom:6px">เทียบช่วงก่อนโปร (ช่วงเวลายาวเท่ากัน): เคยสั่ง '+nQ(bQty)+' หน่วย ฿'+fmt(bAmt)+' จาก '+bShops+' ร้าน'
+      +(up!=null?(' → ช่วงโปร'+(totQty>=bQty?'เพิ่มขึ้น ':'ลดลง ')+Math.abs(up)+'%'):(totQty>0?' → ช่วงโปรมียอดใหม่ทั้งหมด (ก่อนหน้าไม่มีเลย)':''))+'</div>'
+      +'<div style="overflow-x:auto;max-height:340px;overflow-y:auto"><table><thead><tr>'
+      +'<th>ร้าน</th><th>เซลล์</th><th>ได้รับข้อความ</th><th class="num">ออเดอร์</th><th class="num">จำนวน</th><th class="num">ยอดเงิน</th></tr></thead><tbody>'
+      +rows.map(r=>'<tr'+(r.orders?'':' style="color:var(--muted)"')+'>'
+        +'<td><b>'+esc(r.code)+'</b> '+esc(r.name)+'</td><td>'+esc(r.sale)+'</td>'
+        +'<td>'+(r.sent?'✅':'—')+'</td>'
+        +'<td class="num">'+(r.orders||'')+'</td>'
+        +'<td class="num">'+(r.qty?nQ(r.qty):'')+'</td>'
+        +'<td class="num">'+(r.amount?'฿'+fmt(r.amount):'<span style="color:var(--muted)">ยังไม่สั่ง</span>')+'</td></tr>').join('')
+      +'</tbody></table></div>';
+  }catch(e){
+    box.innerHTML='<div class="empty">ดูผลไม่ได้: '+esc(String(e.message||e))+' (รัน mix888-promotions.sql เวอร์ชันล่าสุดหรือยัง?)</div>';
+  }
 }
 function bcTargets(){return customers.filter(c=>c.active!==false&&c.line_group_id);}
 function bcVisible(){
