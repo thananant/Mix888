@@ -259,7 +259,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div class="stat" style="cursor:pointer" onclick="openNewCustModal()" title="กดดูรายชื่อลูกค้าใหม่"><div class="ic">🤝</div><div><div class="l">ลูกค้าใหม่ (ช่วงที่เลือก)</div><div class="v" id="d-newcust">—</div><div class="l">กดดูรายชื่อ ›</div></div></div>
   </div>
   <div class="charts">
-    <div class="card"><h3 class="ct">ยอดขายรายวัน (ช่วงที่เลือก)</h3><div class="chart-box"><canvas id="ch-sales"></canvas></div></div>
+    <div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap"><h3 class="ct">ยอดขายรายวัน (ช่วงที่เลือก)</h3><span id="d-avg" style="font-size:13px;font-weight:700;color:#b91c1c"></span></div><div class="chart-box"><canvas id="ch-sales"></canvas></div></div>
     <div class="card"><h3 class="ct">สินค้าขายดี (ช่วงที่เลือก)</h3><div class="chart-box"><canvas id="ch-top"></canvas></div></div>
   </div>
   <div class="charts" style="margin-top:16px">
@@ -1908,9 +1908,18 @@ async function loadDashboard(){
     labels.push(d.toLocaleDateString('th-TH',{day:'numeric',month:'short'}));
     vals.push(o.filter(x=>{const t=new Date(x.created_at);return t>=d&&t<nd;}).reduce((s,x)=>s+Number(x.total),0));
   }
+  // ค่าเฉลี่ยต่อวัน — นับเฉพาะวันที่มียอด (ไม่ให้วันหัว-ท้ายช่วงที่ว่างเปล่าฉุดค่าลง)
+  const salesDays=vals.filter(v=>v>0);
+  const dayAvg=salesDays.length?salesDays.reduce((s,v)=>s+v,0)/salesDays.length:0;
+  const avgEl=document.getElementById('d-avg');
+  if(avgEl)avgEl.innerHTML=salesDays.length
+    ?('เฉลี่ยวันละ ฿'+fmt0(dayAvg)+' <span style="color:var(--muted);font-weight:400">('+salesDays.length+' วันที่มียอด)</span>')
+    :'';
   if(chSales)chSales.destroy();
   chSales=new Chart(document.getElementById('ch-sales'),{type:'line',
-    data:{labels,datasets:[{data:vals,borderColor:'#b91c1c',backgroundColor:'rgba(185,28,28,.08)',fill:true,tension:.35,pointBackgroundColor:'#b91c1c',pointRadius:days>31?0:3}]},
+    data:{labels,datasets:[
+      {data:vals,borderColor:'#b91c1c',backgroundColor:'rgba(185,28,28,.08)',fill:true,tension:.35,pointBackgroundColor:'#b91c1c',pointRadius:days>31?0:3},
+      {data:vals.map(()=>dayAvg),borderColor:'#e0a020',borderDash:[6,4],borderWidth:1.5,pointRadius:0,fill:false}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
       scales:{y:{beginAtZero:true,ticks:{callback:v=>'฿'+fmt0(v)}},x:{grid:{display:false}}}}});
 
