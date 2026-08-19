@@ -164,7 +164,80 @@ grant execute on function promo_apply(bigint) to authenticated;
 grant execute on function promo_revert(bigint, text) to authenticated;
 grant execute on function promo_cancel(bigint) to authenticated;
 
--- 6) ตั้งเวลา: เช็คเริ่ม/จบโปรทุก 5 นาที + ให้ promo-runner ส่งข้อความตามเวลาที่ตั้งไว้
+-- 6) โปรที่กำลังลดของร้านลูกค้า — หน้าสั่งของใช้โชว์ป้ายโปร (ยืนยันตัวตนด้วยลิงก์ประจำร้าน)
+create or replace function get_customer_promos(p_token text) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp
+as $$
+declare cid bigint; result jsonb;
+begin
+  if p_token is null or p_token = '' then return '[]'::jsonb; end if;
+  select id into cid from customers
+    where (order_token = p_token or slug = p_token) and coalesce(active, true) limit 1;
+  if cid is null then return '[]'::jsonb; end if;
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'product_id', p.product_id,
+      'promo_price', p.promo_price,
+      'normal', (ent->>'normal')::numeric,
+      'ends_at', p.ends_at,
+      'win_label', p.win_label)), '[]'::jsonb)
+    into result
+    from promotions p
+    cross join lateral jsonb_array_elements(coalesce(p.customers,'[]'::jsonb)) ent
+    where p.status = 'active'
+      and now() >= p.starts_at and now() < p.ends_at
+      and (ent->>'customer_id')::bigint = cid
+      and coalesce((ent->>'applied')::boolean, false);
+  return result;
+end $$;
+revoke execute on function get_customer_promos(text) from public;
+grant execute on function get_customer_promos(text) to anon, authenticated;
+
+-- 7) รายงานผลโปร — ใครสั่งบ้าง สั่งเท่าไร เทียบช่วงก่อนโปร (สำหรับหน้ารายละเอียดการลดราคา)
+create or replace function promo_report(p_id bigint) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp
+as $$
+declare
+  pr promotions%rowtype;
+  ids bigint[];
+  win interval;
+  v_during jsonb; v_before jsonb;
+begin
+  select * into pr from promotions where id = p_id;
+  if not found then raise exception 'ไม่พบโปร #%', p_id; end if;
+  select coalesce(array_agg((e->>'customer_id')::bigint), '{}') into ids
+    from jsonb_array_elements(coalesce(pr.customers,'[]'::jsonb)) e;
+  win := pr.ends_at - pr.starts_at;
+  -- ยอดสั่งสินค้าตัวนี้ของร้านที่ได้โปร "ช่วงโปร" รายร้าน
+  select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb) into v_during
+    from (select o.customer_id,
+                 count(distinct o.id) as orders,
+                 sum(oi.qty) as qty,
+                 sum(oi.qty * oi.price) as amount
+            from orders o join order_items oi on oi.order_id = o.id
+           where oi.product_id = pr.product_id
+             and o.customer_id = any(ids)
+             and o.created_at >= pr.starts_at and o.created_at < pr.ends_at
+             and coalesce(o.status,'') <> 'cancelled'
+           group by o.customer_id
+           order by sum(oi.qty * oi.price) desc) t;
+  -- ฐานเทียบ: ช่วงเวลายาวเท่ากัน "ก่อนโปรเริ่ม" (ร้านกลุ่มเดียวกัน สินค้าตัวเดียวกัน)
+  select jsonb_build_object(
+      'qty',    coalesce(sum(oi.qty), 0),
+      'amount', coalesce(sum(oi.qty * oi.price), 0),
+      'orders', count(distinct o.id),
+      'shops',  count(distinct o.customer_id))
+    into v_before
+    from orders o join order_items oi on oi.order_id = o.id
+   where oi.product_id = pr.product_id
+     and o.customer_id = any(ids)
+     and o.created_at >= pr.starts_at - win and o.created_at < pr.starts_at
+     and coalesce(o.status,'') <> 'cancelled';
+  return jsonb_build_object('during', v_during, 'before', v_before);
+end $$;
+revoke execute on function promo_report(bigint) from public, anon;
+grant execute on function promo_report(bigint) to authenticated;
+
+-- 8) ตั้งเวลา: เช็คเริ่ม/จบโปรทุก 5 นาที + ให้ promo-runner ส่งข้อความตามเวลาที่ตั้งไว้
 do $$ begin perform cron.unschedule('promo-price-tick'); exception when others then null; end $$;
 select cron.schedule('promo-price-tick', '*/5 * * * *', $$select promo_tick()$$);
 
