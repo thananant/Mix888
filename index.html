@@ -43,6 +43,15 @@ main{max-width:640px;margin:0 auto;padding:12px}
 #imgview.show{display:flex}
 #imgview img{max-width:100%;max-height:85vh;border-radius:14px;background:#fff}
 .item.out{opacity:.55}
+/* สินค้าที่กำลังลดราคา — ให้เด่นชวนซื้อ */
+.item.promo{border:2px solid #ff9345;background:linear-gradient(135deg,#fff8ea,#fff);box-shadow:0 4px 16px rgba(255,199,44,.28)}
+.pbadge{display:inline-flex;align-items:center;gap:4px;background:linear-gradient(135deg,#ff5722,#c0201f);color:#fff;font-size:11.5px;font-weight:700;padding:2px 10px;border-radius:99px;margin-bottom:3px;animation:ppulse 1.6s ease-in-out infinite;box-shadow:0 2px 6px rgba(224,60,20,.3)}
+@keyframes ppulse{0%,100%{transform:scale(1)}50%{transform:scale(1.07)}}
+.price .old{color:var(--muted);text-decoration:line-through;font-weight:500;font-size:12.5px;margin-right:6px}
+.price.promo-p{font-size:16.5px;color:#e64a19}
+.psave{display:inline-block;background:#ffe9d2;color:#c05000;font-size:11.5px;font-weight:700;border-radius:8px;padding:1px 8px;margin-left:6px;vertical-align:2px}
+.pends{font-size:11.5px;color:#c05000;font-weight:600;margin-top:1px}
+#promobanner{background:linear-gradient(135deg,#ff6f3c,#e0261f);color:#fff;border-radius:14px;padding:11px 15px;margin-bottom:10px;font-weight:700;display:none;box-shadow:0 4px 14px rgba(224,38,31,.28);font-family:var(--display);font-size:14.5px}
 .info{flex:1;min-width:0}
 .name{font-weight:600;line-height:1.35}
 .pack{font-size:12.5px;color:var(--muted)}
@@ -159,6 +168,7 @@ body{padding-bottom:calc(90px + env(safe-area-inset-bottom))}
 
     <div id="page-order">
       <input class="searchbox" id="search" placeholder="🔍 ค้นหาสินค้า…" oninput="render()">
+      <div id="promobanner"></div>
       <div id="list"></div>
     </div>
 
@@ -286,8 +296,16 @@ async function init(){
   subscribeOrders();
 }
 
+let promos={};   // product_id → โปรที่กำลังลดของร้านนี้ {promo_price, normal, ends_at}
+async function loadPromos(){
+  try{
+    const {data,error}=await db.rpc('get_customer_promos',{p_token:token});
+    promos={};
+    if(!error&&Array.isArray(data))data.forEach(p=>{promos[p.product_id]=p;});
+  }catch(e){promos={};}   // ระบบโปรยังไม่ติดตั้ง — หน้าใช้งานได้ปกติ
+}
 async function loadCatalog(){
-  const {data,error}=await db.rpc('get_customer_catalog',{p_token:token});
+  const [{data,error}]=await Promise.all([db.rpc('get_customer_catalog',{p_token:token}),loadPromos()]);
   if(error){toast('โหลดสินค้าไม่ได้: '+error.message);return;}
   // เรียงชื่อตามหลักพจนานุกรมไทย + ตัวเลขในชื่อเทียบแบบตัวเลข
   items=(data||[]).sort((a,b)=>
@@ -302,9 +320,18 @@ async function loadCatalog(){
 function render(){
   const q=(document.getElementById('search').value||'').toLowerCase();
   const list=items.filter(it=>!q||it.name.toLowerCase().includes(q)||it.sku.toLowerCase().includes(q));
+  // สินค้าที่กำลังลดราคาขึ้นก่อนเสมอ (ในกลุ่มเดียวกันคงลำดับชื่อไทยเดิม)
+  list.sort((a,b)=>(promos[b.product_id]?1:0)-(promos[a.product_id]?1:0));
+  const banner=document.getElementById('promobanner');
+  const pn=items.filter(it=>promos[it.product_id]).length;
+  if(banner){
+    banner.style.display=pn?'block':'none';
+    if(pn)banner.textContent='🔥 โปรพิเศษสำหรับร้านคุณ '+pn+' รายการ — ลดจริงถึงเวลาหมดเขต สั่งเลย!';
+  }
   const el=document.getElementById('list');
   if(!items.length){el.innerHTML='<div class="empty">ยังไม่มีสินค้าในรายการของคุณ<br>กรุณาติดต่อทางร้าน</div>';updateCartBar();return;}
   if(!list.length){el.innerHTML='<div class="empty">ไม่พบสินค้าที่ค้นหา</div>';updateCartBar();return;}
+  const fmtEnds=iso=>{try{return new Date(iso).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});}catch(e){return '';}};
   el.innerHTML=list.map(it=>{
     const stock=Number(it.stock_qty);
     const qty=cart[it.product_id]||0;
@@ -316,12 +343,21 @@ function render(){
     const img=it.image_url
       ?`<img class="pimg" src="${esc(it.image_url)}" loading="lazy" alt="" onclick="showImg('${esc(it.image_url)}')">`
       :`<div class="pimg-ph">🧺</div>`;
-    return `<div class="item ${out?'out':''}">
+    const pm=promos[it.product_id];
+    const pmSave=pm&&!hidePrice()&&Number(pm.normal)>Number(it.price);
+    const badge=pm?`<div class="pbadge">🔥 โปรพิเศษ${pmSave?' ลด '+Math.round((pm.normal-it.price)/pm.normal*100)+'%':''}</div>`:'';
+    const priceHtml=hidePrice()?'':(pmSave
+      ?`<div class="price promo-p"><span class="old">${fmt(pm.normal)}</span>${fmt(it.price)} <small>/ ${esc(it.unit)}</small><span class="psave">ประหยัด ${fmt(pm.normal-it.price)}</span></div>`
+      :`<div class="price">${fmt(it.price)} <small>/ ${esc(it.unit)}</small></div>`);
+    const ends=pm?`<div class="pends">⏳ ลดถึง ${fmtEnds(pm.ends_at)} น. เท่านั้น</div>`:'';
+    return `<div class="item ${out?'out':''}${pm?' promo':''}">
       ${img}
       <div class="info">
+        ${badge}
         <div class="name">${esc(it.name)}</div>
         ${it.pack_info?`<div class="pack">${esc(it.pack_info)}</div>`:''}
-        ${hidePrice()?'':`<div class="price">${fmt(it.price)} <small>/ ${esc(it.unit)}</small></div>`}
+        ${priceHtml}
+        ${ends}
         ${stockHtml}
       </div>
       <div class="qtybox">
