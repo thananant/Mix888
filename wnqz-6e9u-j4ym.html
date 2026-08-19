@@ -1391,7 +1391,11 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <h3 style="margin:0;font-size:16px">🛎️ คำขอแก้บิล (รอ admin อนุมัติ)</h3>
       <button class="btn-g mini" onclick="document.getElementById('ebreq-modal').style.display='none'">ปิด</button>
     </div>
-    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">คำขอจากพนักงานที่แก้บิลซึ่งส่งของแล้วหรือรับยอดแล้ว — อนุมัติแล้วระบบจะแก้บิล ปรับสต๊อก และคิดสถานะจ่ายใหม่ให้ทันที</div>
+    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">คำขอจากพนักงานที่แก้บิลซึ่งส่งของแล้วหรือรับยอดแล้ว — อนุมัติแล้วระบบจะแก้บิล ปรับสต๊อกที่โกดังลาดพร้าว และคิดสถานะจ่ายใหม่ให้ทันที (ไม่ส่งข้อความหาลูกค้า)</div>
+    <div id="ebreq-all-wrap" style="display:none;margin-bottom:10px">
+      <button class="btn-ok" id="ebreq-all-btn" onclick="approveAllEditReqs(this)">✅ อนุมัติทั้งหมด</button>
+      <div id="ebreq-all-status" style="font-size:12.5px;margin-top:6px;color:#b58900"></div>
+    </div>
     <div id="ebreq-body"><div class="empty">กำลังโหลด…</div></div>
   </div>
 </div>
@@ -7440,8 +7444,12 @@ async function applyBillEdit(p,opts={}){
   const itemsChanged=!!p.itemsChanged;
   let wid=opts.warehouseId||null;
   if(shipped&&itemsChanged&&!wid){
-    wid=await pickWarehouse('แก้บิล '+b.bill_no+' (ส่งของแล้ว) — ปรับสต๊อกที่คลังไหน?');
-    if(!wid)throw new Error('ยกเลิก: ยังไม่ได้เลือกคลังสำหรับปรับสต๊อก');
+    // แก้บิลหลังส่งของ: คืน/ปรับสต๊อกเข้าโกดังลาดพร้าวเสมอ ไม่ต้องถาม (ถามเฉพาะกรณีหาโกดังนี้ไม่เจอ)
+    wid=(whList.find(w=>String(w.name).includes('ลาดพร้าว'))||{}).id||null;
+    if(!wid){
+      wid=await pickWarehouse('แก้บิล '+b.bill_no+' (ส่งของแล้ว) — ปรับสต๊อกที่คลังไหน?\n(ไม่พบ "โกดังลาดพร้าว" ในหน้าคลัง)');
+      if(!wid)throw new Error('ยกเลิก: ยังไม่ได้เลือกคลังสำหรับปรับสต๊อก');
+    }
   }
   const noteFinal=(!itemsChanged&&!p.editNote)?'':(p.editNote||'');
   const {data:rj,error:ae}=await db.rpc('apply_bill_edit',{
@@ -7475,13 +7483,7 @@ async function applyBillEdit(p,opts={}){
     if(upErr)throw new Error(upErr.message);
     const imageUrl=db.storage.from('bills').getPublicUrl(path).data.publicUrl;
     await db.from('bills').update({image_url:imageUrl,page_urls:await uploadA4Pages(result,b.bill_no)}).eq('id',p.billId);
-    if(opts.interactive&&o2.customers?.line_group_id&&confirm('ส่งบิลฉบับแก้ไข (v.'+newRev+') เข้ากลุ่ม LINE ลูกค้าเลยไหม?')){
-      await db.functions.invoke('line-push',{body:{to:o2.customers.line_group_id,messages:[
-        {type:'image',originalContentUrl:imageUrl,previewImageUrl:imageUrl},
-        {type:'text',text:shopTag(o2.customers)+'🧾 บิลเลขที่ '+b.bill_no+' (แก้ไขครั้งที่ '+newRev+')'
-          +(p.ship?'\nค่าขนส่ง ฿'+fmt(p.ship):'')+(p.disc?'\nส่วนลด -฿'+fmt(p.disc):'')
-          +'\nยอดรวม ฿'+fmt(grand)+'\nขออภัยในความไม่สะดวกครับ 🙏'}]}});
-    }
+    // การแก้บิลไม่ส่งข้อความเข้ากลุ่มไลน์ลูกค้า — ถ้าต้องส่งบิลใหม่ให้ร้าน กดส่งเองจากหน้าบิล
   }catch(e){console.warn('redraw',e);toast('บันทึกบิลเรียบร้อย แต่วาดรูปบิลไม่สำเร็จ — รูปจะถูกวาดใหม่ตอนกดส่งบิลครั้งหน้า');}
   return {newRev,grand,payNote,billNo:b.bill_no};
 }
@@ -7509,6 +7511,14 @@ async function renderEditApprovals(){
   const {data,error}=await db.from('bill_edit_requests').select('*').order('id',{ascending:false}).limit(30);
   if(error){el.innerHTML='<div class="empty">โหลดไม่ได้: '+esc(error.message)+' (รัน mix888-bill-edit-approval.sql หรือยัง?)</div>';return;}
   const rows=data||[];
+  const nPend=rows.filter(r=>r.status==='pending').length;
+  const allWrap=document.getElementById('ebreq-all-wrap');
+  if(allWrap){
+    const stTxt=(document.getElementById('ebreq-all-status')||{}).textContent||'';
+    allWrap.style.display=(nPend>1||stTxt)?'block':'none';
+    const ab=document.getElementById('ebreq-all-btn');
+    if(ab){ab.textContent='✅ อนุมัติทั้งหมด ('+nPend+' รายการ)';ab.style.display=nPend>1?'inline-block':'none';}
+  }
   if(!rows.length){el.innerHTML='<div class="empty">ยังไม่มีคำขอแก้บิล</div>';return;}
   el.innerHTML=rows.map(r=>{
     const d=new Date(r.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
@@ -7525,9 +7535,9 @@ async function renderEditApprovals(){
       +'</div>';
   }).join('');
 }
-async function approveEditReq(id,btn){
-  if(!ebIsAdmin()){toast('เฉพาะ admin เท่านั้น');return;}
-  btn.disabled=true;
+// แกนกลางอนุมัติ 1 คำขอ — ใช้ทั้งปุ่มเดี่ยวและปุ่มอนุมัติทั้งหมด
+// interactive=true: ถ้าบิลถูกแก้เป็นเวอร์ชันใหม่กว่า ถามยืนยันก่อนทับ · โหมดทั้งหมดจะข้ามใบนั้นแทน
+async function approveEditReqCore(id,interactive){
   const who=currentUser?.display_name||currentUser?.username||'admin';
   let claimed=false;
   try{
@@ -7542,27 +7552,65 @@ async function approveEditReq(id,btn){
     if(!claim||!claim.length)throw new Error('คำขอนี้เพิ่งถูกตัดสินโดยคนอื่น');
     claimed=true;
     let res;
-    try{ res=await applyBillEdit(r.payload,{interactive:true,fromApproval:true}); }
+    try{ res=await applyBillEdit(r.payload,{fromApproval:true}); }
     catch(e){
-      if(String(e.message||'').includes('เวอร์ชันใหม่กว่า')
+      if(interactive&&String(e.message||'').includes('เวอร์ชันใหม่กว่า')
         &&confirm(String(e.message)+'\n\nยืนยันใช้คำขอนี้ทับบิลเวอร์ชันล่าสุดต่อเลยไหม?\n(ระบบคิดส่วนต่างสต๊อกจากของจริงปัจจุบัน ไม่ปรับซ้ำ)')){
-        res=await applyBillEdit(r.payload,{interactive:true,fromApproval:true,skipRevGuard:true});
+        res=await applyBillEdit(r.payload,{fromApproval:true,skipRevGuard:true});
       }else throw e;
     }
     claimed=false;   // สำเร็จ — สถานะ approved ที่จองไว้ถูกต้องแล้ว
-    if(appSettings.line_central_group){
-      try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
-        messages:[{type:'text',text:'✅ อนุมัติคำขอแก้บิล '+(r.bill_no||'')+' → v.'+res.newRev+' (โดย '+who+')'+(res.payNote||'')}]}});}catch(e){console.warn('notify',e);}
-    }
-    toast('อนุมัติ + แก้บิล '+(r.bill_no||'')+' เป็น v.'+res.newRev+' แล้ว ✓'+(res.payNote||''));
-    renderEditApprovals(); refreshEditReqBadge(); loadBills(); loadProducts();
+    return {ok:true,billNo:r.bill_no||'',newRev:res.newRev,payNote:res.payNote||''};
   }catch(e){
     if(claimed){   // ลงมือไม่สำเร็จ — คืนคำขอกลับเป็นรออนุมัติ
       try{await db.from('bill_edit_requests').update({status:'pending',decided_by:null,decided_at:null}).eq('id',id);}catch(e2){console.warn('revert claim',e2);}
-      renderEditApprovals();
     }
-    toast(String(e.message||e).replace('NEED_APPROVAL|',''));
+    return {ok:false,error:String(e.message||e).replace('NEED_APPROVAL|','')};
   }
+}
+async function approveEditReq(id,btn){
+  if(!ebIsAdmin()){toast('เฉพาะ admin เท่านั้น');return;}
+  btn.disabled=true;
+  const who=currentUser?.display_name||currentUser?.username||'admin';
+  const res=await approveEditReqCore(id,true);
+  if(res.ok){
+    if(appSettings.line_central_group){
+      try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
+        messages:[{type:'text',text:'✅ อนุมัติคำขอแก้บิล '+res.billNo+' → v.'+res.newRev+' (โดย '+who+')'+(res.payNote||'')}]}});}catch(e){console.warn('notify',e);}
+    }
+    toast('อนุมัติ + แก้บิล '+res.billNo+' เป็น v.'+res.newRev+' แล้ว ✓'+(res.payNote||''));
+    renderEditApprovals(); refreshEditReqBadge(); loadBills(); loadProducts();
+  }else{
+    renderEditApprovals();
+    toast(res.error);
+  }
+  btn.disabled=false;
+}
+// อนุมัติทุกคำขอที่ค้างในคลิกเดียว — ทำทีละใบ ใบไหนติดปัญหาให้ข้ามแล้วไปต่อ
+async function approveAllEditReqs(btn){
+  if(!ebIsAdmin()){toast('เฉพาะ admin เท่านั้น');return;}
+  const {data:pend,error}=await db.from('bill_edit_requests').select('id,bill_no').eq('status','pending').order('id',{ascending:true}).limit(100);
+  if(error){toast('โหลดคำขอไม่ได้: '+error.message);return;}
+  const rows=pend||[];
+  if(!rows.length){toast('ไม่มีคำขอค้างอนุมัติ');renderEditApprovals();return;}
+  if(!confirm('อนุมัติคำขอแก้บิลทั้งหมด '+rows.length+' รายการเลยไหม?\n\n• ระบบจะแก้บิล ปรับสต๊อกที่โกดังลาดพร้าว และคิดสถานะจ่ายใหม่ให้ทุกใบ\n• ไม่มีการส่งข้อความหาลูกค้า'))return;
+  btn.disabled=true;
+  const st=document.getElementById('ebreq-all-status');
+  const okList=[],failList=[];
+  for(let i=0;i<rows.length;i++){
+    if(st)st.textContent='กำลังอนุมัติ… '+(i+1)+'/'+rows.length+' ('+(rows[i].bill_no||'')+')';
+    const r=await approveEditReqCore(rows[i].id,false);
+    if(r.ok)okList.push(r.billNo+' → v.'+r.newRev+(r.payNote||''));
+    else failList.push((rows[i].bill_no||('คำขอ #'+rows[i].id))+': '+r.error);
+  }
+  if(st)st.textContent=failList.length?('⚠️ ข้ามไป '+failList.length+' รายการ — '+failList.join(' · ')):'';
+  const who=currentUser?.display_name||currentUser?.username||'admin';
+  if(appSettings.line_central_group&&okList.length){
+    try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
+      messages:[{type:'text',text:('✅ อนุมัติคำขอแก้บิล '+okList.length+' รายการ (โดย '+who+')\n'+okList.map(s=>'• '+s).join('\n')).slice(0,4900)}]}});}catch(e){console.warn('notify',e);}
+  }
+  toast(failList.length?('อนุมัติแล้ว '+okList.length+' · ข้าม '+failList.length+' รายการ (ดูเหตุผลด้านบนรายการ)'):'✅ อนุมัติครบ '+okList.length+' รายการ');
+  renderEditApprovals(); refreshEditReqBadge(); loadBills(); loadProducts();
   btn.disabled=false;
 }
 async function rejectEditReq(id,btn){
