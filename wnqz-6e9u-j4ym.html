@@ -336,10 +336,24 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
             <input id="bp-price" type="number" min="0" step="0.01" style="width:100%" onchange="bpReset()"></div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
-          <div><label>เริ่ม</label><input id="bp-from" type="date"></div>
-          <div><label>ถึงวันที่</label><input id="bp-to" type="date"></div>
-          <div><label>หมดเขตเวลา</label><input id="bp-time" type="time" value="21:00"></div>
+          <div><label>เริ่มวันที่</label><input id="bp-from" type="date"></div>
+          <div><label>เวลาเริ่ม</label><input id="bp-from-time" type="time" value="00:00"></div>
+          <div><label>สิ้นสุดวันที่</label><input id="bp-to" type="date"></div>
+          <div><label>เวลาหมดเขต</label><input id="bp-time" type="time" value="21:00"></div>
         </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;align-items:flex-end">
+          <div><label>ส่งข้อความแจ้งลูกค้า</label>
+            <select id="bp-ann-mode" onchange="bpAnnUI()">
+              <option value="now">ส่งทันทีที่กดบันทึก</option>
+              <option value="sched">🕐 ตั้งเวลาส่งล่วงหน้า</option>
+            </select></div>
+          <div id="bp-ann-w" style="display:none"><label>ส่งวันที่ / เวลา</label>
+            <div style="display:flex;gap:6px"><input id="bp-ann-date" type="date"><input id="bp-ann-time" type="time" value="09:00"></div></div>
+        </div>
+        <label class="chk" style="display:flex;gap:6px;align-items:center;margin-top:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="bp-apply" checked>
+          <span>💸 <b>แก้ราคาจริงในระบบตามช่วงโปร</b> — ถึงเวลาเริ่ม ระบบเปลี่ยนราคาให้ร้านที่ได้โปร พอหมดเขตคืนราคาเดิมให้อัตโนมัติ</span>
+        </label>
         <label style="margin-top:6px">ข้อความเพิ่มเติม (ไม่บังคับ)</label>
         <div class="bc-emoji" style="display:flex;flex-wrap:wrap;gap:2px;margin:2px 0"></div>
         <textarea id="bp-note" rows="2" style="width:100%" placeholder="เช่น สั่งในลิงก์ประจำร้านได้เลยครับ"></textarea>
@@ -357,8 +371,9 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <div id="bp-list" style="margin-top:8px"></div>
         <div id="bp-status" style="font-size:13px;margin-top:8px"></div>
         <div style="display:flex;gap:8px;margin-top:10px">
-          <button class="btn-p" id="bp-send" style="display:none" onclick="bpSend(this)">🔥 ส่งโปรถึงร้านที่เลือก</button>
+          <button class="btn-p" id="bp-send" style="display:none" onclick="bpSend(this)">🔥 บันทึกโปร</button>
         </div>
+        <div id="bp-promos" style="margin-top:16px"></div>
       </div>
 
       <div id="bc-mode-msg">
@@ -1391,7 +1406,11 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <h3 style="margin:0;font-size:16px">🛎️ คำขอแก้บิล (รอ admin อนุมัติ)</h3>
       <button class="btn-g mini" onclick="document.getElementById('ebreq-modal').style.display='none'">ปิด</button>
     </div>
-    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">คำขอจากพนักงานที่แก้บิลซึ่งส่งของแล้วหรือรับยอดแล้ว — อนุมัติแล้วระบบจะแก้บิล ปรับสต๊อก และคิดสถานะจ่ายใหม่ให้ทันที</div>
+    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">คำขอจากพนักงานที่แก้บิลซึ่งส่งของแล้วหรือรับยอดแล้ว — อนุมัติแล้วระบบจะแก้บิล ปรับสต๊อกที่โกดังลาดพร้าว และคิดสถานะจ่ายใหม่ให้ทันที (ไม่ส่งข้อความหาลูกค้า)</div>
+    <div id="ebreq-all-wrap" style="display:none;margin-bottom:10px">
+      <button class="btn-ok" id="ebreq-all-btn" onclick="approveAllEditReqs(this)">✅ อนุมัติทั้งหมด</button>
+      <div id="ebreq-all-status" style="font-size:12.5px;margin-top:6px;color:#b58900"></div>
+    </div>
     <div id="ebreq-body"><div class="empty">กำลังโหลด…</div></div>
   </div>
 </div>
@@ -2685,14 +2704,19 @@ function initBroadcastPage(){
   sel.innerHTML='<option value="">เซลล์: ทั้งหมด</option>'+names.map(n=>'<option value="'+esc(n)+'">'+esc(n)+'</option>').join('');
   if(keep&&[...sel.options].some(o=>o.value===keep))sel.value=keep;
   const today=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
-  const f=document.getElementById('bp-from'),t=document.getElementById('bp-to');
-  if(f&&!f.value)f.value=today; if(t&&!t.value)t.value=today;
+  const f=document.getElementById('bp-from'),t=document.getElementById('bp-to'),ad=document.getElementById('bp-ann-date');
+  if(f&&!f.value)f.value=today; if(t&&!t.value)t.value=today; if(ad&&!ad.value)ad.value=today;
+  bpAnnUI(); bpLoadPromos();
   bcRender();
+}
+function bpAnnUI(){
+  const w=document.getElementById('bp-ann-w');
+  if(w)w.style.display=document.getElementById('bp-ann-mode').value==='sched'?'block':'none';
 }
 
 /* ---- 🔥 โปรลดราคาสินค้า: หาเฉพาะร้านที่ถูกจัดสินค้าตัวนี้ และราคาปกติแพงกว่าโปร ---- */
-let bpRows=[],bpProd=null,bpSending=false,bpProdSel=null;
-function bpReset(){bpRows=[];document.getElementById('bp-list').innerHTML='';document.getElementById('bp-sum').textContent='';document.getElementById('bp-send').style.display='none';document.getElementById('bp-status').textContent='';const f=document.getElementById('bp-filter');if(f)f.style.display='none';}
+let bpRows=[],bpProd=null,bpSending=false,bpProdSel=null,bpPromoCur=null;
+function bpReset(){bpRows=[];bpPromoCur=null;document.getElementById('bp-list').innerHTML='';document.getElementById('bp-sum').textContent='';document.getElementById('bp-send').style.display='none';document.getElementById('bp-status').textContent='';const f=document.getElementById('bp-filter');if(f)f.style.display='none';}
 /* ลิสต์ค้นหาสินค้าแบบวาดเอง — datalist ของเบราว์เซอร์ค้นภาษาไทยไม่ติดในหลายเครื่อง */
 function bpSuggest(){
   const q=(document.getElementById('bp-prod').value||'').trim().toLowerCase();
@@ -2727,9 +2751,18 @@ function bpFindProd(){
 }
 function bpWindowLabel(){
   const f=document.getElementById('bp-from').value,t=document.getElementById('bp-to').value,tm=document.getElementById('bp-time').value||'21:00';
+  const ftm=(document.getElementById('bp-from-time')||{}).value||'00:00';
   const lb=s=>{const[y,m,d]=s.split('-');return Number(d)+' '+TH_MONTHS[Number(m)-1];};
   if(!f||!t)return '';
-  return (f===t?('วันนี้ ('+lb(f)+')'):(lb(f)+' – '+lb(t)))+' หมดเขต '+tm+' น.';
+  const startPart=(ftm&&ftm!=='00:00')?(f===t?' เริ่ม '+ftm+' น.':' '+ftm+' น.'):'';
+  return (f===t?('วันนี้ ('+lb(f)+')'+startPart):(lb(f)+startPart+' – '+lb(t)))+' หมดเขต '+tm+' น.';
+}
+/** วัน+เวลา (เขตไทย) → Date · ใช้ประกอบ starts_at/ends_at/announce_at */
+function bpTs(dateStr,timeStr){return dateStr?new Date(dateStr+'T'+(timeStr||'00:00')+':00+07:00'):null;}
+function bpAnnLabel(d){
+  const t=new Date(d.getTime()+7*3600000);
+  return 'วันที่ '+t.getUTCDate()+' '+TH_MONTHS[t.getUTCMonth()]+' เวลา '
+    +String(t.getUTCHours()).padStart(2,'0')+':'+String(t.getUTCMinutes()).padStart(2,'0')+' น.';
 }
 async function bpScan(btn){
   const p=bpFindProd(),promo=Number(document.getElementById('bp-price').value);
@@ -2737,6 +2770,7 @@ async function bpScan(btn){
   if(!(promo>0)){toast('ใส่ราคาโปรก่อน');return;}
   if(!document.getElementById('bp-from').value||!document.getElementById('bp-to').value){toast('เลือกช่วงวันที่ก่อน');return;}
   btn.disabled=true;
+  bpPromoCur=null;   // ค้นหาชุดใหม่ = โปรตัวใหม่
   try{
     const {data:cps,error}=await db.from('customer_prices').select('customer_id,price').eq('product_id',p.id).limit(5000);
     if(error)throw new Error(error.message);
@@ -2800,7 +2834,7 @@ function bpRender(){
 function bpCount(){
   const n=bpRows.filter(r=>r.sel).length;
   const b=document.getElementById('bp-send');
-  if(b)b.textContent='🔥 ส่งโปรถึงร้านที่เลือก ('+n+')';
+  if(b)b.textContent='🔥 บันทึกโปร + ส่งถึงร้านที่เลือก ('+n+')';
   const inf=document.getElementById('bp-filter-info');
   if(inf)inf.textContent=bpRows.length?('แสดง '+bpVisible().length+'/'+bpRows.length+' ร้าน · เลือกไว้ '+n):'';
 }
@@ -2811,35 +2845,127 @@ async function bpSend(btn){
   if(!bpProd||!targets.length){toast('ยังไม่ได้เลือกร้าน');return;}
   const win=bpWindowLabel();
   const note=document.getElementById('bp-note').value.trim();
+  const startAt=bpTs(document.getElementById('bp-from').value,(document.getElementById('bp-from-time')||{}).value||'00:00');
+  const endAt=bpTs(document.getElementById('bp-to').value,document.getElementById('bp-time').value||'21:00');
+  if(!startAt||!endAt){toast('เลือกช่วงวันที่ก่อน');return;}
+  if(endAt<=startAt){toast('เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม');return;}
+  if(endAt<=new Date()){toast('โปรนี้หมดเขตไปแล้ว — เช็ควันที่/เวลาอีกที');return;}
+  const annSched=document.getElementById('bp-ann-mode').value==='sched';
+  let annAt=null;
+  if(annSched){
+    annAt=bpTs(document.getElementById('bp-ann-date').value,document.getElementById('bp-ann-time').value||'09:00');
+    if(!annAt){toast('เลือกวัน/เวลาที่จะส่งข้อความก่อน');return;}
+    if(annAt>=endAt){toast('เวลาส่งข้อความต้องอยู่ก่อนโปรหมดเขต');return;}
+  }
+  const applyPrice=document.getElementById('bp-apply').checked;
   const sample=shopTag(targets[0].c)+'🔥 โปรพิเศษเฉพาะร้านคุณ\n'+bpProd.name
     +'\nจากราคาปกติ ฿'+fmt(targets[0].normal)+' → เหลือ ฿'+fmt(promo)+' (ลด ฿'+fmt(targets[0].normal-promo)+')'
     +'\n⏰ '+win+(note?'\n'+note:'');
-  if(!confirm('จะส่งโปร "'+bpProd.name+'" ถึง '+targets.length+' ร้าน\nแต่ละร้านเห็นราคาปกติของตัวเอง เช่น:\n\n'+sample+'\n\nยืนยันส่งเลยไหม?'))return;
+  const cm='โปร "'+bpProd.name+'" ฿'+fmt(promo)+' ถึง '+targets.length+' ร้าน\n⏰ '+win+'\n'
+    +(applyPrice?'💸 ถึงเวลาเริ่ม ระบบแก้ราคาจริงให้ร้านที่ได้โปร และคืนราคาเดิมเมื่อหมดเขต\n':'📣 แจ้งข้อความอย่างเดียว ไม่แก้ราคาในระบบ\n')
+    +(annSched?('🕐 ข้อความจะถูกส่ง'+bpAnnLabel(annAt)):'✉️ ส่งข้อความทันที — แต่ละร้านเห็นราคาปกติของตัวเอง เช่น:\n\n'+sample)
+    +'\n\nยืนยัน?';
+  if(!confirm(cm))return;
   bpSending=true;btn.disabled=true;
   const st=document.getElementById('bp-status');
-  let ok=0,fail=0;
-  for(let i=0;i<targets.length;i++){
-    const r=targets[i];
-    st.textContent='กำลังส่ง… '+(i+1)+'/'+targets.length;
-    const text=shopTag(r.c)+'🔥 โปรพิเศษเฉพาะร้านคุณ\n'+bpProd.name
-      +'\nจากราคาปกติ ฿'+fmt(r.normal)+' → เหลือ ฿'+fmt(promo)+' (ลด ฿'+fmt(r.normal-promo)+')'
-      +'\n⏰ '+win+(note?'\n'+note:'');
-    try{
-      const {error}=await db.functions.invoke('line-push',{body:{to:r.c.line_group_id,messages:[{type:'text',text:text.slice(0,4900)}]}});
-      if(error)throw error;
-      r.sent=true;ok++;
-    }catch(e){r.sent=false;fail++;console.warn('promo',r.c.code,e);}
-    await new Promise(x=>setTimeout(x,150));
-  }
-  bpRender();
-  st.innerHTML=fail?('⚠️ ส่งแล้ว '+ok+' ร้าน · ไม่สำเร็จ '+fail+' ร้าน (แถวสีแดง) — กดส่งซ้ำได้ ระบบข้ามร้านที่ได้แล้ว')
-    :('✅ ส่งครบ '+ok+' ร้านเรียบร้อย');
-  if(appSettings.line_central_group){
-    try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
-      messages:[{type:'text',text:'🔥 โปรบรอดแคสต์ "'+bpProd.name+'" ฿'+fmt(promo)+' ('+win+')\nโดย '+(currentUser?.display_name||currentUser?.username||'-')+' · ส่งแล้ว '+ok+'/'+targets.length+' ร้าน'}]}});}catch(e){}
-  }
-  toast(fail?'ส่งไม่ครบ — กดส่งซ้ำเฉพาะที่เหลือได้':'🔥 ส่งโปรครบ '+ok+' ร้าน');
+  try{
+    // 1) บันทึกโปรลงฐานข้อมูล — ระบบเวลา (ทุก 5 นาที) จะแก้/คืนราคา และส่งข้อความตามที่ตั้ง
+    //    (กดซ้ำเพื่อส่งต่อร้านที่พลาด ไม่สร้างโปรใหม่ซ้ำ)
+    const snap=r=>({customer_id:r.c.id,code:r.c.code,name:r.c.name,gid:r.c.line_group_id,normal:r.normal,tag:shopTag(r.c),sent:r.sent===true?true:(r.sent===false?false:null)});
+    if(!bpPromoCur){
+      const {data:ins,error:insErr}=await db.from('promotions').insert({
+        product_id:bpProd.id,product_name:bpProd.name,promo_price:promo,
+        starts_at:startAt.toISOString(),ends_at:endAt.toISOString(),
+        announce_at:annSched?annAt.toISOString():null,
+        apply_price:applyPrice,win_label:win,note:note||null,
+        customers:bpRows.filter(r=>r.sel).map(snap),
+        created_by:currentUser?.display_name||currentUser?.username||null
+      }).select('id').single();
+      if(insErr){
+        if(annSched||applyPrice)throw new Error('บันทึกโปรไม่สำเร็จ: '+insErr.message+' (รัน mix888-promotions.sql ใน SQL Editor หรือยัง?)');
+        console.warn('promotions insert',insErr);   // โหมดส่งทันที+ไม่แก้ราคา: ส่งต่อได้แม้ยังไม่ติดตั้งตาราง
+      }else bpPromoCur=ins.id;
+      // ถึงเวลาเริ่มแล้ว → แก้ราคาเดี๋ยวนี้เลย ไม่รอรอบเช็ค 5 นาที
+      if(bpPromoCur&&applyPrice&&startAt<=new Date()){
+        const {error:apErr}=await db.rpc('promo_apply',{p_id:bpPromoCur});
+        if(apErr)toast('ตั้งโปรแล้ว แต่แก้ราคาทันทีไม่สำเร็จ: '+apErr.message+' — ระบบจะลองใหม่เองใน 5 นาที');
+      }
+    }
+    if(annSched){
+      st.textContent='🕐 ตั้งเวลาส่งไว้แล้ว — ข้อความจะถูกส่ง'+bpAnnLabel(annAt);
+      if(appSettings.line_central_group){
+        try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
+          messages:[{type:'text',text:'🕐 ตั้งโปร "'+bpProd.name+'" ฿'+fmt(promo)+' ('+win+')\nส่งข้อความ'+bpAnnLabel(annAt)+' · '+targets.length+' ร้าน'
+            +(applyPrice?'\n💸 แก้ราคาจริงตามช่วงโปร':'')+'\nโดย '+(currentUser?.display_name||currentUser?.username||'-')}]}});}catch(e){}
+      }
+      toast('🕐 ตั้งโปรเรียบร้อย — ข้อความจะถูกส่ง'+bpAnnLabel(annAt));
+    }else{
+      // 2) ส่งข้อความทันที
+      let ok=0,fail=0;
+      for(let i=0;i<targets.length;i++){
+        const r=targets[i];
+        st.textContent='กำลังส่ง… '+(i+1)+'/'+targets.length;
+        const text=shopTag(r.c)+'🔥 โปรพิเศษเฉพาะร้านคุณ\n'+bpProd.name
+          +'\nจากราคาปกติ ฿'+fmt(r.normal)+' → เหลือ ฿'+fmt(promo)+' (ลด ฿'+fmt(r.normal-promo)+')'
+          +'\n⏰ '+win+(note?'\n'+note:'');
+        try{
+          const {error}=await db.functions.invoke('line-push',{body:{to:r.c.line_group_id,messages:[{type:'text',text:text.slice(0,4900)}]}});
+          if(error)throw error;
+          r.sent=true;ok++;
+        }catch(e){r.sent=false;fail++;console.warn('promo',r.c.code,e);}
+        await new Promise(x=>setTimeout(x,150));
+      }
+      bpRender();
+      st.innerHTML=fail?('⚠️ ส่งแล้ว '+ok+' ร้าน · ไม่สำเร็จ '+fail+' ร้าน (แถวสีแดง) — กดส่งซ้ำได้ ระบบข้ามร้านที่ได้แล้ว')
+        :('✅ ส่งครบ '+ok+' ร้านเรียบร้อย');
+      if(bpPromoCur){
+        try{await db.from('promotions').update({announced_at:new Date().toISOString(),
+          customers:bpRows.filter(r=>r.sel).map(snap)}).eq('id',bpPromoCur);}catch(e){console.warn('promo mark sent',e);}
+      }
+      if(appSettings.line_central_group){
+        try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
+          messages:[{type:'text',text:'🔥 โปรบรอดแคสต์ "'+bpProd.name+'" ฿'+fmt(promo)+' ('+win+')'
+            +(applyPrice?'\n💸 แก้ราคาจริงตามช่วงโปร':'')+'\nโดย '+(currentUser?.display_name||currentUser?.username||'-')+' · ส่งแล้ว '+ok+'/'+targets.length+' ร้าน'}]}});}catch(e){}
+      }
+      toast(fail?'ส่งไม่ครบ — กดส่งซ้ำเฉพาะที่เหลือได้':'🔥 ส่งโปรครบ '+ok+' ร้าน');
+    }
+    bpLoadPromos();
+  }catch(e){toast(String(e.message||e));}
   bpSending=false;btn.disabled=false;bpCount();
+}
+/* ---- รายการโปรที่ตั้งไว้ + ยกเลิก ---- */
+async function bpLoadPromos(){
+  const box=document.getElementById('bp-promos');if(!box)return;
+  try{
+    const {data,error}=await db.from('promotions').select('*').order('id',{ascending:false}).limit(12);
+    if(error||!data||!data.length){box.innerHTML='';return;}   // ยังไม่รัน SQL / ยังไม่มีโปร — ไม่ต้องโชว์
+    const chip=s=>s==='scheduled'?'<span class="tag tag-low">รอเริ่ม</span>'
+      :s==='active'?'<span class="tag tag-ok">กำลังลดราคา</span>'
+      :s==='done'?'<span class="tag">จบแล้ว</span>':'<span class="tag tag-out">ยกเลิก</span>';
+    const fD=x=>x?new Date(x).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'-';
+    box.innerHTML='<div style="font-weight:700;margin-bottom:6px">📋 โปรที่ตั้งไว้ล่าสุด</div>'
+      +data.map(p=>{
+        const cs=Array.isArray(p.customers)?p.customers:[];
+        const sentN=cs.filter(c=>c.sent===true).length;
+        const ann=p.announced_at?('ส่งข้อความแล้ว '+sentN+'/'+cs.length+' ร้าน')
+          :(p.announce_at?('🕐 จะส่งข้อความ '+fD(p.announce_at)):'ยังไม่ได้ส่งข้อความ');
+        return '<div style="border:1px solid var(--line,#eee);border-radius:12px;padding:10px 12px;margin-bottom:8px">'
+          +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>'+esc(p.product_name||'')+'</b> ฿'+fmt(p.promo_price)+' '+chip(p.status)
+          +(p.apply_price?'<span class="tag" style="background:#e8f6f0;color:#0f6e56">💸 แก้ราคาจริง</span>':'')+'</div>'
+          +'<div style="font-size:12.5px;color:var(--muted);margin-top:3px">⏰ '+esc(p.win_label||(fD(p.starts_at)+' – '+fD(p.ends_at)))+' · '+cs.length+' ร้าน · '+ann+'</div>'
+          +((p.status==='scheduled'||p.status==='active')
+            ?'<div style="margin-top:6px"><button class="btn-d mini" onclick="bpCancelPromo('+p.id+',this)">✖ ยกเลิกโปรนี้</button></div>':'')
+          +'</div>';
+      }).join('');
+  }catch(e){box.innerHTML='';}
+}
+async function bpCancelPromo(id,btn){
+  if(!confirm('ยกเลิกโปรนี้?\n• ถ้าแก้ราคาไปแล้ว ระบบจะคืนราคาเดิมให้ทันที\n• ข้อความที่ตั้งเวลาไว้จะไม่ถูกส่ง'))return;
+  btn.disabled=true;
+  const {data,error}=await db.rpc('promo_cancel',{p_id:id});
+  if(error){toast('ยกเลิกไม่สำเร็จ: '+error.message);btn.disabled=false;return;}
+  toast('ยกเลิกโปรแล้ว'+(data&&data.reverted!=null?' · คืนราคาเดิมให้ '+data.reverted+' ร้าน':''));
+  bpLoadPromos();
 }
 function bcTargets(){return customers.filter(c=>c.active!==false&&c.line_group_id);}
 function bcVisible(){
@@ -7440,8 +7566,12 @@ async function applyBillEdit(p,opts={}){
   const itemsChanged=!!p.itemsChanged;
   let wid=opts.warehouseId||null;
   if(shipped&&itemsChanged&&!wid){
-    wid=await pickWarehouse('แก้บิล '+b.bill_no+' (ส่งของแล้ว) — ปรับสต๊อกที่คลังไหน?');
-    if(!wid)throw new Error('ยกเลิก: ยังไม่ได้เลือกคลังสำหรับปรับสต๊อก');
+    // แก้บิลหลังส่งของ: คืน/ปรับสต๊อกเข้าโกดังลาดพร้าวเสมอ ไม่ต้องถาม (ถามเฉพาะกรณีหาโกดังนี้ไม่เจอ)
+    wid=(whList.find(w=>String(w.name).includes('ลาดพร้าว'))||{}).id||null;
+    if(!wid){
+      wid=await pickWarehouse('แก้บิล '+b.bill_no+' (ส่งของแล้ว) — ปรับสต๊อกที่คลังไหน?\n(ไม่พบ "โกดังลาดพร้าว" ในหน้าคลัง)');
+      if(!wid)throw new Error('ยกเลิก: ยังไม่ได้เลือกคลังสำหรับปรับสต๊อก');
+    }
   }
   const noteFinal=(!itemsChanged&&!p.editNote)?'':(p.editNote||'');
   const {data:rj,error:ae}=await db.rpc('apply_bill_edit',{
@@ -7475,13 +7605,7 @@ async function applyBillEdit(p,opts={}){
     if(upErr)throw new Error(upErr.message);
     const imageUrl=db.storage.from('bills').getPublicUrl(path).data.publicUrl;
     await db.from('bills').update({image_url:imageUrl,page_urls:await uploadA4Pages(result,b.bill_no)}).eq('id',p.billId);
-    if(opts.interactive&&o2.customers?.line_group_id&&confirm('ส่งบิลฉบับแก้ไข (v.'+newRev+') เข้ากลุ่ม LINE ลูกค้าเลยไหม?')){
-      await db.functions.invoke('line-push',{body:{to:o2.customers.line_group_id,messages:[
-        {type:'image',originalContentUrl:imageUrl,previewImageUrl:imageUrl},
-        {type:'text',text:shopTag(o2.customers)+'🧾 บิลเลขที่ '+b.bill_no+' (แก้ไขครั้งที่ '+newRev+')'
-          +(p.ship?'\nค่าขนส่ง ฿'+fmt(p.ship):'')+(p.disc?'\nส่วนลด -฿'+fmt(p.disc):'')
-          +'\nยอดรวม ฿'+fmt(grand)+'\nขออภัยในความไม่สะดวกครับ 🙏'}]}});
-    }
+    // การแก้บิลไม่ส่งข้อความเข้ากลุ่มไลน์ลูกค้า — ถ้าต้องส่งบิลใหม่ให้ร้าน กดส่งเองจากหน้าบิล
   }catch(e){console.warn('redraw',e);toast('บันทึกบิลเรียบร้อย แต่วาดรูปบิลไม่สำเร็จ — รูปจะถูกวาดใหม่ตอนกดส่งบิลครั้งหน้า');}
   return {newRev,grand,payNote,billNo:b.bill_no};
 }
@@ -7509,6 +7633,14 @@ async function renderEditApprovals(){
   const {data,error}=await db.from('bill_edit_requests').select('*').order('id',{ascending:false}).limit(30);
   if(error){el.innerHTML='<div class="empty">โหลดไม่ได้: '+esc(error.message)+' (รัน mix888-bill-edit-approval.sql หรือยัง?)</div>';return;}
   const rows=data||[];
+  const nPend=rows.filter(r=>r.status==='pending').length;
+  const allWrap=document.getElementById('ebreq-all-wrap');
+  if(allWrap){
+    const stTxt=(document.getElementById('ebreq-all-status')||{}).textContent||'';
+    allWrap.style.display=(nPend>1||stTxt)?'block':'none';
+    const ab=document.getElementById('ebreq-all-btn');
+    if(ab){ab.textContent='✅ อนุมัติทั้งหมด ('+nPend+' รายการ)';ab.style.display=nPend>1?'inline-block':'none';}
+  }
   if(!rows.length){el.innerHTML='<div class="empty">ยังไม่มีคำขอแก้บิล</div>';return;}
   el.innerHTML=rows.map(r=>{
     const d=new Date(r.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
@@ -7525,9 +7657,9 @@ async function renderEditApprovals(){
       +'</div>';
   }).join('');
 }
-async function approveEditReq(id,btn){
-  if(!ebIsAdmin()){toast('เฉพาะ admin เท่านั้น');return;}
-  btn.disabled=true;
+// แกนกลางอนุมัติ 1 คำขอ — ใช้ทั้งปุ่มเดี่ยวและปุ่มอนุมัติทั้งหมด
+// interactive=true: ถ้าบิลถูกแก้เป็นเวอร์ชันใหม่กว่า ถามยืนยันก่อนทับ · โหมดทั้งหมดจะข้ามใบนั้นแทน
+async function approveEditReqCore(id,interactive){
   const who=currentUser?.display_name||currentUser?.username||'admin';
   let claimed=false;
   try{
@@ -7542,27 +7674,65 @@ async function approveEditReq(id,btn){
     if(!claim||!claim.length)throw new Error('คำขอนี้เพิ่งถูกตัดสินโดยคนอื่น');
     claimed=true;
     let res;
-    try{ res=await applyBillEdit(r.payload,{interactive:true,fromApproval:true}); }
+    try{ res=await applyBillEdit(r.payload,{fromApproval:true}); }
     catch(e){
-      if(String(e.message||'').includes('เวอร์ชันใหม่กว่า')
+      if(interactive&&String(e.message||'').includes('เวอร์ชันใหม่กว่า')
         &&confirm(String(e.message)+'\n\nยืนยันใช้คำขอนี้ทับบิลเวอร์ชันล่าสุดต่อเลยไหม?\n(ระบบคิดส่วนต่างสต๊อกจากของจริงปัจจุบัน ไม่ปรับซ้ำ)')){
-        res=await applyBillEdit(r.payload,{interactive:true,fromApproval:true,skipRevGuard:true});
+        res=await applyBillEdit(r.payload,{fromApproval:true,skipRevGuard:true});
       }else throw e;
     }
     claimed=false;   // สำเร็จ — สถานะ approved ที่จองไว้ถูกต้องแล้ว
-    if(appSettings.line_central_group){
-      try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
-        messages:[{type:'text',text:'✅ อนุมัติคำขอแก้บิล '+(r.bill_no||'')+' → v.'+res.newRev+' (โดย '+who+')'+(res.payNote||'')}]}});}catch(e){console.warn('notify',e);}
-    }
-    toast('อนุมัติ + แก้บิล '+(r.bill_no||'')+' เป็น v.'+res.newRev+' แล้ว ✓'+(res.payNote||''));
-    renderEditApprovals(); refreshEditReqBadge(); loadBills(); loadProducts();
+    return {ok:true,billNo:r.bill_no||'',newRev:res.newRev,payNote:res.payNote||''};
   }catch(e){
     if(claimed){   // ลงมือไม่สำเร็จ — คืนคำขอกลับเป็นรออนุมัติ
       try{await db.from('bill_edit_requests').update({status:'pending',decided_by:null,decided_at:null}).eq('id',id);}catch(e2){console.warn('revert claim',e2);}
-      renderEditApprovals();
     }
-    toast(String(e.message||e).replace('NEED_APPROVAL|',''));
+    return {ok:false,error:String(e.message||e).replace('NEED_APPROVAL|','')};
   }
+}
+async function approveEditReq(id,btn){
+  if(!ebIsAdmin()){toast('เฉพาะ admin เท่านั้น');return;}
+  btn.disabled=true;
+  const who=currentUser?.display_name||currentUser?.username||'admin';
+  const res=await approveEditReqCore(id,true);
+  if(res.ok){
+    if(appSettings.line_central_group){
+      try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
+        messages:[{type:'text',text:'✅ อนุมัติคำขอแก้บิล '+res.billNo+' → v.'+res.newRev+' (โดย '+who+')'+(res.payNote||'')}]}});}catch(e){console.warn('notify',e);}
+    }
+    toast('อนุมัติ + แก้บิล '+res.billNo+' เป็น v.'+res.newRev+' แล้ว ✓'+(res.payNote||''));
+    renderEditApprovals(); refreshEditReqBadge(); loadBills(); loadProducts();
+  }else{
+    renderEditApprovals();
+    toast(res.error);
+  }
+  btn.disabled=false;
+}
+// อนุมัติทุกคำขอที่ค้างในคลิกเดียว — ทำทีละใบ ใบไหนติดปัญหาให้ข้ามแล้วไปต่อ
+async function approveAllEditReqs(btn){
+  if(!ebIsAdmin()){toast('เฉพาะ admin เท่านั้น');return;}
+  const {data:pend,error}=await db.from('bill_edit_requests').select('id,bill_no').eq('status','pending').order('id',{ascending:true}).limit(100);
+  if(error){toast('โหลดคำขอไม่ได้: '+error.message);return;}
+  const rows=pend||[];
+  if(!rows.length){toast('ไม่มีคำขอค้างอนุมัติ');renderEditApprovals();return;}
+  if(!confirm('อนุมัติคำขอแก้บิลทั้งหมด '+rows.length+' รายการเลยไหม?\n\n• ระบบจะแก้บิล ปรับสต๊อกที่โกดังลาดพร้าว และคิดสถานะจ่ายใหม่ให้ทุกใบ\n• ไม่มีการส่งข้อความหาลูกค้า'))return;
+  btn.disabled=true;
+  const st=document.getElementById('ebreq-all-status');
+  const okList=[],failList=[];
+  for(let i=0;i<rows.length;i++){
+    if(st)st.textContent='กำลังอนุมัติ… '+(i+1)+'/'+rows.length+' ('+(rows[i].bill_no||'')+')';
+    const r=await approveEditReqCore(rows[i].id,false);
+    if(r.ok)okList.push(r.billNo+' → v.'+r.newRev+(r.payNote||''));
+    else failList.push((rows[i].bill_no||('คำขอ #'+rows[i].id))+': '+r.error);
+  }
+  if(st)st.textContent=failList.length?('⚠️ ข้ามไป '+failList.length+' รายการ — '+failList.join(' · ')):'';
+  const who=currentUser?.display_name||currentUser?.username||'admin';
+  if(appSettings.line_central_group&&okList.length){
+    try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
+      messages:[{type:'text',text:('✅ อนุมัติคำขอแก้บิล '+okList.length+' รายการ (โดย '+who+')\n'+okList.map(s=>'• '+s).join('\n')).slice(0,4900)}]}});}catch(e){console.warn('notify',e);}
+  }
+  toast(failList.length?('อนุมัติแล้ว '+okList.length+' · ข้าม '+failList.length+' รายการ (ดูเหตุผลด้านบนรายการ)'):'✅ อนุมัติครบ '+okList.length+' รายการ');
+  renderEditApprovals(); refreshEditReqBadge(); loadBills(); loadProducts();
   btn.disabled=false;
 }
 async function rejectEditReq(id,btn){
