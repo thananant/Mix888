@@ -7942,7 +7942,7 @@ function spAmtCheck(){
 }
 function closeSlipModal(){document.getElementById('slip-modal').style.display='none';spBillId=null;spOthers=[];spSlipOk=null;}
 /* ==================== เช็คสลิปตกค้าง ==================== */
-let saFiles=[],saUnpaidByCust={},saUbCur=[];
+let saFiles=[],saUnpaidByCust={},saUbCur=[],saCurFile=null;
 async function saListSlips(prefix){
   const out=[];let offset=0;
   for(;;){
@@ -8060,8 +8060,11 @@ function renderSlipAudit(){
         const ub=saOwe(f);
         owe=ub.length
           ?'<button class="btn-s mini" style="margin-top:5px" onclick="saShowUnpaid('+f.i+')">💳 ค้าง '+ub.length+' บิล ฿'+fmt(ub.reduce((s,b)=>s+(Number(b.total)||0)-(Number(b.paid_amount)||0),0))+'</button>'
-          :'<div style="font-size:12px;color:#0f7a5c;font-weight:600;margin-top:3px">✅ ตอนนี้ไม่มีบิลค้างชำระ</div>';
+          :'<div style="font-size:12px;color:#0f7a5c;font-weight:600;margin-top:3px;cursor:pointer;text-decoration:underline dotted" onclick="saShowHistory('+f.i+')">✅ ไม่มีบิลค้าง · กดดูประวัติบิล</div>';
       }
+      // สลิปที่สืบไม่ได้ว่าของร้านไหน → เลือกได้ว่าค้างไว้ก่อน หรือลบทิ้ง
+      if(!c0&&!f.usedBy&&f.expDesc===undefined)
+        owe='<div style="margin-top:5px"><button class="btn-g mini" onclick="saDeleteSlip('+f.i+')">🗑 ลบทิ้ง / ค้างไว้</button></div>';
       const state=f.usedBy
         ?'<div style="font-size:12px;color:#0f7a5c;font-weight:600;margin-top:2px">✅ ใช้กับบิล '+esc(f.usedBy)+'</div>'
         :(f.expDesc!==undefined
@@ -8076,12 +8079,13 @@ function renderSlipAudit(){
 /** กดจากการ์ดสลิป → บิลค้างชำระทั้งหมดของร้านเจ้าของสลิป (รวมทุกร้านที่ใช้กลุ่มไลน์เดียวกัน) */
 function saShowUnpaid(idx){
   const f=saFiles[idx];if(!f||!f.custs.length)return;
+  saCurFile=f;
   const many=f.custs.length>1;
   saUbCur=f.custs.flatMap(c=>(saUnpaidByCust[c.id]||[]).map(b=>({b,c})))
     .sort((a,b)=>new Date(a.b.created_at)-new Date(b.b.created_at));
   const amt=f.log?Number(f.log.amount)||0:0;
   document.getElementById('sab-title').textContent='💳 บิลค้างชำระ — '+(f.custs[0].name||'')+(many?' และร้านกลุ่มเดียวกัน':'');
-  document.getElementById('sab-hint').textContent=(amt?'ยอดสลิปใบนี้ ฿'+fmt(amt)+' — บิลที่ยอดค้างตรงกันจะไฮไลต์ 💡 ให้':'เรียงจากบิลเก่าสุดก่อน');
+  document.getElementById('sab-hint').textContent=(amt?'ยอดสลิปใบนี้ ฿'+fmt(amt)+' — บิลที่ยอดค้างตรงกันจะไฮไลต์ 💡 ให้':'เรียงจากบิลเก่าสุดก่อน')+' · กด 💰 ตัดบิล เพื่อบันทึกรับยอดด้วยสลิปใบนี้เลย';
   let tot=0;
   document.getElementById('sab-body').innerHTML=saUbCur.length
     ?'<table><thead><tr><th>วันที่</th><th>บิล</th>'+(many?'<th>ร้าน</th>':'')
@@ -8091,17 +8095,127 @@ function saShowUnpaid(idx){
       const hit=amt>0&&Math.abs(rem-amt)<0.01;
       return '<tr'+(hit?' style="background:#fff3d6"':'')+'>'
         +'<td>'+esc(saD(x.b.created_at,false))+'</td>'
-        +'<td><b>'+esc(x.b.bill_no||'')+'</b></td>'
+        +'<td><b>'+esc(x.b.bill_no||'')+'</b>'+(hit?'<div style="font-size:11px;color:#b58900">💡 ยอดตรงสลิป</div>':'')+'</td>'
         +(many?'<td>'+esc(x.c.code)+'</td>':'')
         +'<td class="num">฿'+fmt(x.b.total)+'</td>'
         +'<td class="num">฿'+fmt(x.b.paid_amount||0)+'</td>'
         +'<td class="num" style="color:#b3261e"><b>฿'+fmt(rem)+'</b></td>'
-        +'<td style="white-space:nowrap">'+(hit?'💡 ยอดตรงสลิป ':'')+'<button class="btn-g mini" onclick="saOpenBill('+n+')">ดูบิล</button></td></tr>';
+        +'<td style="white-space:nowrap"><button class="btn-ok mini" onclick="saSettleBill('+n+')">💰 ตัดบิลนี้</button> <button class="btn-g mini" onclick="saOpenBill('+n+')">ดูบิล</button></td></tr>';
     }).join('')
     +'</tbody><tfoot><tr><td colspan="'+(many?5:4)+'" style="text-align:right"><b>รวมค้าง '+saUbCur.length+' บิล</b></td>'
     +'<td class="num" style="color:#b3261e"><b>฿'+fmt(tot)+'</b></td><td></td></tr></tfoot></table>'
     :'<div class="empty">✅ ตอนนี้ไม่มีบิลค้างชำระ</div>';
   document.getElementById('sabill-modal').style.display='flex';
+}
+/** การ์ด "ไม่มีบิลค้าง" → เปิดประวัติบิลล่าสุดของร้าน ช่วยดูว่าสลิปน่าจะคู่กับบิลไหนที่รับยอดไปแล้ว */
+async function saShowHistory(idx){
+  const f=saFiles[idx];if(!f||!f.custs.length)return;
+  saCurFile=f;saUbCur=[];
+  const many=f.custs.length>1;
+  const amt=f.log?Number(f.log.amount)||0:0;
+  document.getElementById('sab-title').textContent='📖 ประวัติบิลล่าสุด — '+(f.custs[0].name||'')+(many?' และร้านกลุ่มเดียวกัน':'');
+  document.getElementById('sab-hint').textContent='ร้านนี้ไม่มียอดค้าง — สลิปใบนี้อาจเป็นของบิลที่กดรับยอดไปแล้วโดยไม่ได้แนบสลิป'+(amt?' · บิลที่ยอดตรง ฿'+fmt(amt)+' จะไฮไลต์ 💡':'');
+  document.getElementById('sab-body').innerHTML='<div class="empty">กำลังโหลด…</div>';
+  document.getElementById('sabill-modal').style.display='flex';
+  try{
+    const ids=f.custs.map(c=>c.id);
+    const {data,error}=await db.from('bills')
+      .select('id,bill_no,customer_id,total,paid_amount,payment_status,ship_status,created_at,image_url,paid_by,paid_at')
+      .in('customer_id',ids).order('created_at',{ascending:false}).limit(30);
+    if(error)throw new Error(error.message);
+    const rows=(data||[]).filter(b=>b.ship_status!=='cancelled');
+    const byId={};f.custs.forEach(c=>byId[c.id]=c);
+    saUbCur=rows.map(b=>({b,c:byId[b.customer_id]||f.custs[0]}));
+    document.getElementById('sab-body').innerHTML=saUbCur.length
+      ?'<table><thead><tr><th>วันที่</th><th>บิล</th>'+(many?'<th>ร้าน</th>':'')
+        +'<th class="num">ยอดบิล</th><th class="num">จ่ายแล้ว</th><th>สถานะ</th><th></th></tr></thead><tbody>'
+      +saUbCur.map((x,n)=>{
+        const hit=amt>0&&(Math.abs((Number(x.b.total)||0)-amt)<0.01||Math.abs((Number(x.b.paid_amount)||0)-amt)<0.01);
+        const stx=x.b.payment_status==='paid'
+          ?'✅ จ่ายครบ'+(x.b.paid_by?'<div style="font-size:11px;color:var(--muted)">โดย '+esc(x.b.paid_by)+(x.b.paid_at?' · '+esc(saD(x.b.paid_at,false)):'')+'</div>':'')
+          :(Number(x.b.paid_amount)||0)>0?'🟠 บางส่วน':'🔴 ค้าง';
+        return '<tr'+(hit?' style="background:#fff3d6"':'')+'>'
+          +'<td>'+esc(saD(x.b.created_at,false))+'</td>'
+          +'<td><b>'+esc(x.b.bill_no||'')+'</b>'+(hit?'<div style="font-size:11px;color:#b58900">💡 ยอดตรงสลิป</div>':'')+'</td>'
+          +(many?'<td>'+esc(x.c.code)+'</td>':'')
+          +'<td class="num">฿'+fmt(x.b.total)+'</td>'
+          +'<td class="num">฿'+fmt(x.b.paid_amount||0)+'</td>'
+          +'<td>'+stx+'</td>'
+          +'<td><button class="btn-g mini" onclick="saOpenBill('+n+')">ดูบิล</button></td></tr>';
+      }).join('')+'</tbody></table><div style="font-size:12px;color:var(--muted);margin-top:6px">แสดง 30 บิลล่าสุด</div>'
+      :'<div class="empty">ไม่พบบิลของร้านนี้</div>';
+  }catch(e){document.getElementById('sab-body').innerHTML='<div class="empty">โหลดไม่สำเร็จ: '+esc(String(e.message||e))+'</div>';}
+}
+/** ตัดบิลด้วยสลิปตกค้างใบนี้ — บันทึกเหมือนกดรับยอดปกติ (บิล + ประวัติชำระ + แจ้งไลน์ร้าน) */
+async function saSettleBill(n){
+  const x=saUbCur[n],f=saCurFile;if(!x||!f)return;
+  if(f.usedBy){toast('สลิปใบนี้ถูกใช้ตัดบิลไปแล้ว ('+f.usedBy+')');return;}
+  const b=x.b,c=x.c;
+  const rem=+(((Number(b.total)||0)-(Number(b.paid_amount)||0)).toFixed(2));
+  const slipAmt=f.log?Number(f.log.amount)||0:0;
+  let amt=slipAmt;
+  if(!(amt>0)){
+    const v=prompt('ยอดเงินตามสลิป (฿)\nบิล '+b.bill_no+' ค้างอยู่ ฿'+fmt(rem),String(rem));
+    if(v===null)return;
+    amt=Number(v)||0;
+    if(!(amt>0)){toast('ยอดไม่ถูกต้อง');return;}
+  }
+  let staff=((document.getElementById('ac-staff')||{}).value||'').trim();
+  if(!staff)staff=(prompt('ชื่อผู้ตรวจ (คนที่ยืนยันว่าเงินเข้าบัญชีจริง)',currentUser?.display_name||currentUser?.username||'')||'').trim();
+  if(!staff){toast('ต้องมีชื่อผู้ตรวจ');return;}
+  const full=amt>=rem-0.009, over=amt>rem+0.009;
+  const msg=(over?'🔺 ยอดสลิป ฿'+fmt(amt)+' เกินยอดค้าง ฿'+fmt(rem)+'\n\n':'')
+    +'ตัดบิล '+b.bill_no+' ('+(c.name||'')+') ด้วยสลิปใบนี้\n'
+    +(full?'ยอด ฿'+fmt(amt)+' → ปิดบิล ✅':'รับบางส่วน ฿'+fmt(amt)+' — บิลยังค้างอีก ฿'+fmt(rem-amt))
+    +(c.line_group_id?'\n\nระบบจะส่งข้อความยืนยันเข้ากลุ่มไลน์ของร้านด้วย':'')
+    +'\n\nยืนยัน?';
+  if(!confirm(msg))return;
+  try{
+    // เช็คสถานะบิลสด ๆ ก่อนเขียน กันตัดซ้ำกรณีมีคนรับยอดไปพร้อมกัน
+    const {data:fb,error:fe}=await db.from('bills').select('id,total,paid_amount,payment_status,ship_status').eq('id',b.id).single();
+    if(fe||!fb)throw new Error('โหลดสถานะบิลล่าสุดไม่ได้');
+    if(fb.payment_status==='paid')throw new Error('บิล '+b.bill_no+' ถูกรับยอดครบไปแล้ว');
+    if((fb.ship_status||'')==='cancelled')throw new Error('บิล '+b.bill_no+' ถูกยกเลิกแล้ว');
+    const remF=+(((Number(fb.total)||0)-(Number(fb.paid_amount)||0)).toFixed(2));
+    if(Math.abs(remF-rem)>0.009)throw new Error('ยอดค้างของบิลเพิ่งเปลี่ยน (ตอนนี้ค้าง ฿'+fmt(remF)+') — ปิดแล้วเปิดหน้าต่างนี้ใหม่อีกครั้ง');
+    const ref=(f.log&&f.log.trans_ref)||null;
+    const newPaid=Number(fb.paid_amount||0)+amt;
+    const u=full
+      ?{payment_status:'paid',paid_at:new Date().toISOString(),paid_by:staff,pay_method:'transfer',paid_amount:newPaid,slip_url:f.url}
+      :{paid_amount:newPaid,paid_by:staff,pay_method:'transfer',slip_url:f.url};
+    if(ref)u.slip_ref=ref;
+    const {error}=await db.from('bills').update(u).eq('id',b.id);
+    if(error)throw new Error(error.message);
+    await logPayment(b.id,amt,'transfer',[f.url],ref,staff,'ตัดจากหน้าเช็คสลิปตกค้าง'+(full?'':' (จ่ายบางส่วน)'));
+    if(c.line_group_id){
+      const polite=(document.getElementById('polite')||{value:'ครับ'}).value;
+      const txt=full
+        ?'✅ รับยอดบิลเลขที่ '+b.bill_no+'\nจำนวน ฿'+fmt(amt)+' เรียบร้อย\nขอบคุณ'+polite+' 🙏'
+        :'💰 รับยอดบางส่วน บิล '+b.bill_no+'\nรับแล้ว ฿'+fmt(newPaid)+' / ฿'+fmt(b.total)+'\nคงเหลือ ฿'+fmt(rem-amt)+'\nขอบคุณ'+polite+' 🙏';
+      try{await db.functions.invoke('line-push',{body:{to:c.line_group_id,messages:[{type:'text',text:shopTag(c)+txt}]}});}catch(e){}
+    }
+    // อัปเดตหน้าจอ: สลิปใบนี้ใช้แล้ว + ยอดค้างของร้านลดตาม
+    f.usedBy=b.bill_no;
+    if(full){const l=saUnpaidByCust[b.customer_id]||[];const ix=l.findIndex(z=>z.id===b.id);if(ix>=0)l.splice(ix,1);}
+    else b.paid_amount=newPaid;
+    document.getElementById('sabill-modal').style.display='none';
+    renderSlipAudit();
+    loadBills();
+    toast(full?'✅ ตัดบิล '+b.bill_no+' ปิดบิลเรียบร้อย':'บันทึกจ่ายบางส่วน '+b.bill_no+' — ยังค้างอีก ฿'+fmt(rem-amt));
+  }catch(e){toast('ตัดบิลไม่สำเร็จ: '+(e.message||e));}
+}
+/** สลิปที่ไม่ทราบที่มา — ให้เลือก: ลบทิ้งถาวร หรือค้างไว้ก่อน */
+async function saDeleteSlip(idx){
+  const f=saFiles[idx];if(!f)return;
+  if(!confirm('สลิปใบนี้ยังไม่ทราบว่ามาจากร้านไหน จะทำอย่างไร?\n\nOK = 🗑 ลบทิ้งถาวร (กู้คืนไม่ได้)\nCancel = ค้างไว้ก่อน'))return;
+  try{
+    const {error}=await db.storage.from('slips').remove([f.path]);
+    if(error)throw new Error(error.message);
+    saFiles=saFiles.filter(z=>z!==f);
+    saFiles.forEach((z,i)=>z.i=i);
+    renderSlipAudit();
+    toast('ลบสลิปแล้ว');
+  }catch(e){toast('ลบไม่สำเร็จ: '+(e.message||e));}
 }
 async function saOpenBill(n){
   const b=(saUbCur[n]||{}).b;if(!b)return;
