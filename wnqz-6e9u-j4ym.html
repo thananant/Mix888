@@ -2574,13 +2574,20 @@ async function wasteProduct(id){
   loadProducts();
 }
 // เลือกคลังผ่าน prompt (คืน warehouse_id หรือ null)
+// ค่าเริ่มต้น: คลังที่เลือกครั้งก่อนบนเครื่องนี้ → โกดังวังหิน (คลังที่ใช้ตัดสต๊อกประจำ) → คลังหลัก → อันแรก
 function pickWarehouse(title){
   if(whList.length===1) return Promise.resolve(whList[0].id);
   const menu=whList.map((w,i)=>(i+1)+' = '+w.name).join('\n');
-  const ans=prompt(title+'\n'+menu,'1');
+  let defIdx=-1;
+  try{defIdx=whList.findIndex(w=>w.id===Number(localStorage.getItem('pick_wh_last')));}catch(e){}
+  if(defIdx<0)defIdx=whList.findIndex(w=>String(w.name).includes('วังหิน'));
+  if(defIdx<0)defIdx=whList.findIndex(w=>w.is_default);
+  if(defIdx<0)defIdx=0;
+  const ans=prompt(title+'\n'+menu,String(defIdx+1));
   if(ans===null)return Promise.resolve(null);
   const idx=parseInt(ans.trim(),10)-1;
   if(idx<0||idx>=whList.length){toast('เลือกไม่ถูกต้อง');return Promise.resolve(null);}
+  try{localStorage.setItem('pick_wh_last',String(whList[idx].id));}catch(e){}
   return Promise.resolve(whList[idx].id);
 }
 function importCSV(input){
