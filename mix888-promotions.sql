@@ -51,6 +51,8 @@ begin
   if pr.status <> 'scheduled' then
     return jsonb_build_object('status', pr.status, 'note', 'โปรไม่ได้อยู่สถานะรอเริ่ม');
   end if;
+  -- บอกที่มาให้ประวัติการแก้ราคา (mix888-price-log.sql) รู้ว่าโปรเป็นคนแก้ ไม่ใช่คน
+  perform set_config('app.price_source', 'โปรลดราคา #'||p_id||' '||coalesce(pr.product_name,''), true);
   if pr.apply_price then
     for ent in select * from jsonb_array_elements(coalesce(pr.customers,'[]'::jsonb)) loop
       cid := (ent->>'customer_id')::bigint;
@@ -97,6 +99,7 @@ begin
   if pr.status <> 'active' then
     return jsonb_build_object('status', pr.status, 'note', 'โปรไม่ได้อยู่สถานะกำลังลดราคา');
   end if;
+  perform set_config('app.price_source', 'คืนราคาหลังโปร #'||p_id||' '||coalesce(pr.product_name,''), true);
   for ent in select * from jsonb_array_elements(coalesce(pr.customers,'[]'::jsonb)) loop
     if coalesce((ent->>'applied')::boolean, false) then
       cid := (ent->>'customer_id')::bigint;
