@@ -710,6 +710,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       </select></div>
       <button class="btn-g mini" onclick="toggleShown(true)">✓ เลือกที่แสดง</button>
       <button class="btn-g mini" onclick="toggleShown(false)">✗ เอาออกที่แสดง</button>
+      <button class="btn-g mini" onclick="openPriceLog()">🕘 ประวัติแก้ราคา</button>
       <button class="btn-p" id="pr-save" onclick="savePricing()" disabled>บันทึก (<span id="pr-changes">0</span>)</button>
     </div>
     <div class="row" style="align-items:center;margin-top:8px">
@@ -1375,6 +1376,23 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div id="sa-sum" style="font-size:13px;font-weight:600;margin-bottom:10px"></div>
     <div id="sa-body"><div class="empty">กำลังโหลด…</div></div>
     <div style="text-align:right;margin-top:12px"><button class="btn-g" onclick="document.getElementById('slipaudit-modal').style.display='none'">ปิด</button></div>
+  </div>
+</div>
+<!-- ประวัติการแก้ราคา (เปิดจากหน้าจัดสินค้า) -->
+<div id="plog-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#fff;border-radius:14px;max-width:780px;width:100%;padding:18px;margin:14px auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h3 id="plog-title" style="margin:0;font-size:16px">🕘 ประวัติการแก้ราคา</h3>
+      <button class="btn-g mini" onclick="document.getElementById('plog-modal').style.display='none'">ปิด</button>
+    </div>
+    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 8px">บันทึกอัตโนมัติทุกครั้งที่ราคาถูกแก้ — ใครแก้ เมื่อไร จากเท่าไรเป็นเท่าไร (เริ่มเก็บตั้งแต่วันที่ติดตั้งระบบนี้)</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <input id="plog-q" placeholder="🔍 ค้นหาชื่อสินค้า…" style="flex:1;min-width:180px" oninput="plogRender()">
+      <label class="chk" style="display:flex;gap:5px;align-items:center;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="plog-central" onchange="plogRender()"> รวมการแก้ราคากลางของสินค้า
+      </label>
+    </div>
+    <div id="plog-body" style="overflow-x:auto;max-height:430px;overflow-y:auto"></div>
   </div>
 </div>
 <!-- บิลค้างของร้านเจ้าของสลิป (เปิดจากการ์ดในเช็คสลิปตกค้าง) -->
@@ -4009,6 +4027,54 @@ async function savePricing(){
   }
   toast('บันทึกแล้ว '+(ups.length+dels.length)+' รายการ');
   loadPricing(); loadCustomers();
+}
+/* ---- 🕘 ประวัติการแก้ราคา (บันทึกโดย trigger ในฐานข้อมูล — mix888-price-log.sql) ---- */
+let plogRows=[];
+async function openPriceLog(){
+  const cid=Number(document.getElementById('pr-customer').value)||0;
+  if(!cid){toast('เลือกลูกค้าก่อน');return;}
+  const c=customers.find(x=>x.id===cid);
+  document.getElementById('plog-title').textContent='🕘 ประวัติการแก้ราคา — '+(c?c.name+(c.branch_name?' • '+c.branch_name:''):'');
+  document.getElementById('plog-body').innerHTML='<div class="empty">กำลังโหลด…</div>';
+  document.getElementById('plog-q').value='';
+  document.getElementById('plog-modal').style.display='flex';
+  const {data,error}=await db.from('price_log').select('*')
+    .or('customer_id.eq.'+cid+',customer_id.is.null')
+    .order('id',{ascending:false}).limit(400);
+  if(error){
+    document.getElementById('plog-body').innerHTML='<div class="empty">โหลดไม่ได้: '+esc(error.message)+'<br>(ต้องรัน mix888-price-log.sql ใน SQL Editor ก่อน ระบบถึงเริ่มเก็บประวัติ)</div>';
+    return;
+  }
+  plogRows=data||[];
+  plogRender();
+}
+function plogRender(){
+  const q=(document.getElementById('plog-q').value||'').trim().toLowerCase();
+  const central=document.getElementById('plog-central').checked;
+  const byId={};products.forEach(p=>byId[p.id]=p);
+  const rows=plogRows.filter(r=>{
+    if(r.customer_id==null&&!central)return false;
+    if(q){const p=byId[r.product_id];const nm=((p&&p.name)||'')+' '+((p&&p.sku)||'');if(!nm.toLowerCase().includes(q))return false;}
+    return true;
+  });
+  const fD=x=>new Date(x).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+  document.getElementById('plog-body').innerHTML=rows.length
+    ?'<table><thead><tr><th>เมื่อไร</th><th>สินค้า</th><th>การแก้</th><th>ใคร</th></tr></thead><tbody>'
+    +rows.map(r=>{
+      const p=byId[r.product_id];
+      const nm=p?('<b>'+esc(p.sku)+'</b> '+esc(p.name)):('สินค้า #'+r.product_id);
+      const up=r.action==='change'&&Number(r.new_price)>Number(r.old_price);
+      const what=r.action==='add'?('เพิ่มเข้าร้าน ฿'+fmt(r.new_price))
+        :r.action==='remove'?('เอาออกจากร้าน <span style="color:var(--muted)">(เดิม ฿'+fmt(r.old_price)+')</span>')
+        :('฿'+fmt(r.old_price)+' → <b style="color:'+(up?'#b3261e':'#0f7a5c')+'">฿'+fmt(r.new_price)+'</b>');
+      const fieldTag=r.customer_id==null?'<span class="tag" style="background:#eef;color:#3949ab">'+esc(r.field||'ราคากลาง')+'</span> ':'';
+      const srcTag=r.source?'<div style="font-size:11.5px;color:#8e24aa">🔥 '+esc(r.source)+'</div>':'';
+      return '<tr><td style="white-space:nowrap">'+esc(fD(r.changed_at))+'</td>'
+        +'<td>'+nm+'</td>'
+        +'<td>'+fieldTag+what+srcTag+'</td>'
+        +'<td>'+esc(r.changed_by||(r.source?'ระบบ':'-'))+'</td></tr>';
+    }).join('')+'</tbody></table>'
+    :'<div class="empty">ยังไม่มีประวัติการแก้ราคา'+(q?'ที่ตรงกับที่ค้นหา':' ของร้านนี้')+' — ระบบเริ่มเก็บตั้งแต่วันที่ติดตั้ง การแก้ก่อนหน้านั้นตามย้อนไม่ได้</div>';
 }
 
 /* ==================== ทำบิล ==================== */
