@@ -1376,7 +1376,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div style="background:#fdf6e3;border:1px solid #f0e0b8;border-radius:10px;padding:9px 12px;font-size:12.5px;line-height:1.65;margin-bottom:10px">
       <b>วิธีใช้:</b> ไล่ดูการ์ดเหลืองทีละใบ แล้วดูบรรทัดล่างของการ์ด<br>
       🔴 ปุ่มชมพู <b>"ค้าง N บิล"</b> = ลูกค้าโอนมาแล้วแต่บิลยังค้าง! → กดเข้าไป บิลที่ยอดตรงสลิปจะไฮไลต์ 💡 → กด <b>💰 ตัดบิลนี้</b> จบเลย<br>
-      🟢 <b>"ไม่มีบิลค้าง"</b> = สลิปนี้น่าจะเป็นของบิลที่รับยอดไปแล้วแบบไม่ได้แนบสลิป → กดดูประวัติยืนยันแล้วผ่านได้<br>
+      🟢 <b>"ไม่มีบิลค้าง"</b> = สลิปนี้น่าจะเป็นของบิลที่รับยอดไปแล้วแบบไม่ได้แนบสลิป → กดดูประวัติยืนยัน หรือกด 🗑 ลบทิ้งได้เลย<br>
       ❓ <b>"ไม่ทราบร้าน"</b> = เปิดรูปเช็คเอง ไม่มีประโยชน์ก็กดลบทิ้ง · เป้าหมาย: ทำให้ใบที่มีปุ่มชมพูเหลือ 0
     </div>
     <div id="sa-sum" style="font-size:13px;font-weight:600;margin-bottom:10px"></div>
@@ -8405,7 +8405,8 @@ function renderSlipAudit(){
         const ub=saOwe(f);
         owe=ub.length
           ?'<button class="btn-s mini" style="margin-top:5px" onclick="saShowUnpaid('+f.i+')">💳 ค้าง '+ub.length+' บิล ฿'+fmt(ub.reduce((s,b)=>s+(Number(b.total)||0)-(Number(b.paid_amount)||0),0))+'</button>'
-          :'<div style="font-size:12px;color:#0f7a5c;font-weight:600;margin-top:3px;cursor:pointer;text-decoration:underline dotted" onclick="saShowHistory('+f.i+')">✅ ไม่มีบิลค้าง · กดดูประวัติบิล</div>';
+          :'<div style="font-size:12px;color:#0f7a5c;font-weight:600;margin-top:3px;cursor:pointer;text-decoration:underline dotted" onclick="saShowHistory('+f.i+')">✅ ไม่มีบิลค้าง · กดดูประวัติบิล</div>'
+            +'<div style="margin-top:4px"><button class="btn-g mini" onclick="saDeleteSlip('+f.i+')">🗑 ลบทิ้ง / ค้างไว้</button></div>';
       }
       // สลิปที่สืบไม่ได้ว่าของร้านไหน → เลือกได้ว่าค้างไว้ก่อน หรือลบทิ้ง
       if(!c0&&!f.usedBy&&f.expDesc===undefined)
@@ -8552,7 +8553,10 @@ async function saSettleBill(n){
 /** สลิปที่ไม่ทราบที่มา — ให้เลือก: ลบทิ้งถาวร หรือค้างไว้ก่อน */
 async function saDeleteSlip(idx){
   const f=saFiles[idx];if(!f)return;
-  if(!confirm('สลิปใบนี้ยังไม่ทราบว่ามาจากร้านไหน จะทำอย่างไร?\n\nOK = 🗑 ลบทิ้งถาวร (กู้คืนไม่ได้)\nCancel = ค้างไว้ก่อน'))return;
+  const head=(f.custs&&f.custs.length)
+    ?'สลิปของร้านที่ไม่มีบิลค้างแล้ว (น่าจะเป็นของบิลที่รับยอดไปแล้ว)'
+    :'สลิปใบนี้ยังไม่ทราบว่ามาจากร้านไหน';
+  if(!confirm(head+' จะทำอย่างไร?\n\nOK = 🗑 ลบทิ้งถาวร (กู้คืนไม่ได้)\nCancel = ค้างไว้ก่อน'))return;
   try{
     const {data:del,error}=await db.storage.from('slips').remove([f.path]);
     if(error)throw new Error(error.message);
