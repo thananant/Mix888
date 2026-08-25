@@ -1372,7 +1372,13 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <input type="checkbox" id="sa-show-used" onchange="renderSlipAudit()"> แสดงสลิปที่ใช้ตัดบิลแล้วด้วย
       </label>
     </div>
-    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">สลิปทุกใบที่ถูกอัปเข้าระบบ เทียบกับประวัติการรับยอด — ใบไหนยังไม่เคยถูกใช้ตัดบิลจะขึ้นพื้นเหลือง พร้อมบอกว่ามาจากร้านไหน และกดดูได้เลยว่าร้านนั้นยังค้างบิลอะไรอยู่</div>
+    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 8px">สลิปทุกใบที่ถูกอัปเข้าระบบ เทียบกับประวัติการรับยอด — ใบไหนยังไม่เคยถูกใช้ตัดบิลจะขึ้นพื้นเหลือง</div>
+    <div style="background:#fdf6e3;border:1px solid #f0e0b8;border-radius:10px;padding:9px 12px;font-size:12.5px;line-height:1.65;margin-bottom:10px">
+      <b>วิธีใช้:</b> ไล่ดูการ์ดเหลืองทีละใบ แล้วดูบรรทัดล่างของการ์ด<br>
+      🔴 ปุ่มชมพู <b>"ค้าง N บิล"</b> = ลูกค้าโอนมาแล้วแต่บิลยังค้าง! → กดเข้าไป บิลที่ยอดตรงสลิปจะไฮไลต์ 💡 → กด <b>💰 ตัดบิลนี้</b> จบเลย<br>
+      🟢 <b>"ไม่มีบิลค้าง"</b> = สลิปนี้น่าจะเป็นของบิลที่รับยอดไปแล้วแบบไม่ได้แนบสลิป → กดดูประวัติยืนยันแล้วผ่านได้<br>
+      ❓ <b>"ไม่ทราบร้าน"</b> = เปิดรูปเช็คเอง ไม่มีประโยชน์ก็กดลบทิ้ง · เป้าหมาย: ทำให้ใบที่มีปุ่มชมพูเหลือ 0
+    </div>
     <div id="sa-sum" style="font-size:13px;font-weight:600;margin-bottom:10px"></div>
     <div id="sa-body"><div class="empty">กำลังโหลด…</div></div>
     <div style="text-align:right;margin-top:12px"><button class="btn-g" onclick="document.getElementById('slipaudit-modal').style.display='none'">ปิด</button></div>
@@ -1919,13 +1925,14 @@ async function loadDashboard(){
   document.getElementById('d-waste').textContent='฿'+fmt0(wasteVal);
   dashLocalCards();   // การ์ดที่อิงข้อมูลหลัก (ออเดอร์/บิล/สต๊อก/ลูกค้าใหม่) — ขึ้นเมื่อข้อมูลมาถึง
 
-  // กราฟยอดขายรายวันในช่วง (จำกัด 62 จุด)
+  // กราฟยอดขายรายวันในช่วง (จำกัด 62 จุด) — ป้ายแกนบอกวันในสัปดาห์ด้วย
   const days=Math.min(Math.round((dTo-dFrom)/86400000)+1,62);
+  const TH_WD=['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
   const labels=[],vals=[];
   for(let i=days-1;i>=0;i--){
     const d=new Date(dTo);d.setHours(0,0,0,0);d.setDate(d.getDate()-i);
     const nd=new Date(d);nd.setDate(d.getDate()+1);
-    labels.push(d.toLocaleDateString('th-TH',{day:'numeric',month:'short'}));
+    labels.push([d.toLocaleDateString('th-TH',{day:'numeric',month:'short'}),TH_WD[d.getDay()]]);
     vals.push(o.filter(x=>{const t=new Date(x.created_at);return t>=d&&t<nd;}).reduce((s,x)=>s+Number(x.total),0));
   }
   // ค่าเฉลี่ยต่อวัน — นับเฉพาะวันที่มียอด (ไม่ให้วันหัว-ท้ายช่วงที่ว่างเปล่าฉุดค่าลง)
