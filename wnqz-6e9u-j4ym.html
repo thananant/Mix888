@@ -8554,8 +8554,10 @@ async function saDeleteSlip(idx){
   const f=saFiles[idx];if(!f)return;
   if(!confirm('สลิปใบนี้ยังไม่ทราบว่ามาจากร้านไหน จะทำอย่างไร?\n\nOK = 🗑 ลบทิ้งถาวร (กู้คืนไม่ได้)\nCancel = ค้างไว้ก่อน'))return;
   try{
-    const {error}=await db.storage.from('slips').remove([f.path]);
+    const {data:del,error}=await db.storage.from('slips').remove([f.path]);
     if(error)throw new Error(error.message);
+    // Supabase ตอบ "สำเร็จ" ทั้งที่ไม่ได้ลบ ถ้าถังยังไม่เปิดสิทธิ์ลบ — เช็คผลจริงก่อนเอาออกจากจอ
+    if(!del||!del.length)throw new Error('ระบบยังไม่เปิดสิทธิ์ลบไฟล์สลิป — รันไฟล์ mix888-slip-delete.sql ใน SQL Editor หนึ่งครั้ง แล้วลองใหม่');
     saFiles=saFiles.filter(z=>z!==f);
     saFiles.forEach((z,i)=>z.i=i);
     renderSlipAudit();
