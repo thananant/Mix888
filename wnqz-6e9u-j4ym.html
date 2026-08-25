@@ -1919,13 +1919,14 @@ async function loadDashboard(){
   document.getElementById('d-waste').textContent='฿'+fmt0(wasteVal);
   dashLocalCards();   // การ์ดที่อิงข้อมูลหลัก (ออเดอร์/บิล/สต๊อก/ลูกค้าใหม่) — ขึ้นเมื่อข้อมูลมาถึง
 
-  // กราฟยอดขายรายวันในช่วง (จำกัด 62 จุด)
+  // กราฟยอดขายรายวันในช่วง (จำกัด 62 จุด) — ป้ายแกนบอกวันในสัปดาห์ด้วย
   const days=Math.min(Math.round((dTo-dFrom)/86400000)+1,62);
+  const TH_WD=['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
   const labels=[],vals=[];
   for(let i=days-1;i>=0;i--){
     const d=new Date(dTo);d.setHours(0,0,0,0);d.setDate(d.getDate()-i);
     const nd=new Date(d);nd.setDate(d.getDate()+1);
-    labels.push(d.toLocaleDateString('th-TH',{day:'numeric',month:'short'}));
+    labels.push([d.toLocaleDateString('th-TH',{day:'numeric',month:'short'}),TH_WD[d.getDay()]]);
     vals.push(o.filter(x=>{const t=new Date(x.created_at);return t>=d&&t<nd;}).reduce((s,x)=>s+Number(x.total),0));
   }
   // ค่าเฉลี่ยต่อวัน — นับเฉพาะวันที่มียอด (ไม่ให้วันหัว-ท้ายช่วงที่ว่างเปล่าฉุดค่าลง)
