@@ -172,7 +172,7 @@ function diffPrices(prevRows, curRows){
   // ---------- โหมด ①: ไทม์ไลน์ — ราคาเปลี่ยนวันไหน ----------
   if(!DATE && !DIFF){
     console.log('\n📅 ไทม์ไลน์ราคาเฉพาะร้าน' + (SHOP ? ' · เฉพาะร้าน ' + SHOP : '') + '\n');
-    console.log('วันที่           ตั้งราคาเอง   เทียบกับวันก่อนหน้า');
+    console.log('วันที่           ตั้งราคาเอง  กู้คืนได้  เทียบกับวันก่อนหน้า');
     const snaps = [];
     for(const d of days){
       const rows = readBackup(d);
@@ -181,9 +181,13 @@ function diffPrices(prevRows, curRows){
     }
     snaps.push({d: 'ตอนนี้', rows: live.filter(r => inShop(r.customer_id)), isLive: true});
     const suspects = [];
+    let bestDay = null, bestN = 0;
     for(let i = 0; i < snaps.length; i++){
       const s = snaps[i];
       const own = s.rows.filter(r => num(r.price) !== null).length;
+      // "กู้คืนได้" = ราคาที่วันนั้นเคยตั้งไว้ แต่ตอนนี้หายไปแล้ว (ยิ่งเยอะ = วันนั้นเป็นฐานกู้ที่ดี)
+      const recoverable = s.isLive ? 0 : compareToLive(s.rows, live).filter(r => r.willRestore).length;
+      if(recoverable > bestN){ bestN = recoverable; bestDay = s.d; }
       let note = '—';
       if(i > 0){
         const df = diffPrices(snaps[i - 1].rows, s.rows);
@@ -194,9 +198,16 @@ function diffPrices(prevRows, curRows){
         note = bits.length ? bits.join(' · ') : 'เท่าเดิม';
         if(df.lost.length || df.changed.length) suspects.push(s.d);
       }
-      console.log(String(s.d).padEnd(16) + String(own).padStart(6) + '        ' + note);
+      console.log(String(s.d).padEnd(16) + String(own).padStart(6) + '     '
+        + String(s.isLive ? '-' : recoverable).padStart(6) + '   ' + note);
     }
-    console.log('\nอ่านยังไง: บรรทัดที่ขึ้น ⚠️ คือวันที่ราคาถูกเปลี่ยน/หายไป');
+    console.log('\nอ่านยังไง:');
+    console.log('  • "ราคาหาย"  = เคยตั้งราคาเอง แล้วกลายเป็นราคากลาง/หายทั้งรายการ  ← มักเป็นอุบัติเหตุ');
+    console.log('  • "แก้ราคา"  = เปลี่ยนจากเลขหนึ่งเป็นอีกเลข  ← พนักงานตั้งใจแก้');
+    console.log('  • "ตั้งเพิ่ม" = เพิ่มราคาเฉพาะร้านใหม่          ← พนักงานตั้งใจเพิ่ม');
+    console.log('  • "กู้คืนได้" = ราคาของวันนั้นที่ตอนนี้หายไปแล้ว และระบบกู้คืนให้ได้');
+    if(bestDay) console.log('\n🎯 วันที่กู้คืนได้มากที่สุดคือ ' + bestDay + ' (' + bestN + ' รายการ)'
+      + '\n   ดูรายละเอียดก่อนกู้:  node mix888-restore-prices.js --date ' + bestDay + (SHOP ? ' --shop ' + SHOP : ''));
     if(suspects.length){
       console.log('\n🔎 วันที่มีการเปลี่ยนราคา: ' + suspects.join(', '));
       console.log('   ดูว่าวันนั้นเปลี่ยนอะไรบ้าง:');
@@ -232,9 +243,30 @@ function diffPrices(prevRows, curRows){
       if(arr.length > 40) console.log('   … และอีก ' + (arr.length - 40) + ' รายการ');
       console.log('');
     };
+    // สรุปตามร้าน — ราคาหายกระจุกอยู่ที่ไม่กี่ร้าน = คนกดทำทีเดียว (เช่นคัดลอกราคาจากร้านอื่น)
+    if(df.lost.length){
+      const byShop = new Map();
+      for(const r of df.lost){
+        const cid = Number(r.k.split('|')[0]);
+        byShop.set(cid, (byShop.get(cid) || 0) + 1);
+      }
+      const top = [...byShop.entries()].sort((a, b) => b[1] - a[1]);
+      console.log('🏪 ราคาหายกระจุกที่ร้านไหน (' + byShop.size + ' ร้าน)');
+      for(const [cid, n] of top.slice(0, 15)){
+        const c = shopOf(cid);
+        console.log('   ' + String(n).padStart(4) + ' รายการ — ' + (c.code || '#' + cid) + ' ' + (c.name || '')
+          + (c.branch_name ? ' • ' + c.branch_name : ''));
+      }
+      if(top.length > 15) console.log('   … และอีก ' + (top.length - 15) + ' ร้าน (ดูครบในไฟล์ CSV ของโหมด --date)');
+      const many = top.filter(([, n]) => n >= 20).length;
+      console.log(many
+        ? '   → มี ' + many + ' ร้านที่หายทีละหลายสิบรายการ = น่าจะเกิดจากการกดทำทีเดียว เช่นปุ่ม "คัดลอกการจัดสินค้า+ราคา จากร้านอื่น"'
+        : '   → หายกระจาย ร้านละไม่กี่รายการ = น่าจะเกิดจากการแก้ทีละรายการ');
+      console.log('');
+    }
     dump('⚠️ ราคาที่หายไป', df.lost, r => r.how + ' (เคยตั้งไว้ ' + fmtB(r.from) + ')');
-    dump('✏️ ราคาที่ถูกแก้', df.changed, r => fmtB(r.from) + ' → ' + fmtB(r.to));
-    dump('➕ ราคาที่ตั้งเพิ่ม', df.added, r => 'ตั้งเป็น ' + fmtB(r.to));
+    dump('✏️ ราคาที่ถูกแก้ (พนักงานตั้งใจแก้)', df.changed, r => fmtB(r.from) + ' → ' + fmtB(r.to));
+    dump('➕ ราคาที่ตั้งเพิ่ม (พนักงานตั้งใจเพิ่ม)', df.added, r => 'ตั้งเป็น ' + fmtB(r.to));
     if(!df.lost.length && !df.changed.length && !df.added.length) console.log('เท่าเดิมทุกรายการ');
     if(df.lost.length){
       console.log('กู้ราคาที่หายของวันนั้นคืนได้ด้วย:');
