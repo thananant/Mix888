@@ -271,7 +271,15 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <tbody id="d-bysale"></tbody></table></div></div>
   </div>
   <div class="charts">
-    <div class="card"><h3 class="ct">สินค้าขายออก (ช่วงที่เลือก)</h3><div style="overflow-x:auto;max-height:340px;overflow-y:auto"><table><thead><tr><th>สินค้า</th><th class="num">จำนวน</th><th class="num">ยอดขาย</th></tr></thead><tbody id="d-sold"></tbody></table></div></div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <h3 class="ct" style="margin:0">สินค้าขายออก (ช่วงที่เลือก)</h3>
+        <span class="count" id="d-sold-sum"></span>
+      </div>
+      <input id="d-sold-q" placeholder="🔍 ค้นหาสินค้า…" style="width:100%;margin:8px 0 6px" autocomplete="off" oninput="renderSoldBox()">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:4px">กดที่ชื่อสินค้าเพื่อดูว่าขายได้วันไหนบ้าง วันละเท่าไร</div>
+      <div style="overflow-x:auto;max-height:340px;overflow-y:auto"><table><thead><tr><th>สินค้า</th><th class="num">จำนวน</th><th class="num">ยอดขาย</th></tr></thead><tbody id="d-sold"></tbody></table></div>
+    </div>
     <div class="card"><h3 class="ct">ใกล้หมดอายุ (≤ 3 เดือน)</h3><div style="overflow-x:auto"><table><thead><tr><th>สินค้า</th><th class="num">รับเข้า</th><th>หมดอายุ</th></tr></thead><tbody id="d-exp"></tbody></table></div></div>
   </div>
   <div class="charts" style="margin-top:16px">
@@ -1384,6 +1392,17 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div style="text-align:right;margin-top:12px"><button class="btn-g" onclick="document.getElementById('slipaudit-modal').style.display='none'">ปิด</button></div>
   </div>
 </div>
+<!-- ขายรายวันของสินค้าตัวหนึ่ง (เปิดจากกล่องสินค้าขายออก) -->
+<div id="solddetail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#fff;border-radius:14px;max-width:720px;width:100%;padding:18px;margin:14px auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h3 id="sd-title" style="margin:0;font-size:16px"></h3>
+      <button class="btn-g mini" onclick="document.getElementById('solddetail-modal').style.display='none'">ปิด</button>
+    </div>
+    <div id="sd-sum" style="font-size:13px;margin:6px 0 10px"></div>
+    <div id="sd-body" style="overflow-x:auto;max-height:60vh;overflow-y:auto"></div>
+  </div>
+</div>
 <!-- ประวัติการแก้ราคา (เปิดจากหน้าจัดสินค้า) -->
 <div id="plog-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)this.style.display='none'">
   <div style="background:#fff;border-radius:14px;max-width:780px;width:100%;padding:18px;margin:14px auto">
@@ -1874,6 +1893,60 @@ function dashRange(){
   return {today,dFrom,dTo};
 }
 let dashGen=0;   // กันผลโหลดรอบเก่ามาทับรอบใหม่ ตอนกดสลับช่วงเวลาเร็ว ๆ
+let dashSold=[],dashSoldRaw=[];   // สินค้าขายออกในช่วง + รายการดิบไว้กดดูรายวัน
+/** ตารางสินค้าขายออก — กรองตามช่องค้นหา และกดดูรายวันได้ */
+function renderSoldBox(){
+  const q=((document.getElementById('d-sold-q')||{}).value||'').trim().toLowerCase();
+  const list=q?dashSold.filter(([nm])=>String(nm).toLowerCase().includes(q)):dashSold;
+  const sum=document.getElementById('d-sold-sum');
+  if(sum)sum.textContent=dashSold.length?(q?('พบ '+list.length+' จาก '+dashSold.length+' รายการ')
+    :(dashSold.length+' รายการ · ฿'+fmt0(dashSold.reduce((s,[,v])=>s+v.amt,0)))):'';
+  const idxOf=new Map(dashSold.map(([nm],i)=>[nm,i]));   // อ้างด้วยลำดับ กันชื่อสินค้าที่มีอักขระพิเศษ
+  document.getElementById('d-sold').innerHTML=dashSold.length
+    ?(list.length?list.map(([nm,v])=>`<tr>
+      <td><span style="cursor:pointer;text-decoration:underline dotted" onclick="openSoldDetail(${idxOf.get(nm)})">${esc(nm)}</span></td>
+      <td class="num">${fmt0(v.qty)} ${esc(v.unit)}</td><td class="num">฿${fmt0(v.amt)}</td></tr>`).join('')
+      :'<tr><td colspan="3" class="empty">ไม่พบสินค้าที่ค้นหา</td></tr>')
+    :'<tr><td colspan="3" class="empty">ช่วงนี้ยังไม่มีการขาย</td></tr>';
+}
+/** กดชื่อสินค้า → ขายได้วันไหนบ้าง วันละเท่าไร (ในช่วงที่กรองไว้) */
+function openSoldDetail(idx){
+  const ent=dashSold[idx];if(!ent)return;
+  const nm=ent[0];
+  const rows=dashSoldRaw.filter(x=>x.nm===nm);
+  if(!rows.length)return;
+  const unit=rows[0].unit||'';
+  const TH_WD=['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
+  const byDay={};
+  rows.forEach(x=>{
+    if(!x.at)return;
+    const d=new Date(x.at); d.setHours(0,0,0,0);
+    const k=d.getTime();
+    (byDay[k]=byDay[k]||{qty:0,amt:0,n:0});
+    byDay[k].qty+=x.qty; byDay[k].amt+=x.amt; byDay[k].n++;
+  });
+  const days=Object.entries(byDay).map(([k,v])=>({t:Number(k),...v})).sort((a,b)=>a.t-b.t);
+  const totQty=days.reduce((s,d)=>s+d.qty,0), totAmt=days.reduce((s,d)=>s+d.amt,0);
+  const best=days.reduce((m,d)=>(!m||d.amt>m.amt)?d:m,null);
+  document.getElementById('sd-title').textContent='📦 '+nm;
+  document.getElementById('sd-sum').innerHTML='ขายได้ '+days.length+' วัน · รวม <b>'+fmt0(totQty)+' '+esc(unit)+'</b> · <b>฿'+fmt0(totAmt)+'</b>'
+    +' · เฉลี่ยวันที่ขายได้ ฿'+fmt0(days.length?totAmt/days.length:0)
+    +(best?' · ขายดีสุด '+new Date(best.t).toLocaleDateString('th-TH',{day:'numeric',month:'short'})+' ฿'+fmt0(best.amt):'');
+  const mx=best?best.amt:0;
+  document.getElementById('sd-body').innerHTML=days.length
+    ?'<table><thead><tr><th>วันที่</th><th class="num">จำนวน</th><th class="num">ยอดขาย</th><th style="width:38%"></th></tr></thead><tbody>'
+    +days.map(d=>{const dt=new Date(d.t);
+      return '<tr><td style="white-space:nowrap">'+dt.toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit'})
+        +' <span style="color:var(--muted)">'+TH_WD[dt.getDay()]+'</span></td>'
+        +'<td class="num">'+fmt0(d.qty)+' '+esc(unit)+'</td>'
+        +'<td class="num">฿'+fmt0(d.amt)+'</td>'
+        +'<td><div style="background:#f3e8e6;border-radius:6px;height:10px"><div style="background:#b91c1c;height:10px;border-radius:6px;width:'
+        +(mx?Math.max(3,Math.round(d.amt/mx*100)):0)+'%"></div></div></td></tr>';}).join('')
+    +'</tbody><tfoot><tr style="border-top:2px solid var(--line)"><td><b>รวม</b></td>'
+    +'<td class="num"><b>'+fmt0(totQty)+' '+esc(unit)+'</b></td><td class="num"><b>฿'+fmt0(totAmt)+'</b></td><td></td></tr></tfoot></table>'
+    :'<div class="empty">ไม่มีข้อมูลรายวัน</div>';
+  document.getElementById('solddetail-modal').style.display='flex';
+}
 async function loadDashboard(){
   const dGen=++dashGen;
   const {today,dFrom,dTo}=dashRange();
@@ -1984,14 +2057,14 @@ async function loadDashboard(){
       +`<tr style="border-top:2px solid var(--line)"><td><b>รวม</b></td><td class="num"><b>${seCnt}</b></td><td class="num" style="color:var(--muted)"><b>฿${fmt0(seCnt?grand/seCnt:0)}</b></td><td class="num"><b>฿${fmt0(grand)}</b></td><td class="num">100%</td></tr>`
     :'<tr><td colspan="5" class="empty">ไม่มียอดขายในช่วงนี้</td></tr>';
 
-  // สินค้าขายออกในช่วงที่เลือก (รายตัว)
+  // สินค้าขายออกในช่วงที่เลือก (รายตัว) — เก็บรายการดิบไว้ให้กดดูรายวันได้
+  dashSoldRaw=it.map(x=>({nm:x.products?.name||'?',unit:x.products?.unit||'',
+    qty:Number(x.qty)||0,amt:Number(x.amount)||0,at:x.orders?.created_at||null}));
   const soldAgg={};
-  it.forEach(x=>{const nm=x.products?.name||'?';
-    (soldAgg[nm]=soldAgg[nm]||{qty:0,amt:0,unit:x.products?.unit||''});soldAgg[nm].qty+=Number(x.qty);soldAgg[nm].amt+=Number(x.amount);});
-  const sold=Object.entries(soldAgg).sort((a,b)=>b[1].amt-a[1].amt);
-  document.getElementById('d-sold').innerHTML=sold.length?sold.map(([nm,v])=>`<tr>
-    <td>${esc(nm)}</td><td class="num">${v.qty} ${esc(v.unit)}</td><td class="num">฿${fmt0(v.amt)}</td></tr>`).join('')
-    :'<tr><td colspan="3" class="empty">ช่วงนี้ยังไม่มีการขาย</td></tr>';
+  dashSoldRaw.forEach(x=>{(soldAgg[x.nm]=soldAgg[x.nm]||{qty:0,amt:0,unit:x.unit});
+    soldAgg[x.nm].qty+=x.qty;soldAgg[x.nm].amt+=x.amt;});
+  dashSold=Object.entries(soldAgg).sort((a,b)=>b[1].amt-a[1].amt);
+  renderSoldBox();
 
   // ใกล้หมดอายุ ≤90 วัน
   const soon=new Date();soon.setDate(soon.getDate()+90);
