@@ -1893,6 +1893,20 @@ function dashRange(){
   return {today,dFrom,dTo};
 }
 let dashGen=0;   // กันผลโหลดรอบเก่ามาทับรอบใหม่ ตอนกดสลับช่วงเวลาเร็ว ๆ
+/** ดึงข้อมูลให้ครบทุกแถว — Supabase ส่งกลับได้สูงสุด 1,000 แถวต่อครั้ง
+    ถ้าไม่ไล่หน้า ยอดขาย/สินค้าขายออก/กำไร จะขาดหายไปเงียบ ๆ เมื่อข้อมูลเกิน 1,000 แถว */
+async function fetchAllPages(makeQuery,pageSize=1000){
+  const out=[];
+  for(let from=0;;from+=pageSize){
+    const {data,error}=await makeQuery().range(from,from+pageSize-1);
+    if(error){toast('โหลดข้อมูลไม่ครบ: '+error.message);break;}
+    const rows=data||[];
+    out.push(...rows);
+    if(rows.length<pageSize)break;
+    if(out.length>=300000)break;   // กันวนไม่รู้จบ
+  }
+  return out;
+}
 let dashSold=[],dashSoldRaw=[];   // สินค้าขายออกในช่วง + รายการดิบไว้กดดูรายวัน
 /** ตารางสินค้าขายออก — กรองตามช่องค้นหา และกดดูรายวันได้ */
 function renderSoldBox(){
@@ -1956,16 +1970,16 @@ async function loadDashboard(){
   // การ์ด "ยอดขายเดือนนี้" = เดือนปัจจุบันเสมอ ไม่เปลี่ยนตามช่วงที่กรอง
   const mNow=new Date(), mFrom=new Date(mNow.getFullYear(),mNow.getMonth(),1);
 
-  const [{data:ords},{data:items},{data:wastes},{data:exps},{data:mData}]=await Promise.all([
-    db.from('orders').select('total,created_at,status,customers(sale_name)')
-      .gte('created_at',dFrom.toISOString()).lte('created_at',dTo.toISOString()).neq('status','cancelled'),
-    db.from('order_items').select('qty,amount,price,products(name,last_cost,unit),orders!inner(created_at,status)')
-      .gte('orders.created_at',dFrom.toISOString()).lte('orders.created_at',dTo.toISOString()).neq('orders.status','cancelled'),
-    db.from('stock_movements').select('qty,created_at,products(name,last_cost,base_price)')
-      .eq('type','waste').gte('created_at',dFrom.toISOString()).lte('created_at',dTo.toISOString()),
+  const [ords,items,wastes,{data:exps},mData]=await Promise.all([
+    fetchAllPages(()=>db.from('orders').select('total,created_at,status,customers(sale_name)')
+      .gte('created_at',dFrom.toISOString()).lte('created_at',dTo.toISOString()).neq('status','cancelled')),
+    fetchAllPages(()=>db.from('order_items').select('qty,amount,price,products(name,last_cost,unit),orders!inner(created_at,status)')
+      .gte('orders.created_at',dFrom.toISOString()).lte('orders.created_at',dTo.toISOString()).neq('orders.status','cancelled')),
+    fetchAllPages(()=>db.from('stock_movements').select('qty,created_at,products(name,last_cost,base_price)')
+      .eq('type','waste').gte('created_at',dFrom.toISOString()).lte('created_at',dTo.toISOString())),
     db.from('stock_receive_items').select('qty,expiry_date,products(name,unit)')
       .not('expiry_date','is',null).order('expiry_date',{ascending:true}).limit(200),
-    db.from('orders').select('total').gte('created_at',mFrom.toISOString()).neq('status','cancelled')
+    fetchAllPages(()=>db.from('orders').select('total').gte('created_at',mFrom.toISOString()).neq('status','cancelled'))
   ]);
   if(dGen!==dashGen)return;   // มีการเปลี่ยนช่วงเวลาไประหว่างรอ — ทิ้งผลรอบนี้
 
@@ -8428,7 +8442,7 @@ async function openSlipAudit(){
     // บิลค้างชำระทั้งหมดทุกช่วงเวลา — ไว้เช็คว่าร้านเจ้าของสลิปยังค้างบิลไหนอยู่
     saUnpaidByCust={};
     try{
-      const {data:ub}=await db.from('bills').select('id,bill_no,customer_id,total,paid_amount,payment_status,ship_status,created_at,image_url').neq('payment_status','paid').limit(5000);
+      const ub=await fetchAllPages(()=>db.from('bills').select('id,bill_no,customer_id,total,paid_amount,payment_status,ship_status,created_at,image_url').neq('payment_status','paid'));
       (ub||[]).filter(b=>b.ship_status!=='cancelled'&&(Number(b.total)||0)-(Number(b.paid_amount)||0)>0.009)
         .forEach(b=>{(saUnpaidByCust[b.customer_id]=saUnpaidByCust[b.customer_id]||[]).push(b);});
     }catch(e){console.warn('อ่านบิลค้างไม่ได้',e);}
@@ -9821,11 +9835,11 @@ const AR_PER_PAGE=20;
 function arSetSale(v){arSale=v;arPage=1;renderArAging();}
 function arPageMove(d){arPage+=d;renderArAging();}
 async function loadArAging(){
-  const {data,error}=await db.from('bills')
+  // ไล่หน้าให้ครบ — บิลค้างเกิน 1,000 ใบ ยอดค้างจ่ายจะขาดถ้าดึงรอบเดียว
+  const data=await fetchAllPages(()=>db.from('bills')
     .select('bill_no,total,paid_amount,created_at,payment_status,ship_status,customers(code,name,branch_name,sale_name)')
-    .neq('payment_status','paid').limit(5000);
+    .neq('payment_status','paid'));
   const note=document.getElementById('ar-note');
-  if(error){note.textContent='โหลดข้อมูลลูกหนี้ไม่ได้: '+error.message;return;}
   arRows=(data||[]).filter(b=>b.ship_status!=='cancelled');
   arLoaded=true;
   dashLocalCards();   // การ์ดยอดค้างจ่าย ใช้ชุดบิลค้างเต็ม ๆ นี้ (แม่นกว่าแคช 500 ใบ)
