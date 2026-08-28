@@ -361,10 +361,13 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
           <div id="bp-ann-w" style="display:none"><label>ส่งวันที่ / เวลา</label>
             <div style="display:flex;gap:6px"><input id="bp-ann-date" type="date"><input id="bp-ann-time" type="time" value="09:00"></div></div>
         </div>
-        <label class="chk" style="display:flex;gap:6px;align-items:center;margin-top:8px;font-size:13px;cursor:pointer">
-          <input type="checkbox" id="bp-apply" checked>
-          <span>💸 <b>แก้ราคาจริงในระบบตามช่วงโปร</b> — ถึงเวลาเริ่ม ระบบเปลี่ยนราคาให้ร้านที่ได้โปร พอหมดเขตคืนราคาเดิมให้อัตโนมัติ</span>
-        </label>
+        <div style="background:#fdf6e3;border:1px solid #f0e0b8;border-radius:10px;padding:9px 12px;margin-top:8px">
+          <label class="chk" style="display:flex;gap:6px;align-items:flex-start;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="bp-apply" style="margin-top:3px">
+            <span>💸 <b>ให้ระบบแก้ราคาจริงตามช่วงโปรด้วย</b> (ไม่ติ๊ก = <b>แจ้งข้อความอย่างเดียว ไม่แตะราคาในระบบ</b>)<br>
+            <span style="color:#b58900">ถ้าติ๊ก: ถึงเวลาเริ่มโปร ระบบจะเปลี่ยนราคาเฉพาะร้านของร้านที่ได้โปรเป็นราคาโปร แล้วคืนราคาเดิมให้เมื่อหมดเขต</span></span>
+          </label>
+        </div>
         <label style="margin-top:6px">ข้อความเพิ่มเติม (ไม่บังคับ)</label>
         <div class="bc-emoji" style="display:flex;flex-wrap:wrap;gap:2px;margin:2px 0"></div>
         <textarea id="bp-note" rows="2" style="width:100%" placeholder="เช่น สั่งในลิงก์ประจำร้านได้เลยครับ"></textarea>
