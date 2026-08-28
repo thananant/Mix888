@@ -183,8 +183,11 @@ revoke execute on function promo_report(bigint) from public, anon;
 grant execute on function promo_report(bigint) to authenticated;
 
 -- 8) ตั้งเวลา: เช็คเริ่ม/จบโปรทุก 5 นาที + ให้ promo-runner ส่งข้อความตามเวลาที่ตั้งไว้
+-- ลบงานเก่าชื่อ promo-price-tick ทิ้ง (เวอร์ชันเก่าที่เคยแก้ราคาให้อัตโนมัติ) แล้วตั้งงานใหม่
+-- ที่ทำแค่เปลี่ยน "สถานะโปร" อย่างเดียว — ชื่อใหม่บอกชัดว่าไม่ยุ่งกับราคา
 do $$ begin perform cron.unschedule('promo-price-tick'); exception when others then null; end $$;
-select cron.schedule('promo-price-tick', '*/5 * * * *', $$select promo_tick()$$);
+do $$ begin perform cron.unschedule('promo-status-tick'); exception when others then null; end $$;
+select cron.schedule('promo-status-tick', '*/5 * * * *', $$select promo_tick()$$);
 
 do $$ begin perform cron.unschedule('promo-announce'); exception when others then null; end $$;
 select cron.schedule('promo-announce', '*/5 * * * *', $$
