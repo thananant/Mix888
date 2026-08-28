@@ -99,6 +99,28 @@ function findLost(backupRows, liveRows){
   return lost;
 }
 
+/** เทียบไฟล์สำรอง กับราคาปัจจุบัน — คืน "ทุกความต่าง" พร้อมบอกว่าอันไหนระบบกู้ให้ อันไหนต้องตรวจเอง */
+function compareToLive(backupRows, liveRows){
+  const live = new Map(liveRows.map(r => [keyOf(r), num(r.price)]));
+  const seen = new Set(), out = [];
+  for(const b of backupRows){
+    const k = keyOf(b), bp = num(b.price);
+    seen.add(k);
+    const has = live.has(k), cv = has ? live.get(k) : undefined;
+    if(bp === null){                                   // ตอนนั้นใช้ราคากลางอยู่แล้ว
+      if(has && cv !== null) out.push({k, was: null, now: cv, cat: 'ตั้งราคาเพิ่มทีหลัง', willRestore: false});
+      continue;
+    }
+    if(!has)             out.push({k, was: bp, now: undefined, cat: 'หายไปทั้งรายการ',  willRestore: true});
+    else if(cv === null) out.push({k, was: bp, now: null,      cat: 'กลายเป็นราคากลาง', willRestore: true});
+    else if(Math.abs(cv - bp) > 0.001)
+                         out.push({k, was: bp, now: cv,        cat: 'ราคาต่างจากเดิม',   willRestore: false});
+  }
+  for(const [k, cv] of live)
+    if(!seen.has(k) && cv !== null) out.push({k, was: undefined, now: cv, cat: 'รายการใหม่ (ไม่มีในสำรอง)', willRestore: false});
+  return out;
+}
+
 /** เทียบราคา 2 ช่วงเวลา — ใช้ไล่ว่าวันไหนราคาถูกเปลี่ยน */
 function diffPrices(prevRows, curRows){
   const P = new Map(prevRows.map(r => [keyOf(r), num(r.price)]));
@@ -225,46 +247,67 @@ function diffPrices(prevRows, curRows){
   const rows = readBackup(DATE);
   if(!rows){ console.log('❌ ไม่มีไฟล์สำรองราคาของวันที่ ' + DATE); return; }
   const scoped = rows.filter(r => inShop(r.customer_id));
-  const lost = findLost(scoped, live);
-  if(!lost.length){
-    console.log('✅ เทียบกับสำรองวันที่ ' + DATE + ' แล้ว ไม่มีราคาที่หายไป' + (SHOP ? ' (ร้าน ' + SHOP + ')' : ''));
+  const all = compareToLive(scoped, live);            // ทุกความต่าง ไม่ใช่แค่ที่หาย
+  const lost = all.filter(r => r.willRestore);        // เฉพาะที่จะกู้คืนจริง
+  const diff = all.filter(r => r.cat === 'ราคาต่างจากเดิม');
+  const other = all.filter(r => !r.willRestore && r.cat !== 'ราคาต่างจากเดิม');
+  if(!all.length){
+    console.log('✅ เทียบกับสำรองวันที่ ' + DATE + ' แล้ว ราคาเหมือนกันทุกรายการ' + (SHOP ? ' (ร้าน ' + SHOP + ')' : ''));
     return;
   }
-  console.log('\n📋 เทียบกับสำรองวันที่ ' + DATE + (SHOP ? ' · เฉพาะร้าน ' + SHOP : '')
-    + ' — พบราคาที่หายไป ' + lost.length + ' รายการ\n');
-  const show = lost.slice(0, 40);
-  for(const r of show){
-    const c = shopOf(r.customer_id), p = pById.get(r.product_id) || {};
-    console.log('  ' + (c.code || '#' + r.customer_id) + ' ' + (c.name || '') + ' · '
-      + (p.sku || '#' + r.product_id) + ' ' + (p.name || '')
-      + ' → ' + r.now + ' (เคยตั้งไว้ ' + fmtB(r.price) + ')');
+  const pr = (v) => v === undefined ? 'ไม่มีรายการ' : (v === null ? 'ราคากลาง' : fmtB(v));
+  const line = (r) => {
+    const [cid, pid] = r.k.split('|').map(Number);
+    const c = shopOf(cid), p = pById.get(pid) || {};
+    return '  ' + (c.code || '#' + cid) + ' ' + (c.name || '') + ' · ' + (p.sku || '#' + pid) + ' ' + (p.name || '')
+      + '\n      เดิม ' + pr(r.was) + '  →  ตอนนี้ ' + pr(r.now);
+  };
+  console.log('\n📋 เทียบราคาปัจจุบัน กับสำรองวันที่ ' + DATE + (SHOP ? ' · เฉพาะร้าน ' + SHOP : '') + '\n');
+  console.log('   ✅ จะกู้คืนให้    ' + String(lost.length).padStart(5) + ' รายการ  (ราคาหายไป/กลายเป็นราคากลาง)');
+  console.log('   ⚠️ ต้องตรวจเอง  ' + String(diff.length).padStart(5) + ' รายการ  (มีราคาเฉพาะร้านอยู่ แต่คนละตัวเลข — ระบบจะไม่ไปทับ)');
+  console.log('   ℹ️ ไม่เกี่ยวข้อง ' + String(other.length).padStart(5) + ' รายการ  (ตั้งเพิ่มทีหลัง / รายการใหม่)');
+  if(lost.length){
+    console.log('\n✅ รายการที่จะกู้คืน' + (lost.length > 25 ? ' (แสดง 25 แรก — ดูครบในไฟล์ CSV)' : '') + ':');
+    lost.slice(0, 25).forEach(r => console.log(line(r)));
   }
-  if(lost.length > show.length) console.log('  … และอีก ' + (lost.length - show.length) + ' รายการ (ดูครบในไฟล์ CSV)');
+  if(diff.length){
+    console.log('\n⚠️ ราคาต่างจากเดิม — ระบบไม่แตะให้ ต้องดูเองว่าอันไหนถูก'
+      + (diff.length > 25 ? ' (แสดง 25 แรก — ดูครบในไฟล์ CSV)' : '') + ':');
+    diff.slice(0, 25).forEach(r => console.log(line(r)));
+  }
 
-  // รายงาน CSV เปิดด้วย Excel
+  // รายงาน CSV เปิดด้วย Excel — ครบทุกความต่าง พร้อมบอกว่าอันไหนระบบกู้ให้ อันไหนต้องตรวจเอง
   try{
-    const cols = ['รหัสร้าน','ชื่อร้าน','เซลล์','SKU','ชื่อสินค้า','สถานะตอนนี้','ราคาที่เคยตั้งไว้'];
-    const csv = [cols.map(csvCell).join(',')].concat(lost.map(r => {
-      const c = shopOf(r.customer_id), p = pById.get(r.product_id) || {};
-      return [c.code || r.customer_id, c.name || '', c.sale_name || '', p.sku || r.product_id, p.name || '',
-              r.now, r.price].map(csvCell).join(',');
+    const cols = ['รหัสร้าน','ชื่อร้าน','เซลล์','SKU','ชื่อสินค้า','ราคาเมื่อ ' + DATE,'ราคาตอนนี้','สถานะ','ระบบจะทำอะไร'];
+    const csv = [cols.map(csvCell).join(',')].concat(all.map(r => {
+      const [cid, pid] = r.k.split('|').map(Number);
+      const c = shopOf(cid), p = pById.get(pid) || {};
+      return [c.code || cid, c.name || '', c.sale_name || '', p.sku || pid, p.name || '',
+              r.was === undefined ? 'ไม่มีรายการ' : (r.was === null ? 'ราคากลาง' : r.was),
+              r.now === undefined ? 'ไม่มีรายการ' : (r.now === null ? 'ราคากลาง' : r.now),
+              r.cat, r.willRestore ? 'กู้คืนให้' : 'ไม่แตะ'].map(csvCell).join(',');
     }));
     fs.writeFileSync(path.join(baseDir, 'รายงานกู้ราคา.csv'), '﻿' + csv.join('\r\n'));
-    console.log('\n📄 รายงานเต็ม: ' + path.join(baseDir, 'รายงานกู้ราคา.csv'));
+    console.log('\n📄 รายงานเต็มทุกรายการ (เปิดด้วย Excel): ' + path.join(baseDir, 'รายงานกู้ราคา.csv'));
   }catch(e){ console.log('⚠️ เขียนไฟล์รายงานไม่ได้: ' + e.message); }
 
   if(!APPLY){
-    console.log('\n👀 นี่คือการดูเฉย ๆ ยังไม่ได้แก้อะไร');
-    console.log('   ถ้าถูกต้องแล้ว สั่งกู้จริงด้วย:');
-    console.log('   node mix888-restore-prices.js --date ' + DATE + (SHOP ? ' --shop ' + SHOP : '') + ' --apply');
+    console.log('\n👀 นี่คือการดูเฉย ๆ ยังไม่ได้แก้อะไรเลย');
+    if(lost.length){
+      console.log('   ถ้าถูกต้องแล้ว สั่งกู้จริงด้วย:');
+      console.log('   node mix888-restore-prices.js --date ' + DATE + (SHOP ? ' --shop ' + SHOP : '') + ' --apply');
+    }else console.log('   ไม่มีรายการที่ต้องกู้คืน');
     return;
   }
+  if(!lost.length){ console.log('\n✅ ไม่มีรายการที่ต้องกู้คืน'); return; }
 
   console.log('\n🔧 กำลังกู้คืน ' + lost.length + ' รายการ…');
   let miss = 0, cen = 0, kept = 0;
   for(let i = 0; i < lost.length; i += 500){
-    const chunk = lost.slice(i, i + 500)
-      .map(r => ({customer_id: r.customer_id, product_id: r.product_id, price: r.price}));
+    const chunk = lost.slice(i, i + 500).map(r => {
+      const [cid, pid] = r.k.split('|').map(Number);
+      return {customer_id: cid, product_id: pid, price: r.was};
+    });
     const res = await rpc('nas_restore_prices', {p_key: NAS_EXPORT_KEY, p_rows: chunk, p_apply: true});
     miss += res.lost_missing || 0; cen += res.lost_to_central || 0; kept += res.kept_new_price || 0;
   }
