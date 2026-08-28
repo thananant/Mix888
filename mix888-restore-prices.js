@@ -12,16 +12,19 @@
 
    วิธีใช้ (รันบน NAS ที่เดียวกับ mix888-nas-archiver.js):
 
-   ① ดูก่อนว่ามีสำรองวันไหนบ้าง และแต่ละวันมีราคาหายไปกี่รายการ
+   ① ไทม์ไลน์ — ราคาถูกเปลี่ยน/หายไปตั้งแต่วันไหน
         node mix888-restore-prices.js
 
-   ② ดูรายละเอียดว่าจะกู้อะไรบ้างจากวันนั้น (ยังไม่แก้จริง)
+   ② วันนั้นเปลี่ยนอะไรบ้าง (ร้านไหน สินค้าอะไร จากเท่าไรเป็นเท่าไร)
+        node mix888-restore-prices.js --diff 2026-08-21
+
+   ③ ดูรายละเอียดว่าจะกู้อะไรบ้างจากวันนั้น (ยังไม่แก้จริง)
         node mix888-restore-prices.js --date 2026-08-20
 
-   ③ กู้จริง
+   ④ กู้จริง
         node mix888-restore-prices.js --date 2026-08-20 --apply
 
-   ④ เฉพาะร้านเดียว (ใส่รหัสร้าน)
+   ⑤ เฉพาะร้านเดียว (ใส่รหัสร้าน) — ใช้ร่วมกับทุกโหมดข้างบน
         node mix888-restore-prices.js --date 2026-08-20 --shop SKG00397 --apply
 
    ทุกครั้งจะเขียนรายงานเปิดด้วย Excel ไว้ที่
@@ -42,6 +45,7 @@ const path = require('path');
 const argv  = process.argv.slice(2);
 const argOf = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : null; };
 const DATE  = argOf('--date');
+const DIFF  = argOf('--diff');
 const SHOP  = (argOf('--shop') || '').trim().toUpperCase();
 const APPLY = argv.includes('--apply');
 
@@ -95,6 +99,25 @@ function findLost(backupRows, liveRows){
   return lost;
 }
 
+/** เทียบราคา 2 ช่วงเวลา — ใช้ไล่ว่าวันไหนราคาถูกเปลี่ยน */
+function diffPrices(prevRows, curRows){
+  const P = new Map(prevRows.map(r => [keyOf(r), num(r.price)]));
+  const C = new Map(curRows.map(r => [keyOf(r), num(r.price)]));
+  const lost = [], changed = [], added = [];
+  for(const [k, pv] of P){
+    const has = C.has(k), cv = has ? C.get(k) : undefined;
+    if(pv === null){                                        // เดิมใช้ราคากลาง
+      if(has && cv !== null) added.push({k, from: null, to: cv});
+      continue;
+    }
+    if(!has)              lost.push({k, from: pv, to: null, how: 'ถูกเอาออกจากร้าน'});
+    else if(cv === null)  lost.push({k, from: pv, to: null, how: 'ถูกเปลี่ยนเป็นราคากลาง'});
+    else if(Math.abs(pv - cv) > 0.001) changed.push({k, from: pv, to: cv, how: 'ถูกแก้ราคา'});
+  }
+  for(const [k, cv] of C) if(!P.has(k) && cv !== null) added.push({k, from: null, to: cv});
+  return {lost, changed, added};
+}
+
 (async () => {
   const ROOT = resolveNasRoot();
   if(!ROOT){ console.log('❌ หาโฟลเดอร์ Mix888 บน NAS ไม่เจอ — ใส่ค่า NAS_ROOT ในไฟล์นี้'); return; }
@@ -124,25 +147,77 @@ function findLost(backupRows, liveRows){
     try{ return JSON.parse(fs.readFileSync(f, 'utf8')); }catch(e){ return null; }
   };
 
-  // ---------- โหมด ①: สรุปทุกวันที่มีสำรอง ----------
-  if(!DATE){
-    console.log('\n📅 สำรองข้อมูลที่มีอยู่ · เทียบกับราคาปัจจุบัน'
-      + (SHOP ? ' (เฉพาะร้าน ' + SHOP + ')' : '') + '\n');
-    console.log('วันที่สำรอง     ตั้งราคาเอง   หายไปตอนนี้');
-    let firstLossDay = null, prevLost = null;
+  // ---------- โหมด ①: ไทม์ไลน์ — ราคาเปลี่ยนวันไหน ----------
+  if(!DATE && !DIFF){
+    console.log('\n📅 ไทม์ไลน์ราคาเฉพาะร้าน' + (SHOP ? ' · เฉพาะร้าน ' + SHOP : '') + '\n');
+    console.log('วันที่           ตั้งราคาเอง   เทียบกับวันก่อนหน้า');
+    const snaps = [];
     for(const d of days){
       const rows = readBackup(d);
-      if(!rows){ console.log(d + '   (ไม่มีไฟล์ราคาในโฟลเดอร์นี้)'); continue; }
-      const scoped = rows.filter(r => inShop(r.customer_id));
-      const own    = scoped.filter(r => num(r.price) !== null).length;
-      const lost   = findLost(scoped, live).length;
-      console.log(d + '        ' + String(own).padStart(6) + '        ' + String(lost).padStart(6));
-      if(prevLost !== null && lost < prevLost && !firstLossDay) firstLossDay = d;
-      prevLost = lost;
+      if(!rows){ console.log(d.padEnd(16) + '(ไม่มีไฟล์ราคาในโฟลเดอร์นี้)'); continue; }
+      snaps.push({d, rows: rows.filter(r => inShop(r.customer_id))});
     }
-    console.log('\nอ่านยังไง: คอลัมน์ "หายไปตอนนี้" = ราคาที่วันนั้นเคยตั้งไว้ แต่ตอนนี้ไม่มีแล้ว');
-    console.log('ให้เลือกวันที่ตัวเลขนี้เยอะสุด (= ก่อนราคาหาย) แล้วสั่งกู้จากวันนั้น เช่น');
-    console.log('   node mix888-restore-prices.js --date ' + days[0] + (SHOP ? ' --shop ' + SHOP : ''));
+    snaps.push({d: 'ตอนนี้', rows: live.filter(r => inShop(r.customer_id)), isLive: true});
+    const suspects = [];
+    for(let i = 0; i < snaps.length; i++){
+      const s = snaps[i];
+      const own = s.rows.filter(r => num(r.price) !== null).length;
+      let note = '—';
+      if(i > 0){
+        const df = diffPrices(snaps[i - 1].rows, s.rows);
+        const bits = [];
+        if(df.lost.length)    bits.push('⚠️ ราคาหาย ' + df.lost.length);
+        if(df.changed.length) bits.push('แก้ราคา ' + df.changed.length);
+        if(df.added.length)   bits.push('ตั้งเพิ่ม ' + df.added.length);
+        note = bits.length ? bits.join(' · ') : 'เท่าเดิม';
+        if(df.lost.length || df.changed.length) suspects.push(s.d);
+      }
+      console.log(String(s.d).padEnd(16) + String(own).padStart(6) + '        ' + note);
+    }
+    console.log('\nอ่านยังไง: บรรทัดที่ขึ้น ⚠️ คือวันที่ราคาถูกเปลี่ยน/หายไป');
+    if(suspects.length){
+      console.log('\n🔎 วันที่มีการเปลี่ยนราคา: ' + suspects.join(', '));
+      console.log('   ดูว่าวันนั้นเปลี่ยนอะไรบ้าง:');
+      console.log('   node mix888-restore-prices.js --diff ' + suspects[0] + (SHOP ? ' --shop ' + SHOP : ''));
+    }else{
+      console.log('\n✅ ไม่พบการเปลี่ยนราคาในช่วงที่มีสำรองข้อมูล');
+    }
+    return;
+  }
+
+  // ---------- โหมด ①ข: ดูว่าวันนั้นเปลี่ยนอะไรบ้าง ----------
+  if(DIFF){
+    const idx = days.indexOf(DIFF);
+    const isLive = DIFF === 'ตอนนี้' || DIFF === 'now';
+    if(!isLive && idx < 0){ console.log('❌ ไม่มีสำรองของวันที่ ' + DIFF + '\n   มีวันที่: ' + days.join(', ')); return; }
+    const curRows  = isLive ? live : readBackup(DIFF);
+    const prevDay  = isLive ? days[days.length - 1] : days[idx - 1];
+    if(!prevDay){ console.log('❌ ไม่มีสำรองของวันก่อนหน้าไว้เทียบ'); return; }
+    const prevRows = readBackup(prevDay);
+    if(!curRows || !prevRows){ console.log('❌ อ่านไฟล์สำรองไม่ได้'); return; }
+    const df = diffPrices(prevRows.filter(r => inShop(r.customer_id)), curRows.filter(r => inShop(r.customer_id)));
+    console.log('\n📋 สิ่งที่เปลี่ยนไประหว่าง ' + prevDay + ' → ' + DIFF
+      + (SHOP ? ' · เฉพาะร้าน ' + SHOP : '') + '\n');
+    const label = (k) => {
+      const [cid, pid] = k.split('|').map(Number);
+      const c = shopOf(cid), p = pById.get(pid) || {};
+      return (c.code || '#' + cid) + ' ' + (c.name || '') + ' · ' + (p.sku || '#' + pid) + ' ' + (p.name || '');
+    };
+    const dump = (title, arr, fn) => {
+      if(!arr.length) return;
+      console.log(title + ' (' + arr.length + ' รายการ)');
+      for(const r of arr.slice(0, 40)) console.log('   ' + label(r.k) + ' — ' + fn(r));
+      if(arr.length > 40) console.log('   … และอีก ' + (arr.length - 40) + ' รายการ');
+      console.log('');
+    };
+    dump('⚠️ ราคาที่หายไป', df.lost, r => r.how + ' (เคยตั้งไว้ ' + fmtB(r.from) + ')');
+    dump('✏️ ราคาที่ถูกแก้', df.changed, r => fmtB(r.from) + ' → ' + fmtB(r.to));
+    dump('➕ ราคาที่ตั้งเพิ่ม', df.added, r => 'ตั้งเป็น ' + fmtB(r.to));
+    if(!df.lost.length && !df.changed.length && !df.added.length) console.log('เท่าเดิมทุกรายการ');
+    if(df.lost.length){
+      console.log('กู้ราคาที่หายของวันนั้นคืนได้ด้วย:');
+      console.log('   node mix888-restore-prices.js --date ' + prevDay + (SHOP ? ' --shop ' + SHOP : ''));
+    }
     return;
   }
 
