@@ -308,6 +308,41 @@ function diffPrices(prevRows, curRows){
     diff.slice(0, 25).forEach(r => console.log(line(r)));
   }
 
+  // สรุปรายร้าน — ลูกค้าแต่ละเจ้ามีกี่รายการที่ราคาไม่ตรงกับวันนั้น (ไว้ไล่แก้ทีละร้าน)
+  const byShop = new Map();
+  for(const r of all){
+    if(!r.willRestore && r.cat !== 'ราคาต่างจากเดิม') continue;   // ของที่ตั้งเพิ่มทีหลัง ไม่ใช่ความผิดปกติ
+    const cid = Number(r.k.split('|')[0]);
+    const e = byShop.get(cid) || {restore: 0, check: 0};
+    if(r.willRestore) e.restore++; else e.check++;
+    byShop.set(cid, e);
+  }
+  const shopRows = [...byShop.entries()]
+    .map(([cid, e]) => ({cid, ...e, total: e.restore + e.check}))
+    .sort((a, b) => b.total - a.total);
+  if(shopRows.length){
+    console.log('\n🏪 สรุปรายร้าน — ลูกค้าแต่ละเจ้ามีกี่รายการที่ราคาไม่ตรงกับวันที่ ' + DATE
+      + ' (ทั้งหมด ' + shopRows.length + ' ร้าน)\n');
+    console.log('  ไม่ตรง  กู้ให้  ตรวจเอง  ร้าน');
+    for(const r of shopRows.slice(0, 30)){
+      const c = shopOf(r.cid);
+      console.log('  ' + String(r.total).padStart(5) + String(r.restore).padStart(7) + String(r.check).padStart(9)
+        + '   ' + (c.code || '#' + r.cid) + ' ' + (c.name || '')
+        + (c.branch_name ? ' • ' + c.branch_name : '') + (c.sale_name ? '  [' + c.sale_name + ']' : ''));
+    }
+    if(shopRows.length > 30) console.log('  … และอีก ' + (shopRows.length - 30) + ' ร้าน (ดูครบในไฟล์ CSV รายร้าน)');
+    try{
+      const cols = ['รหัสร้าน','ชื่อร้าน','สาขา','เซลล์','รายการไม่ตรงทั้งหมด','ระบบกู้ให้ได้','ต้องตรวจเอง'];
+      const csv2 = [cols.map(csvCell).join(',')].concat(shopRows.map(r => {
+        const c = shopOf(r.cid);
+        return [c.code || r.cid, c.name || '', c.branch_name || '', c.sale_name || '',
+                r.total, r.restore, r.check].map(csvCell).join(',');
+      }));
+      fs.writeFileSync(path.join(baseDir, 'รายงานกู้ราคา-รายร้าน.csv'), '\ufeff' + csv2.join('\r\n'));
+      console.log('\n📄 สรุปรายร้าน (เปิดด้วย Excel): ' + path.join(baseDir, 'รายงานกู้ราคา-รายร้าน.csv'));
+    }catch(e){ console.log('⚠️ เขียนไฟล์สรุปรายร้านไม่ได้: ' + e.message); }
+  }
+
   // รายงาน CSV เปิดด้วย Excel — ครบทุกความต่าง พร้อมบอกว่าอันไหนระบบกู้ให้ อันไหนต้องตรวจเอง
   try{
     const cols = ['รหัสร้าน','ชื่อร้าน','เซลล์','SKU','ชื่อสินค้า','ราคาเมื่อ ' + DATE,'ราคาตอนนี้','สถานะ','ระบบจะทำอะไร'];
