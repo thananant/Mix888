@@ -4017,14 +4017,34 @@ async function copyPricingFrom(){
     msg+='\n\n\u26a0\ufe0f กลุ่มราคาต่างกัน \u2014 ต้นทาง: '+gl[src.price_group||'base']+' / ปลายทาง: '+gl[dst.price_group||'base']
       +'\nรายการที่ไม่ได้กำหนดราคาเอง จะคิดตามกลุ่มราคาของร้านปลายทาง';
   if(!confirm(msg))return;
+  // ราคาที่ปลายทาง "ตั้งไว้เองแล้ว" และจะถูกทับด้วยค่าจากต้นทาง (รวมกรณีถูกล้างเป็นราคากลาง)
+  const clash=rows.filter(r=>{
+    const d=assigned[r.product_id];
+    if(d==null||d==='')return false;
+    const sp=(r.price==null||r.price==='')?null:Number(r.price);
+    return sp===null||Math.abs(Number(d)-sp)>0.001;
+  });
+  let keepDst=false;
+  if(clash.length){
+    keepDst=confirm('⚠️ ร้านปลายทางมีราคาที่ตั้งไว้เองแล้ว '+clash.length+' รายการ ซึ่งจะถูกทับด้วยค่าจากร้านต้นทาง\n\n'
+      +'กด OK = 🛡️ เก็บราคาที่ปลายทางตั้งไว้ (แนะนำ)\n'
+      +'   คัดลอกรายการสินค้าให้เหมือนต้นทาง แต่รายการที่ปลายทางตั้งราคาเองไว้แล้ว จะคงราคาเดิมไว้\n\n'
+      +'กด Cancel = ทับด้วยราคาจากต้นทางทั้งหมด\n'
+      +'   ราคาที่พนักงานตั้งไว้ให้ร้านนี้จะหายไป');
+  }
   // อัปเสิร์ตก่อน แล้วค่อยลบส่วนเกิน \u2014 ถ้าเน็ตหลุดกลางทาง เมนูเดิมไม่หายเกลี้ยง
-  const ups=rows.map(r=>({customer_id:Number(cid),product_id:r.product_id,price:r.price}));
+  const ups=rows.map(r=>{
+    const d=assigned[r.product_id];
+    const keep=keepDst&&d!=null&&d!=='';
+    return {customer_id:Number(cid),product_id:r.product_id,price:keep?d:r.price};
+  });
   const {error:e1}=await db.from('customer_prices').upsert(ups,{onConflict:'customer_id,product_id'});
   if(e1){toast('คัดลอกไม่สำเร็จ: '+e1.message);return;}
   const {error:e2}=await db.from('customer_prices').delete().eq('customer_id',cid)
     .not('product_id','in','('+rows.map(r=>r.product_id).join(',')+')');
   if(e2){toast('ลบรายการส่วนเกินไม่สำเร็จ: '+e2.message);return;}
-  toast('\ud83d\udccb คัดลอกแล้ว '+rows.length+' รายการ จาก '+src.code+' \u2192 '+dst.code);
+  toast('\ud83d\udccb คัดลอกแล้ว '+rows.length+' รายการ จาก '+src.code+' \u2192 '+dst.code
+    +(clash.length?(keepDst?' · เก็บราคาเดิมของปลายทางไว้ '+clash.length+' รายการ':' · ทับราคาเดิม '+clash.length+' รายการ'):''));
   const qEl=document.getElementById('pr-copy-q');if(qEl)qEl.value='';
   loadPricing(); loadCustomers();
 }
