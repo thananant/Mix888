@@ -361,12 +361,9 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
           <div id="bp-ann-w" style="display:none"><label>ส่งวันที่ / เวลา</label>
             <div style="display:flex;gap:6px"><input id="bp-ann-date" type="date"><input id="bp-ann-time" type="time" value="09:00"></div></div>
         </div>
-        <div style="background:#fdf6e3;border:1px solid #f0e0b8;border-radius:10px;padding:9px 12px;margin-top:8px">
-          <label class="chk" style="display:flex;gap:6px;align-items:flex-start;font-size:13px;cursor:pointer">
-            <input type="checkbox" id="bp-apply" style="margin-top:3px">
-            <span>💸 <b>ให้ระบบแก้ราคาจริงตามช่วงโปรด้วย</b> (ไม่ติ๊ก = <b>แจ้งข้อความอย่างเดียว ไม่แตะราคาในระบบ</b>)<br>
-            <span style="color:#b58900">ถ้าติ๊ก: ถึงเวลาเริ่มโปร ระบบจะเปลี่ยนราคาเฉพาะร้านของร้านที่ได้โปรเป็นราคาโปร แล้วคืนราคาเดิมให้เมื่อหมดเขต</span></span>
-          </label>
+        <div style="background:#fdf6e3;border:1px solid #f0e0b8;border-radius:10px;padding:9px 12px;margin-top:8px;font-size:12.5px;line-height:1.6">
+          🔒 <b>โปรนี้เป็นการแจ้งข่าวอย่างเดียว — ระบบจะไม่แก้ราคาให้เอง</b><br>
+          ถ้าต้องการให้ราคาลดจริง ให้พนักงานไปตั้งราคาที่หน้า <b>จัดสินค้า</b> เอง (ป้ายโปรในหน้าสั่งของลูกค้าจะขึ้นเมื่อราคาจริงถูกลดแล้วเท่านั้น)
         </div>
         <label style="margin-top:6px">ข้อความเพิ่มเติม (ไม่บังคับ)</label>
         <div class="bc-emoji" style="display:flex;flex-wrap:wrap;gap:2px;margin:2px 0"></div>
@@ -2993,12 +2990,12 @@ async function bpSend(btn){
     if(!annAt){toast('เลือกวัน/เวลาที่จะส่งข้อความก่อน');return;}
     if(annAt>=endAt){toast('เวลาส่งข้อความต้องอยู่ก่อนโปรหมดเขต');return;}
   }
-  const applyPrice=document.getElementById('bp-apply').checked;
+  const applyPrice=false;   // ระบบไม่แก้ราคาเอง — พนักงานตั้งราคาที่หน้าจัดสินค้าเท่านั้น
   const sample=shopTag(targets[0].c)+'🔥 โปรพิเศษเฉพาะร้านคุณ\n'+bpProd.name
     +'\nจากราคาปกติ ฿'+fmt(targets[0].normal)+' → เหลือ ฿'+fmt(promo)+' (ลด ฿'+fmt(targets[0].normal-promo)+')'
     +'\n⏰ '+win+(note?'\n'+note:'');
   const cm='โปร "'+bpProd.name+'" ฿'+fmt(promo)+' ถึง '+targets.length+' ร้าน\n⏰ '+win+'\n'
-    +(applyPrice?'💸 ถึงเวลาเริ่ม ระบบแก้ราคาจริงให้ร้านที่ได้โปร และคืนราคาเดิมเมื่อหมดเขต\n':'📣 แจ้งข้อความอย่างเดียว ไม่แก้ราคาในระบบ\n')
+    +'📣 แจ้งข่าวอย่างเดียว — ระบบไม่แก้ราคาให้ ต้องไปตั้งราคาเองที่หน้าจัดสินค้า\n'
     +(annSched?('🕐 ข้อความจะถูกส่ง'+bpAnnLabel(annAt)):'✉️ ส่งข้อความทันที — แต่ละร้านเห็นราคาปกติของตัวเอง เช่น:\n\n'+sample)
     +'\n\nยืนยัน?';
   if(!confirm(cm))return;
@@ -3018,14 +3015,9 @@ async function bpSend(btn){
         created_by:currentUser?.display_name||currentUser?.username||null
       }).select('id').single();
       if(insErr){
-        if(annSched||applyPrice)throw new Error('บันทึกโปรไม่สำเร็จ: '+insErr.message+' (รัน mix888-promotions.sql ใน SQL Editor หรือยัง?)');
+        if(annSched)throw new Error('บันทึกโปรไม่สำเร็จ: '+insErr.message+' (รัน mix888-promotions.sql ใน SQL Editor หรือยัง?)');
         console.warn('promotions insert',insErr);   // โหมดส่งทันที+ไม่แก้ราคา: ส่งต่อได้แม้ยังไม่ติดตั้งตาราง
       }else bpPromoCur=ins.id;
-      // ถึงเวลาเริ่มแล้ว → แก้ราคาเดี๋ยวนี้เลย ไม่รอรอบเช็ค 5 นาที
-      if(bpPromoCur&&applyPrice&&startAt<=new Date()){
-        const {error:apErr}=await db.rpc('promo_apply',{p_id:bpPromoCur});
-        if(apErr)toast('ตั้งโปรแล้ว แต่แก้ราคาทันทีไม่สำเร็จ: '+apErr.message+' — ระบบจะลองใหม่เองใน 5 นาที');
-      }
     }
     if(annSched){
       st.textContent='🕐 ตั้งเวลาส่งไว้แล้ว — ข้อความจะถูกส่ง'+bpAnnLabel(annAt);
