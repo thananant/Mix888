@@ -3919,6 +3919,10 @@ async function copyPricingFrom(){
     +'ไปที่: '+dst.code+' '+dst.name+'\n\n'
     +'ของเดิมของร้านปลายทาง '+Object.keys(assigned).length+' รายการ จะถูกแทนที่ทั้งหมด';
   if(Object.keys(pending).length)msg+='\n(การแก้ไขที่ยังไม่กดบันทึกจะถูกล้างด้วย)';
+  // ต้นทางที่ไม่ได้กำหนดราคาเอง (price ว่าง) จะไปล้างราคาเฉพาะร้านของปลายทางให้กลายเป็นราคากลาง
+  const willBlank=rows.filter(r=>(r.price==null||r.price==='')&&assigned[r.product_id]!=null&&assigned[r.product_id]!=='');
+  if(willBlank.length)msg+='\n\n⚠️ '+willBlank.length+' รายการ ร้านต้นทางไม่ได้กำหนดราคาเอง'
+    +'\n→ ราคาเฉพาะร้านของปลายทางจะถูกล้าง กลับไปใช้ราคากลาง';
   if((src.price_group||'base')!==(dst.price_group||'base'))
     msg+='\n\n\u26a0\ufe0f กลุ่มราคาต่างกัน \u2014 ต้นทาง: '+gl[src.price_group||'base']+' / ปลายทาง: '+gl[dst.price_group||'base']
       +'\nรายการที่ไม่ได้กำหนดราคาเอง จะคิดตามกลุ่มราคาของร้านปลายทาง';
@@ -4015,14 +4019,26 @@ function updateChangeCount(){
 async function savePricing(){
   const cid=document.getElementById('pr-customer').value;
   if(!cid)return;
-  const ups=[],dels=[];
+  const ups=[],dels=[],blanked=[];
   for(const [pid,st] of Object.entries(pending)){
     if(st.on){
-      ups.push({customer_id:Number(cid),product_id:Number(pid),
-        price:(st.price===''||st.price==null)?null:parseFloat(st.price)});
+      // ช่องว่าง / ค่าที่เบราว์เซอร์อ่านไม่ออก (เช่นพิมพ์ลูกน้ำ "1,027" ในช่องตัวเลข ค่าที่ได้จะเป็นค่าว่าง)
+      // = ล้างราคาเฉพาะร้าน กลับไปใช้ราคากลาง — ต้องถามก่อน ไม่ให้หลุดไปแบบเงียบ ๆ
+      const n=(st.price===''||st.price==null)?NaN:parseFloat(st.price);
+      const np=isNaN(n)?null:n;
+      const old=assigned[pid];
+      if(np==null&&old!=null&&old!=='')blanked.push({pid:Number(pid),old});
+      ups.push({customer_id:Number(cid),product_id:Number(pid),price:np});
     } else if(pid in assigned){
       dels.push(Number(pid));
     }
+  }
+  if(blanked.length){
+    const names=blanked.slice(0,6).map(b=>{const p=products.find(x=>x.id===b.pid);
+      return (p?esc(p.sku)+' '+p.name:'สินค้า #'+b.pid)+' (เดิม ฿'+fmt(b.old)+')';}).join('\n• ');
+    if(!confirm('⚠️ มี '+blanked.length+' รายการที่ "ราคาเฉพาะร้าน" จะถูกล้างทิ้ง แล้วกลับไปใช้ราคากลาง:\n\n• '+names
+      +(blanked.length>6?'\n• …และอีก '+(blanked.length-6)+' รายการ':'')
+      +'\n\nสาเหตุที่พบบ่อย: ช่องราคาถูกลบจนว่าง หรือพิมพ์ผิดรูปแบบ (ใส่ลูกน้ำ เช่น 1,027 / เว้นวรรค / ตัวอักษร) เบราว์เซอร์จะอ่านเป็นค่าว่าง\n\nยืนยันล้างราคาเฉพาะร้านของรายการเหล่านี้?'))return;
   }
   if(ups.length){
     const {error}=await db.from('customer_prices').upsert(ups,{onConflict:'customer_id,product_id'});
