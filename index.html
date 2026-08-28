@@ -57,6 +57,14 @@ main{max-width:640px;margin:0 auto;padding:12px}
 .price.promo-p{font-size:16.5px;color:#e64a19}
 .psave{display:inline-block;background:#ffe9d2;color:#c05000;font-size:11.5px;font-weight:700;border-radius:8px;padding:1px 8px;margin-left:6px;vertical-align:2px}
 .pends{font-size:11.5px;color:#c05000;font-weight:600;margin-top:1px}
+#catchips{display:flex;gap:7px;overflow-x:auto;padding:2px 0 10px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+#catchips::-webkit-scrollbar{display:none}
+.cchip{flex:none;font:inherit;font-size:13px;font-weight:600;padding:7px 15px;border-radius:99px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap}
+.cchip.on{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 2px 8px rgba(192,32,31,.25)}
+.cchip .cn2{opacity:.65;font-weight:400;margin-left:3px}
+.cathead{display:flex;align-items:center;gap:8px;margin:14px 0 8px;font-family:var(--display);font-size:15px;font-weight:700;color:var(--accent-deep)}
+.cathead::after{content:'';flex:1;height:1px;background:var(--line)}
+.cathead:first-child{margin-top:2px}
 #promobanner{background:linear-gradient(135deg,#ff6f3c,#e0261f);color:#fff;border-radius:14px;padding:11px 15px;margin-bottom:10px;font-weight:700;display:none;box-shadow:0 4px 14px rgba(224,38,31,.28);font-family:var(--display);font-size:14.5px}
 .info{flex:1;min-width:0}
 .name{font-weight:600;line-height:1.35}
@@ -175,6 +183,7 @@ body{padding-bottom:calc(90px + env(safe-area-inset-bottom))}
     <div id="page-order">
       <input class="searchbox" id="search" placeholder="🔍 ค้นหาสินค้า…" oninput="render()">
       <div id="promobanner"></div>
+      <div id="catchips"></div>
       <div id="list"></div>
     </div>
 
@@ -305,6 +314,18 @@ async function init(){
   subscribeOrders();
 }
 
+let skuCats=[], catFilter='';   // หมวด SKU สำหรับจัดกลุ่มสินค้าให้ลูกค้าเลือกง่าย
+const catOf = (sku) => (String(sku||'').match(/^[A-Za-z]+/)||[''])[0].toUpperCase();
+function catLabel(pre){
+  const c=skuCats.find(x=>String(x.prefix||'').toUpperCase()===pre);
+  return c&&c.name?c.name:(pre||'อื่นๆ');
+}
+async function loadSkuCats(){
+  try{
+    const {data,error}=await db.rpc('get_sku_categories',{p_token:token});
+    if(!error&&Array.isArray(data))skuCats=data;
+  }catch(e){}   // ยังไม่ติดตั้ง — แสดงรวมเหมือนเดิม
+}
 let shipInfo={method:'',free_min:5000};   // วิธีจัดส่งของร้านนี้ + ยอดขั้นต่ำไม่เสียค่าส่ง
 const isLalamove = () => String(shipInfo.method||'').toLowerCase()==='lalamove';
 async function loadShipInfo(){
@@ -323,7 +344,7 @@ async function loadPromos(){
   }catch(e){promos={};}   // ระบบโปรยังไม่ติดตั้ง — หน้าใช้งานได้ปกติ
 }
 async function loadCatalog(){
-  const [{data,error}]=await Promise.all([db.rpc('get_customer_catalog',{p_token:token}),loadPromos(),loadShipInfo()]);
+  const [{data,error}]=await Promise.all([db.rpc('get_customer_catalog',{p_token:token}),loadPromos(),loadShipInfo(),loadSkuCats()]);
   if(error){toast('โหลดสินค้าไม่ได้: '+error.message);return;}
   // เรียงชื่อตามหลักพจนานุกรมไทย + ตัวเลขในชื่อเทียบแบบตัวเลข
   items=(data||[]).sort((a,b)=>
@@ -335,11 +356,32 @@ async function loadCatalog(){
   render();
 }
 
+/** แถบเลือกหมวด — ขึ้นเฉพาะเมื่อร้านนี้มีสินค้ามากกว่า 1 หมวด */
+function renderCatChips(){
+  const el=document.getElementById('catchips');if(!el)return;
+  const cnt=new Map();
+  for(const it of items){const c=catOf(it.sku);cnt.set(c,(cnt.get(c)||0)+1);}
+  const order=(pre)=>{const c=skuCats.find(x=>String(x.prefix||'').toUpperCase()===pre);return c?Number(c.sort_order||999):9999;};
+  const cats=[...cnt.keys()].sort((a,b)=>order(a)-order(b)||catLabel(a).localeCompare(catLabel(b),'th'));
+  const q=(document.getElementById('search').value||'').trim();
+  if(cats.length<2||q||!skuCats.length){el.innerHTML='';return;}   // ยังไม่ติดตั้งหมวด → ไม่ต้องมีแถบ
+  if(catFilter&&!cnt.has(catFilter))catFilter='';
+  el.innerHTML='<button class="cchip'+(catFilter?'':' on')+'" onclick="pickCat(\'\')">ทั้งหมด<span class="cn2">'+items.length+'</span></button>'
+    +cats.map(c=>'<button class="cchip'+(catFilter===c?' on':'')+'" onclick="pickCat(\''+c+'\')">'
+      +esc(catLabel(c))+'<span class="cn2">'+cnt.get(c)+'</span></button>').join('');
+}
+function pickCat(c){
+  catFilter=(catFilter===c)?'':c;
+  render();
+  try{window.scrollTo({top:0,behavior:'smooth'});}catch(e){window.scrollTo(0,0);}
+}
 function render(){
   const q=(document.getElementById('search').value||'').toLowerCase();
-  const list=items.filter(it=>!q||it.name.toLowerCase().includes(q)||it.sku.toLowerCase().includes(q));
+  let list=items.filter(it=>!q||it.name.toLowerCase().includes(q)||it.sku.toLowerCase().includes(q));
+  if(!q&&catFilter)list=list.filter(it=>catOf(it.sku)===catFilter);
   // สินค้าที่กำลังลดราคาขึ้นก่อนเสมอ (ในกลุ่มเดียวกันคงลำดับชื่อไทยเดิม)
   list.sort((a,b)=>(promos[b.product_id]?1:0)-(promos[a.product_id]?1:0));
+  renderCatChips();
   const banner=document.getElementById('promobanner');
   const pn=items.filter(it=>promos[it.product_id]).length;
   if(banner){
@@ -350,7 +392,7 @@ function render(){
   if(!items.length){el.innerHTML='<div class="empty">ยังไม่มีสินค้าในรายการของคุณ<br>กรุณาติดต่อทางร้าน</div>';updateCartBar();return;}
   if(!list.length){el.innerHTML='<div class="empty">ไม่พบสินค้าที่ค้นหา</div>';updateCartBar();return;}
   const fmtEnds=iso=>{try{return new Date(iso).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});}catch(e){return '';}};
-  el.innerHTML=list.map(it=>{
+  const cardHtml=(it)=>{
     const stock=Number(it.stock_qty);
     const qty=cart[it.product_id]||0;
     const out=stock<=0;
@@ -385,7 +427,25 @@ function render(){
         <button class="qbtn" onclick="step(${it.product_id},1)" ${out||qty>=stock?'disabled':''}>＋</button>
       </div>
     </div>`;
-  }).join('');
+  };
+  // จัดกลุ่มตามหมวด SKU — ถ้ากำลังค้นหา หรือเลือกหมวดเดียวอยู่ ให้แสดงเป็นรายการเดียวไม่ต้องมีหัวข้อ
+  const grouped=!q&&!catFilter&&skuCats.length>0;
+  if(!grouped){
+    el.innerHTML=list.map(cardHtml).join('');
+  }else{
+    const promoItems=list.filter(it=>promos[it.product_id]);
+    const rest=list.filter(it=>!promos[it.product_id]);
+    const byCat=new Map();
+    for(const it of rest){const c=catOf(it.sku);if(!byCat.has(c))byCat.set(c,[]);byCat.get(c).push(it);}
+    const order=(pre)=>{const c=skuCats.find(x=>String(x.prefix||'').toUpperCase()===pre);return c?Number(c.sort_order||999):9999;};
+    const cats=[...byCat.keys()].sort((a,b)=>order(a)-order(b)||catLabel(a).localeCompare(catLabel(b),'th'));
+    let html=promoItems.length
+      ? '<div class="cathead">🔥 โปรพิเศษของร้านคุณ</div>'+promoItems.map(cardHtml).join('')
+      : '';
+    for(const c of cats)
+      html+='<div class="cathead">'+esc(catLabel(c))+'</div>'+byCat.get(c).map(cardHtml).join('');
+    el.innerHTML=html;
+  }
   updateCartBar();
 }
 
