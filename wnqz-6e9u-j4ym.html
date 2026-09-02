@@ -1412,13 +1412,22 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <h3 style="margin:0;font-size:16px">⚙️ หมวดค่าใช้จ่าย</h3>
       <button class="btn-g mini" onclick="closeExpCats()">ปิด</button>
     </div>
-    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">เพิ่มหมวดใหม่ได้เอง · หมวดที่ซ่อนจะไม่ขึ้นให้เลือกตอนบันทึกรายจ่าย แต่รายการเก่ายังเห็นชื่อหมวดเหมือนเดิม</div>
+    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">เพิ่มหมวดใหม่ได้เอง · <b>ซ่อน</b> = ไม่ขึ้นให้เลือกตอนบันทึก แต่รายการเก่ายังเห็นชื่อหมวด · <b>ลบ</b> = ลบถาวร (ถ้ามีรายจ่ายใช้หมวดนั้นอยู่ ระบบจะให้ย้ายไปหมวดอื่นก่อน)</div>
     <div class="row" style="align-items:flex-end;gap:8px;flex-wrap:wrap">
       <input type="hidden" id="xc-id">
       <div style="flex:1;min-width:170px"><label>ชื่อหมวด</label><input id="xc-name" style="width:100%" placeholder="เช่น ค่าธรรมเนียมธนาคาร" onkeydown="if(event.key==='Enter')saveExpCat()"></div>
       <div><label>ลำดับ</label><input id="xc-sort" type="number" style="width:80px" placeholder="10"></div>
       <button class="btn-p" onclick="saveExpCat()" id="xc-save">เพิ่มหมวด</button>
       <button class="btn-g" onclick="resetExpCatForm()" id="xc-cancel" style="display:none">ยกเลิก</button>
+    </div>
+    <div id="xc-move" style="display:none;margin-top:10px;padding:10px 12px;border:1px solid #f0c0c0;border-radius:10px;background:#fff6f6">
+      <div id="xc-move-msg" style="font-size:13px;line-height:1.5;margin-bottom:8px"></div>
+      <div class="row" style="gap:6px;align-items:flex-end;flex-wrap:wrap">
+        <div><label>ย้ายรายจ่ายทั้งหมดไปหมวด</label><select id="xc-move-to" style="min-width:170px"></select></div>
+        <button class="btn-d" id="xc-move-btn" onclick="xcMoveDelete()">ย้ายแล้วลบหมวด</button>
+        <button class="btn-g" onclick="xcHideInstead()">🙈 ซ่อนแทน</button>
+        <button class="btn-g" onclick="xcMoveHide()">ยกเลิก</button>
+      </div>
     </div>
     <div id="xc-body" style="margin-top:12px;overflow-x:auto"></div>
   </div>
@@ -9467,6 +9476,7 @@ function catName(id){return (expCats.find(c=>c.id===id)||{}).name||'— ไม�
 async function openExpCats(){
   await loadExpCats();
   resetExpCatForm();
+  xcMoveHide();
   renderExpCats();
   document.getElementById('excat-modal').style.display='flex';
   setTimeout(()=>document.getElementById('xc-name').focus(),50);
@@ -9500,6 +9510,7 @@ function renderExpCats(){
       +(c.active===false
         ?'<button class="btn-ok mini" onclick="toggleExpCat('+c.id+',true)">↩ เอากลับมาใช้</button>'
         :'<button class="btn-d mini" onclick="toggleExpCat('+c.id+',false)">🙈 ซ่อน</button>')
+      +' <button class="btn-g mini" onclick="deleteExpCat('+c.id+')" title="ลบหมวดนี้ถาวร" style="color:#b52020">🗑 ลบ</button>'
       +'</td></tr>').join('')+'</tbody></table>';
 }
 async function saveExpCat(){
@@ -9526,6 +9537,73 @@ async function toggleExpCat(id,active){
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
   toast(active?'เอาหมวดกลับมาใช้แล้ว':'ซ่อนหมวดแล้ว');
   await loadExpCats(); renderExpCats(); expFillCatSelects();
+}
+/* ---- 🗑 ลบหมวดถาวร — ถ้ามีรายจ่ายใช้อยู่ ต้องย้ายไปหมวดอื่นก่อน (หรือซ่อนแทน) ---- */
+let xcDelId=null;
+function xcMoveHide(){xcDelId=null;const b=document.getElementById('xc-move');if(b)b.style.display='none';}
+function xcHideInstead(){const id=xcDelId;xcMoveHide();if(id)toggleExpCat(id,false);}
+async function xcCountUse(id){
+  const {count,error}=await db.from('petty_cash').select('id',{count:'exact',head:true}).eq('category_id',id);
+  if(error)throw new Error(error.message);
+  return Number(count)||0;
+}
+async function xcDoDelete(id,name){
+  // .select() ต่อท้ายเพื่อให้รู้ว่าลบจริงไหม — ถ้าสิทธิ์ไม่พอ Supabase จะตอบสำเร็จแต่ไม่มีแถวถูกลบ
+  const {data,error}=await db.from('expense_categories').delete().eq('id',id).select('id');
+  if(error){
+    const fk=/foreign key|violates|23503/i.test(error.message||'');
+    toast(fk?'ลบไม่ได้ — ยังมีรายจ่ายที่ใช้หมวดนี้อยู่ (อาจเป็นรายการที่บัญชีนี้มองไม่เห็น) ให้กด 🙈 ซ่อน แทน':'ลบไม่สำเร็จ: '+error.message);
+    return false;
+  }
+  if(!data||!data.length){toast('ลบไม่สำเร็จ — ระบบไม่อนุญาตให้ลบ (รันไฟล์ mix888-expense-categories.sql ก่อน)');return false;}
+  toast('ลบหมวด "'+name+'" แล้ว');
+  xcMoveHide(); await loadExpCats(); resetExpCatForm(); renderExpCats(); expFillCatSelects();
+  if(expRows.length)renderExpenses();   // ตัวกรองหมวดอาจเด้งกลับเป็น "ทั้งหมด" → วาดรายการใหม่ให้ตรง
+  return true;
+}
+let xcBusy=false;   // กันกดซ้ำระหว่างรอฐานข้อมูล
+async function deleteExpCat(id){
+  if(xcBusy)return; xcBusy=true;
+  try{await deleteExpCatCore(id);}finally{xcBusy=false;}
+}
+async function deleteExpCatCore(id){
+  const c=expCats.find(x=>x.id===id);if(!c)return;
+  let n;
+  try{n=await xcCountUse(id);}catch(e){toast('เช็ครายจ่ายในหมวดไม่ได้: '+e.message);return;}
+  if(!n){
+    if(!confirm('ลบหมวด "'+c.name+'" ถาวร?\n\nยังไม่มีรายจ่ายไหนใช้หมวดนี้ ลบได้เลย (ถ้าจะใช้อีกต้องเพิ่มใหม่)'))return;
+    await xcDoDelete(id,c.name);return;
+  }
+  // มีรายจ่ายใช้หมวดนี้อยู่ → เปิดกล่องให้เลือกย้าย/ซ่อนแทน
+  xcDelId=id;
+  const others=expActiveCats().filter(x=>x.id!==id);
+  document.getElementById('xc-move-msg').innerHTML='⚠️ หมวด <b>'+esc(c.name)+'</b> มีรายจ่ายใช้อยู่ <b>'+n.toLocaleString()+' รายการ</b> ลบทันทีไม่ได้ (รายการเก่าจะไม่มีหมวด)<br>'
+    +'เลือกได้ว่า <b>ย้ายรายจ่ายทั้ง '+n.toLocaleString()+' รายการไปหมวดอื่นแล้วลบ</b> หรือ <b>ซ่อนหมวดนี้แทน</b> (รายการเก่าคงเดิม)'
+    +(others.length?'':'<br><span style="color:#b52020">ยังไม่มีหมวดอื่นให้ย้ายไป — เพิ่มหมวดใหม่ก่อน หรือกดซ่อนแทน</span>');
+  const sel=document.getElementById('xc-move-to');
+  sel.innerHTML=others.map(x=>'<option value="'+x.id+'">'+esc(x.name)+'</option>').join('');
+  document.getElementById('xc-move-btn').disabled=!others.length;
+  const box=document.getElementById('xc-move');box.style.display='block';
+  if(box.scrollIntoView)box.scrollIntoView({block:'nearest'});
+}
+async function xcMoveDelete(){
+  if(xcBusy)return; xcBusy=true;
+  try{await xcMoveDeleteCore();}finally{xcBusy=false;}
+}
+async function xcMoveDeleteCore(){
+  const id=xcDelId, to=Number(document.getElementById('xc-move-to').value);
+  const c=expCats.find(x=>x.id===id), t=expCats.find(x=>x.id===to);
+  if(!c||!t||to===id){toast('เลือกหมวดที่จะย้ายไปก่อน');return;}
+  if(!confirm('ย้ายรายจ่ายทั้งหมดของหมวด "'+c.name+'" ไปหมวด "'+t.name+'"\nแล้วลบหมวด "'+c.name+'" ถาวร?'))return;
+  const {error}=await db.from('petty_cash').update({category_id:to}).eq('category_id',id);
+  if(error){toast('ย้ายรายจ่ายไม่สำเร็จ: '+error.message+' — ยังไม่ได้ลบหมวด');return;}
+  // เช็คซ้ำก่อนลบ: ต้องไม่เหลือรายจ่ายค้างในหมวดนี้เลย
+  let left;
+  try{left=await xcCountUse(id);}catch(e){toast('เช็คซ้ำไม่ได้: '+e.message+' — ยังไม่ได้ลบหมวด');return;}
+  if(left>0){toast('ยังเหลือรายจ่าย '+left.toLocaleString()+' รายการที่ย้ายไม่สำเร็จ (สิทธิ์แก้รายจ่าย?) — ยังไม่ได้ลบหมวด');return;}
+  // ย้ายในฐานข้อมูลสำเร็จแล้ว → รายการที่แสดงอยู่ให้เห็นหมวดใหม่ทันที (ไม่ว่าขั้นลบจะผ่านหรือไม่)
+  expRows.forEach(r=>{if(r.category_id===id)r.category_id=to;});
+  if(!(await xcDoDelete(id,c.name))&&expRows.length)renderExpenses();
 }
 function renderExpenses(){
   const list=exFiltered(), el=document.getElementById('ex-body');
