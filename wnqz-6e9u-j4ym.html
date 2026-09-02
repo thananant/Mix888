@@ -989,7 +989,9 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <input type="hidden" id="ex-id">
     <div class="row" style="flex-wrap:wrap;align-items:flex-end">
       <div><label>วันที่จ่าย</label><input type="date" id="ex-date" style="width:150px"></div>
-      <div><label>หมวดค่าใช้จ่าย</label><select id="ex-cat" style="min-width:190px"></select></div>
+      <div><label>หมวดค่าใช้จ่าย</label>
+        <div style="display:flex;gap:5px"><select id="ex-cat" style="min-width:190px"></select>
+        <button class="btn-g mini" type="button" onclick="openExpCats()" title="เพิ่ม/แก้ไขหมวดค่าใช้จ่าย">⚙️</button></div></div>
       <div style="flex:1;min-width:220px"><label>รายละเอียด *</label><input id="ex-desc" style="width:100%" placeholder="เช่น ค่าส่ง Lalamove ให้ร้านเสี่ยวหยาง"></div>
       <div><label>จำนวนเงิน (฿) *</label><input id="ex-amt" type="number" step="0.01" min="0" class="num" style="width:120px"></div>
     </div>
@@ -1401,6 +1403,24 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div id="sd-sum" style="font-size:13px;margin:6px 0 10px"></div>
     <div id="sd-body" style="overflow-x:auto;max-height:60vh;overflow-y:auto"></div>
+  </div>
+</div>
+<!-- จัดการหมวดค่าใช้จ่าย (เปิดจากหน้ารายจ่าย) -->
+<div id="excat-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#fff;border-radius:14px;max-width:560px;width:100%;padding:18px;margin:14px auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h3 style="margin:0;font-size:16px">⚙️ หมวดค่าใช้จ่าย</h3>
+      <button class="btn-g mini" onclick="closeExpCats()">ปิด</button>
+    </div>
+    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">เพิ่มหมวดใหม่ได้เอง · หมวดที่ซ่อนจะไม่ขึ้นให้เลือกตอนบันทึกรายจ่าย แต่รายการเก่ายังเห็นชื่อหมวดเหมือนเดิม</div>
+    <div class="row" style="align-items:flex-end;gap:8px;flex-wrap:wrap">
+      <input type="hidden" id="xc-id">
+      <div style="flex:1;min-width:170px"><label>ชื่อหมวด</label><input id="xc-name" style="width:100%" placeholder="เช่น ค่าธรรมเนียมธนาคาร" onkeydown="if(event.key==='Enter')saveExpCat()"></div>
+      <div><label>ลำดับ</label><input id="xc-sort" type="number" style="width:80px" placeholder="10"></div>
+      <button class="btn-p" onclick="saveExpCat()" id="xc-save">เพิ่มหมวด</button>
+      <button class="btn-g" onclick="resetExpCatForm()" id="xc-cancel" style="display:none">ยกเลิก</button>
+    </div>
+    <div id="xc-body" style="margin-top:12px;overflow-x:auto"></div>
   </div>
 </div>
 <!-- ประวัติการแก้ราคา (เปิดจากหน้าจัดสินค้า) -->
@@ -9393,15 +9413,24 @@ async function plClosePO(id,st){
 let expCats=[], expRows=[];
 const PAYLBL={cash:'💵 เงินสด',transfer:'📱 โอน',card:'💳 บัตร'};
 function exToday(){return new Date(Date.now()+7*3600000).toISOString().slice(0,10);}
-async function expInit(){
-  if(!expCats.length){
-    const {data}=await db.from('expense_categories').select('*').eq('active',true).order('sort_order');
-    expCats=data||[];
-  }
-  const opt=expCats.map(c=>'<option value="'+c.id+'">'+esc(c.name)+'</option>').join('');
-  const cs=document.getElementById('ex-cat');if(cs&&!cs.options.length)cs.innerHTML=opt;
+async function loadExpCats(){
+  const {data,error}=await db.from('expense_categories').select('*').order('sort_order').order('id');
+  if(error){toast('โหลดหมวดค่าใช้จ่ายไม่ได้: '+error.message);return;}
+  expCats=data||[];
+}
+const expActiveCats=()=>expCats.filter(c=>c.active!==false);
+/** เติม dropdown หมวดใหม่ทั้งสองช่อง โดยคงค่าที่เลือกอยู่ */
+function expFillCatSelects(){
+  const opt=expActiveCats().map(c=>'<option value="'+c.id+'">'+esc(c.name)+'</option>').join('');
+  const cs=document.getElementById('ex-cat');
+  if(cs){const cur=cs.value;cs.innerHTML=opt;if(cur&&[...cs.options].some(o=>o.value===cur))cs.value=cur;}
   const cf=document.getElementById('exf-cat');
-  if(cf&&cf.options.length<=1)cf.innerHTML='<option value="">ทั้งหมด</option>'+opt;
+  if(cf){const cur=cf.value;cf.innerHTML='<option value="">ทั้งหมด</option>'+opt;if(cur&&[...cf.options].some(o=>o.value===cur))cf.value=cur;}
+}
+async function expInit(){
+  if(!expCats.length)await loadExpCats();
+  const cs=document.getElementById('ex-cat');
+  if(cs&&!cs.options.length)expFillCatSelects();
   const w=document.getElementById('ex-wh');
   if(w&&w.options.length<=1)whList.forEach(x=>w.insertAdjacentHTML('beforeend','<option value="'+x.id+'">'+esc(x.name)+'</option>'));
   const dl=document.getElementById('ex-vendors');
@@ -9434,6 +9463,70 @@ function exFiltered(){
     &&(!q||[r.description,r.paid_by,r.vendor,r.ref_no,r.note].some(v=>String(v||'').toLowerCase().includes(q))));
 }
 function catName(id){return (expCats.find(c=>c.id===id)||{}).name||'— ไม่ระบุ —';}
+/* ---- ⚙️ เพิ่ม/แก้/ซ่อน หมวดค่าใช้จ่ายได้เอง ---- */
+async function openExpCats(){
+  await loadExpCats();
+  resetExpCatForm();
+  renderExpCats();
+  document.getElementById('excat-modal').style.display='flex';
+  setTimeout(()=>document.getElementById('xc-name').focus(),50);
+}
+function closeExpCats(){document.getElementById('excat-modal').style.display='none';expFillCatSelects();}
+function resetExpCatForm(){
+  document.getElementById('xc-id').value='';
+  document.getElementById('xc-name').value='';
+  document.getElementById('xc-sort').value='';
+  document.getElementById('xc-save').textContent='เพิ่มหมวด';
+  document.getElementById('xc-cancel').style.display='none';
+}
+function editExpCat(id){
+  const c=expCats.find(x=>x.id===id);if(!c)return;
+  document.getElementById('xc-id').value=c.id;
+  document.getElementById('xc-name').value=c.name||'';
+  document.getElementById('xc-sort').value=c.sort_order??'';
+  document.getElementById('xc-save').textContent='บันทึกการแก้';
+  document.getElementById('xc-cancel').style.display='inline-block';
+  document.getElementById('xc-name').focus();
+}
+function renderExpCats(){
+  const el=document.getElementById('xc-body');
+  if(!expCats.length){el.innerHTML='<div class="empty">ยังไม่มีหมวด — พิมพ์ชื่อด้านบนแล้วกดเพิ่ม</div>';return;}
+  el.innerHTML='<table><thead><tr><th style="width:60px">ลำดับ</th><th>ชื่อหมวด</th><th>สถานะ</th><th></th></tr></thead><tbody>'
+    +expCats.map(c=>'<tr'+(c.active===false?' style="color:var(--muted)"':'')+'>'
+      +'<td class="num">'+(c.sort_order??'')+'</td>'
+      +'<td>'+esc(c.name)+'</td>'
+      +'<td>'+(c.active===false?'<span class="tag">ซ่อนอยู่</span>':'<span class="tag tag-ok">ใช้งาน</span>')+'</td>'
+      +'<td style="white-space:nowrap"><button class="btn-g mini" onclick="editExpCat('+c.id+')">✏️ แก้</button> '
+      +(c.active===false
+        ?'<button class="btn-ok mini" onclick="toggleExpCat('+c.id+',true)">↩ เอากลับมาใช้</button>'
+        :'<button class="btn-d mini" onclick="toggleExpCat('+c.id+',false)">🙈 ซ่อน</button>')
+      +'</td></tr>').join('')+'</tbody></table>';
+}
+async function saveExpCat(){
+  const id=Number(document.getElementById('xc-id').value)||null;
+  const name=document.getElementById('xc-name').value.trim();
+  const sortV=document.getElementById('xc-sort').value;
+  if(!name){toast('พิมพ์ชื่อหมวดก่อน');return;}
+  const dup=expCats.find(c=>c.id!==id&&String(c.name).trim().toLowerCase()===name.toLowerCase());
+  if(dup){toast('มีหมวดชื่อนี้อยู่แล้ว'+(dup.active===false?' (ซ่อนอยู่ — กด "เอากลับมาใช้" แทน)':''));return;}
+  const sort_order=sortV===''?(id?undefined:(Math.max(0,...expCats.map(c=>Number(c.sort_order)||0))+10)):Number(sortV);
+  const rec={name};if(sort_order!==undefined)rec.sort_order=sort_order;
+  const q=id?db.from('expense_categories').update(rec).eq('id',id)
+            :db.from('expense_categories').insert({...rec,active:true});
+  const {error}=await q;
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  toast(id?'แก้หมวดแล้ว':'เพิ่มหมวด "'+name+'" แล้ว');
+  await loadExpCats(); resetExpCatForm(); renderExpCats(); expFillCatSelects();
+  if(!id){const cs=document.getElementById('ex-cat');const nw=expCats.find(c=>c.name===name);if(cs&&nw)cs.value=String(nw.id);}   // เพิ่มแล้วเลือกให้เลย
+}
+async function toggleExpCat(id,active){
+  const c=expCats.find(x=>x.id===id);if(!c)return;
+  if(!active&&!confirm('ซ่อนหมวด "'+c.name+'"?\n\nรายจ่ายเก่าที่เคยใช้หมวดนี้ยังอยู่ครบและยังเห็นชื่อหมวดเหมือนเดิม แค่ไม่ขึ้นให้เลือกตอนบันทึกใหม่ (เอากลับมาใช้ทีหลังได้)'))return;
+  const {error}=await db.from('expense_categories').update({active}).eq('id',id);
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  toast(active?'เอาหมวดกลับมาใช้แล้ว':'ซ่อนหมวดแล้ว');
+  await loadExpCats(); renderExpCats(); expFillCatSelects();
+}
 function renderExpenses(){
   const list=exFiltered(), el=document.getElementById('ex-body');
   const total=list.reduce((a,b)=>a+Number(b.amount||0),0);
