@@ -1425,7 +1425,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div class="row" style="gap:6px;align-items:flex-end;flex-wrap:wrap">
         <div><label>ย้ายรายจ่ายทั้งหมดไปหมวด</label><select id="xc-move-to" style="min-width:170px"></select></div>
         <button class="btn-d" id="xc-move-btn" onclick="xcMoveDelete()">ย้ายแล้วลบหมวด</button>
-        <button class="btn-g" onclick="xcHideInstead()">🙈 ซ่อนแทน</button>
+        <button class="btn-g" id="xc-hide-btn" onclick="xcHideInstead()">🙈 ซ่อนแทน</button>
         <button class="btn-g" onclick="xcMoveHide()">ยกเลิก</button>
       </div>
     </div>
@@ -9522,44 +9522,76 @@ async function saveExpCat(){
   if(dup){toast('มีหมวดชื่อนี้อยู่แล้ว'+(dup.active===false?' (ซ่อนอยู่ — กด "เอากลับมาใช้" แทน)':''));return;}
   const sort_order=sortV===''?(id?undefined:(Math.max(0,...expCats.map(c=>Number(c.sort_order)||0))+10)):Number(sortV);
   const rec={name};if(sort_order!==undefined)rec.sort_order=sort_order;
-  const q=id?db.from('expense_categories').update(rec).eq('id',id)
-            :db.from('expense_categories').insert({...rec,active:true});
-  const {error}=await q;
-  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  let err=null;
+  if(id)err=await xcUpdateCat(id,rec);
+  else{const {error}=await db.from('expense_categories').insert({...rec,active:true});if(error)err='บันทึกไม่สำเร็จ: '+error.message;}
+  if(err){toast(err);renderExpCats();expFillCatSelects();return;}
   toast(id?'แก้หมวดแล้ว':'เพิ่มหมวด "'+name+'" แล้ว');
-  await loadExpCats(); resetExpCatForm(); renderExpCats(); expFillCatSelects();
+  await xcRefreshAll(); resetExpCatForm();
   if(!id){const cs=document.getElementById('ex-cat');const nw=expCats.find(c=>c.name===name);if(cs&&nw)cs.value=String(nw.id);}   // เพิ่มแล้วเลือกให้เลย
+}
+/** แก้หมวด 1 แถวแล้วเช็คว่าแก้จริง — ถ้าสิทธิ์ไม่พอ Supabase จะตอบสำเร็จแต่ไม่มีแถวถูกแก้ (คืนข้อความผิดพลาด หรือ null ถ้าสำเร็จ) */
+async function xcUpdateCat(id,patch){
+  const {data,error}=await db.from('expense_categories').update(patch).eq('id',id).select('id');
+  if(error)return 'บันทึกไม่สำเร็จ: '+error.message;
+  if(!data||!data.length){
+    await loadExpCats();
+    if(!expCats.some(c=>c.id===id))return 'หมวดนี้ถูกลบไปก่อนแล้ว (จากเครื่องอื่น) — รีเฟรชรายการให้แล้ว';
+    return 'บันทึกไม่สำเร็จ — ระบบไม่อนุญาตให้แก้หมวด (รันไฟล์ mix888-expense-categories.sql ก่อน)';
+  }
+  return null;
+}
+/** โหลดหมวดใหม่แล้ววาดทุกส่วนที่เกี่ยว: ตารางในหน้าต่าง, dropdown ทั้งสองช่อง, และกล่องย้ายถ้าเปิดอยู่ */
+async function xcRefreshAll(){
+  await loadExpCats(); renderExpCats(); expFillCatSelects();
+  if(xcDelId!=null)await xcFillMoveBox(xcDelId);
 }
 async function toggleExpCat(id,active){
   const c=expCats.find(x=>x.id===id);if(!c)return;
+  if((c.active!==false)===active){toast(active?'หมวดนี้ใช้งานอยู่แล้ว':'หมวดนี้ซ่อนอยู่แล้ว');return;}
   if(!active&&!confirm('ซ่อนหมวด "'+c.name+'"?\n\nรายจ่ายเก่าที่เคยใช้หมวดนี้ยังอยู่ครบและยังเห็นชื่อหมวดเหมือนเดิม แค่ไม่ขึ้นให้เลือกตอนบันทึกใหม่ (เอากลับมาใช้ทีหลังได้)'))return;
-  const {error}=await db.from('expense_categories').update({active}).eq('id',id);
-  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  const err=await xcUpdateCat(id,{active});
+  if(err){toast(err);renderExpCats();expFillCatSelects();return;}
   toast(active?'เอาหมวดกลับมาใช้แล้ว':'ซ่อนหมวดแล้ว');
-  await loadExpCats(); renderExpCats(); expFillCatSelects();
+  await xcRefreshAll();
 }
 /* ---- 🗑 ลบหมวดถาวร — ถ้ามีรายจ่ายใช้อยู่ ต้องย้ายไปหมวดอื่นก่อน (หรือซ่อนแทน) ---- */
-let xcDelId=null;
-function xcMoveHide(){xcDelId=null;const b=document.getElementById('xc-move');if(b)b.style.display='none';}
-function xcHideInstead(){const id=xcDelId;xcMoveHide();if(id)toggleExpCat(id,false);}
+let xcDelId=null, xcDelCount=0;
+function xcMoveHide(){xcDelId=null;xcDelCount=0;const b=document.getElementById('xc-move');if(b)b.style.display='none';}
+async function xcHideInstead(){
+  const id=xcDelId;if(!id)return;
+  await toggleExpCat(id,false);
+  if((expCats.find(x=>x.id===id)||{}).active===false)xcMoveHide();   // ซ่อนสำเร็จ = จบเรื่องลบ ปิดกล่อง (ถ้ากดยกเลิกใน confirm กล่องยังอยู่)
+}
 async function xcCountUse(id){
   const {count,error}=await db.from('petty_cash').select('id',{count:'exact',head:true}).eq('category_id',id);
   if(error)throw new Error(error.message);
   return Number(count)||0;
 }
-async function xcDoDelete(id,name){
+/** หลังลบสำเร็จ: ปิดกล่อง โหลดใหม่ วาดใหม่ และถ้าฟอร์มรายจ่ายเลือกหมวดที่ลบอยู่ ให้ตามไปหมวดที่ย้ายไป */
+async function xcAfterDelete(id,to){
+  xcMoveHide(); await loadExpCats(); resetExpCatForm(); renderExpCats();
+  const cs=document.getElementById('ex-cat'); const was=cs?cs.value:'';
+  expFillCatSelects();
+  if(cs&&was===String(id)&&to&&[...cs.options].some(o=>o.value===String(to)))cs.value=String(to);
+  if(expRows.length)renderExpenses();   // ตัวกรองหมวดอาจเด้งกลับเป็น "ทั้งหมด" → วาดรายการใหม่ให้ตรง
+}
+/** ลบหมวดจริงในฐานข้อมูล — คืน {ok, msg} (ไม่ toast เอง ให้คนเรียกตัดสินใจว่าจะบอกอะไร) */
+async function xcDoDelete(id,name,to){
   // .select() ต่อท้ายเพื่อให้รู้ว่าลบจริงไหม — ถ้าสิทธิ์ไม่พอ Supabase จะตอบสำเร็จแต่ไม่มีแถวถูกลบ
   const {data,error}=await db.from('expense_categories').delete().eq('id',id).select('id');
   if(error){
     const fk=/foreign key|violates|23503/i.test(error.message||'');
-    toast(fk?'ลบไม่ได้ — ยังมีรายจ่ายที่ใช้หมวดนี้อยู่ (อาจเป็นรายการที่บัญชีนี้มองไม่เห็น) ให้กด 🙈 ซ่อน แทน':'ลบไม่สำเร็จ: '+error.message);
-    return false;
+    return {ok:false,msg:fk?'ลบไม่ได้ — ยังมีรายจ่ายที่ใช้หมวดนี้อยู่ (อาจเป็นรายการที่บัญชีนี้มองไม่เห็น) ให้กด 🙈 ซ่อน แทน':'ลบไม่สำเร็จ: '+error.message};
   }
-  if(!data||!data.length){toast('ลบไม่สำเร็จ — ระบบไม่อนุญาตให้ลบ (รันไฟล์ mix888-expense-categories.sql ก่อน)');return false;}
-  toast('ลบหมวด "'+name+'" แล้ว');
-  xcMoveHide(); await loadExpCats(); resetExpCatForm(); renderExpCats(); expFillCatSelects();
-  if(expRows.length)renderExpenses();   // ตัวกรองหมวดอาจเด้งกลับเป็น "ทั้งหมด" → วาดรายการใหม่ให้ตรง
-  return true;
+  if(!data||!data.length){
+    await loadExpCats();
+    if(expCats.some(c=>c.id===id))return {ok:false,msg:'ลบไม่สำเร็จ — ระบบไม่อนุญาตให้ลบ (รันไฟล์ mix888-expense-categories.sql ก่อน)'};
+    await xcAfterDelete(id,to);   // ไม่มีแถวนี้แล้ว = ถูกลบไปก่อนแล้วจากเครื่องอื่น → ถือว่าเรียบร้อย
+    return {ok:true,msg:'หมวด "'+name+'" ถูกลบไปก่อนแล้ว (จากเครื่องอื่น) — รีเฟรชรายการให้แล้ว'};
+  }
+  await xcAfterDelete(id,to);
+  return {ok:true,msg:'ลบหมวด "'+name+'" แล้ว'};
 }
 let xcBusy=false;   // กันกดซ้ำระหว่างรอฐานข้อมูล
 async function deleteExpCat(id){
@@ -9572,19 +9604,33 @@ async function deleteExpCatCore(id){
   try{n=await xcCountUse(id);}catch(e){toast('เช็ครายจ่ายในหมวดไม่ได้: '+e.message);return;}
   if(!n){
     if(!confirm('ลบหมวด "'+c.name+'" ถาวร?\n\nยังไม่มีรายจ่ายไหนใช้หมวดนี้ ลบได้เลย (ถ้าจะใช้อีกต้องเพิ่มใหม่)'))return;
-    await xcDoDelete(id,c.name);return;
+    const r=await xcDoDelete(id,c.name); toast(r.msg); if(!r.ok)renderExpCats();
+    return;
   }
-  // มีรายจ่ายใช้หมวดนี้อยู่ → เปิดกล่องให้เลือกย้าย/ซ่อนแทน
-  xcDelId=id;
+  await xcFillMoveBox(id,n);   // มีรายจ่ายใช้หมวดนี้อยู่ → เปิดกล่องให้เลือกย้าย/ซ่อนแทน
+  const box=document.getElementById('xc-move');
+  if(box.style.display!=='none'&&box.scrollIntoView)box.scrollIntoView({block:'nearest'});
+}
+/** เติมกล่องย้าย/ซ่อนแทน ให้ตรงกับข้อมูลล่าสุดเสมอ (เรียกซ้ำได้ทุกครั้งที่หมวดเปลี่ยน) — n = จำนวนรายจ่ายถ้านับมาแล้ว */
+async function xcFillMoveBox(id,n){
+  const c=expCats.find(x=>x.id===id);
+  if(!c){xcMoveHide();return;}
+  if(n===undefined){try{n=await xcCountUse(id);}catch(e){toast('เช็ครายจ่ายในหมวดไม่ได้: '+e.message);xcMoveHide();return;}}
+  if(!n){xcMoveHide();return;}   // ไม่มีรายจ่ายค้างแล้ว → ไม่ต้องย้าย ปิดกล่อง
+  xcDelId=id; xcDelCount=n;
+  const hidden=c.active===false;
   const others=expActiveCats().filter(x=>x.id!==id);
-  document.getElementById('xc-move-msg').innerHTML='⚠️ หมวด <b>'+esc(c.name)+'</b> มีรายจ่ายใช้อยู่ <b>'+n.toLocaleString()+' รายการ</b> ลบทันทีไม่ได้ (รายการเก่าจะไม่มีหมวด)<br>'
-    +'เลือกได้ว่า <b>ย้ายรายจ่ายทั้ง '+n.toLocaleString()+' รายการไปหมวดอื่นแล้วลบ</b> หรือ <b>ซ่อนหมวดนี้แทน</b> (รายการเก่าคงเดิม)'
-    +(others.length?'':'<br><span style="color:#b52020">ยังไม่มีหมวดอื่นให้ย้ายไป — เพิ่มหมวดใหม่ก่อน หรือกดซ่อนแทน</span>');
-  const sel=document.getElementById('xc-move-to');
+  const N=n.toLocaleString();
+  document.getElementById('xc-move-msg').innerHTML='⚠️ หมวด <b>'+esc(c.name)+'</b>'+(hidden?' (ซ่อนอยู่)':'')+' มีรายจ่ายใช้อยู่ <b>'+N+' รายการ</b> ลบทันทีไม่ได้ (รายการเก่าจะไม่มีหมวด)<br>'
+    +(hidden?'ถ้าต้องการลบจริง ให้ <b>ย้ายรายจ่ายทั้ง '+N+' รายการไปหมวดอื่นแล้วลบ</b>'
+            :'เลือกได้ว่า <b>ย้ายรายจ่ายทั้ง '+N+' รายการไปหมวดอื่นแล้วลบ</b> หรือ <b>ซ่อนหมวดนี้แทน</b> (รายการเก่าคงเดิม)')
+    +(others.length?'':'<br><span style="color:#b52020">ยังไม่มีหมวดอื่นให้ย้ายไป — เพิ่มหมวดใหม่ที่ช่องด้านบนก่อน (กล่องนี้จะอัปเดตเอง)'+(hidden?'':' หรือกดซ่อนแทน')+'</span>');
+  const sel=document.getElementById('xc-move-to'); const cur=sel.value;
   sel.innerHTML=others.map(x=>'<option value="'+x.id+'">'+esc(x.name)+'</option>').join('');
+  if(cur&&[...sel.options].some(o=>o.value===cur))sel.value=cur;
   document.getElementById('xc-move-btn').disabled=!others.length;
-  const box=document.getElementById('xc-move');box.style.display='block';
-  if(box.scrollIntoView)box.scrollIntoView({block:'nearest'});
+  document.getElementById('xc-hide-btn').style.display=hidden?'none':'';
+  document.getElementById('xc-move').style.display='block';
 }
 async function xcMoveDelete(){
   if(xcBusy)return; xcBusy=true;
@@ -9594,16 +9640,22 @@ async function xcMoveDeleteCore(){
   const id=xcDelId, to=Number(document.getElementById('xc-move-to').value);
   const c=expCats.find(x=>x.id===id), t=expCats.find(x=>x.id===to);
   if(!c||!t||to===id){toast('เลือกหมวดที่จะย้ายไปก่อน');return;}
+  if(t.active===false){toast('หมวดปลายทาง "'+t.name+'" ถูกซ่อนไปแล้ว — เลือกหมวดอื่น');await xcFillMoveBox(id);return;}
   if(!confirm('ย้ายรายจ่ายทั้งหมดของหมวด "'+c.name+'" ไปหมวด "'+t.name+'"\nแล้วลบหมวด "'+c.name+'" ถาวร?'))return;
   const {error}=await db.from('petty_cash').update({category_id:to}).eq('category_id',id);
   if(error){toast('ย้ายรายจ่ายไม่สำเร็จ: '+error.message+' — ยังไม่ได้ลบหมวด');return;}
   // เช็คซ้ำก่อนลบ: ต้องไม่เหลือรายจ่ายค้างในหมวดนี้เลย
   let left;
   try{left=await xcCountUse(id);}catch(e){toast('เช็คซ้ำไม่ได้: '+e.message+' — ยังไม่ได้ลบหมวด');return;}
-  if(left>0){toast('ยังเหลือรายจ่าย '+left.toLocaleString()+' รายการที่ย้ายไม่สำเร็จ (สิทธิ์แก้รายจ่าย?) — ยังไม่ได้ลบหมวด');return;}
+  if(left>0){toast('ยังเหลือรายจ่าย '+left.toLocaleString()+' รายการที่ย้ายไม่สำเร็จ (สิทธิ์แก้รายจ่าย?) — ยังไม่ได้ลบหมวด');await xcFillMoveBox(id,left);return;}
   // ย้ายในฐานข้อมูลสำเร็จแล้ว → รายการที่แสดงอยู่ให้เห็นหมวดใหม่ทันที (ไม่ว่าขั้นลบจะผ่านหรือไม่)
+  const moved=xcDelCount.toLocaleString();
   expRows.forEach(r=>{if(r.category_id===id)r.category_id=to;});
-  if(!(await xcDoDelete(id,c.name))&&expRows.length)renderExpenses();
+  const r=await xcDoDelete(id,c.name,to);
+  if(r.ok){toast('ย้ายรายจ่าย '+moved+' รายการไปหมวด "'+t.name+'" แล้ว · '+r.msg);return;}
+  // ย้ายไปแล้วแต่ลบไม่ผ่าน → ต้องบอกให้ชัดว่าเกิดอะไรขึ้นบ้าง (การย้ายย้อนกลับเองไม่ได้)
+  xcMoveHide(); await loadExpCats(); renderExpCats(); expFillCatSelects(); if(expRows.length)renderExpenses();
+  alert('ย้ายรายจ่าย '+moved+' รายการไปหมวด "'+t.name+'" เรียบร้อยแล้ว\n\nแต่ลบหมวด "'+c.name+'" ไม่สำเร็จ:\n'+r.msg+'\n\nหมวด "'+c.name+'" ยังอยู่ (ตอนนี้ไม่มีรายจ่ายแล้ว) — กด 🗑 ลบ ใหม่ได้ทีหลัง');
 }
 function renderExpenses(){
   const list=exFiltered(), el=document.getElementById('ex-body');
