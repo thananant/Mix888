@@ -6988,11 +6988,11 @@ async function exportMonthExcel(btn){
     const from=new Date(y,m-1,1),to=new Date(y,m,1);
     const thM=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'][m-1];
     const title=thM+'/'+(y+543);
-    const {data:bs,error}=await db.from('bills')
+    // ไล่ดึงทุกหน้า — เดือนหนึ่งมีบิลเกิน 1,000 ใบได้ ถ้าดึงรอบเดียวไฟล์จะขาด
+    const bs=await fetchAllPages(()=>db.from('bills')
       .select('*, customers(code,name,sale_name,delivery_method), orders(id,order_no)')
       .gte('created_at',from.toISOString()).lt('created_at',to.toISOString())
-      .neq('ship_status','cancelled').order('created_at');
-    if(error)throw new Error(error.message);
+      .neq('ship_status','cancelled').order('created_at'));
     if(!bs.length){toast('เดือนนี้ไม่มีบิล');btn.disabled=false;btn.textContent='📊 Excel รายเดือน';return;}
     const orderIds=bs.map(b=>b.order_id).filter(Boolean);
     const its=await fetchAllIn(orderIds,(ids)=>db.from('order_items')
