@@ -7626,6 +7626,8 @@ async function openEditOrder(orderId){
       qty:Number(it.qty),price:Number(it.price),orig_qty:Number(it.qty),orig_price:Number(it.price)}))};
   document.getElementById('eb-no').textContent=o.order_no;
   document.getElementById('eb-rev').textContent='ยังไม่ออกบิล';
+  document.getElementById('eb-note').value='';   // ล้างหมายเหตุค้างจากบิลก่อนหน้า
+  const ebq0=document.getElementById('eb-add-search'); if(ebq0)ebq0.value='';
   document.getElementById('eb-cust').textContent=(o.customers?.code||'')+' · '+(o.customers?.name||'');
   document.getElementById('eb-prodlist').innerHTML=products.filter(p=>p.active!==false)
     .map(p=>`<option value="${esc(p.sku)} · ${esc(p.name)}"></option>`).join('');
@@ -7744,6 +7746,8 @@ async function openEditBill(billId){
   document.getElementById('eb-cust').textContent=(o.customers?.code||'')+' · '+(o.customers?.name||'');
   document.getElementById('eb-ship').value=Number(b.shipping_fee)||0;
   document.getElementById('eb-disc').value=Number(b.discount)||0;
+  document.getElementById('eb-note').value='';   // เหตุผลการแก้เป็นของบิลนี้เท่านั้น — ล้างของบิลก่อนหน้าทิ้ง ไม่ให้ค้างข้ามบิล
+  const ebq=document.getElementById('eb-add-search'); if(ebq)ebq.value='';
   document.getElementById('eb-prodlist').innerHTML=products.filter(p=>p.active!==false)
     .map(p=>`<option value="${esc(p.sku)} · ${esc(p.name)}"></option>`).join('');
   ebRender();
