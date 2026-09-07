@@ -4148,9 +4148,20 @@ let bqBusy=false, bqApplied=false, bqPreviewed=false;
 const BQ_TIER_LBL={base_price:'ราคากลาง',price_r20:'เรท 20 ลัง',price_r50:'เรท 50 ลัง',price_upc:'รวมส่งตจว'};
 const BQ_GRP_LBL={base:'ราคากลาง',r20:'เรท 20 ลัง',r50:'เรท 50 ลัง',upc:'รวมส่งตจว'};
 const bqR2=v=>Math.round(Number(v)*100)/100;
+/** ตัวเลขในข้อความไลน์: จำนวนเต็มไม่ใส่ทศนิยม (480) มีเศษใส่ 2 ตำแหน่ง (12.50) */
+const bqNum=v=>{const n=Number(v)||0;return n%1===0?n.toLocaleString('en-US'):n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});};
+/** ล็อกรอบ: ปรับไปแล้ว (ทั้งหมดหรือบางส่วน) → ห้ามแก้รายการ/ตัวเลือก/ดูตารางใหม่ กันคิดจากราคาที่ขยับไปแล้วจนบวกซ้ำ */
+function bqPartial(){return !bqApplied&&(bqTierRows.some(t=>t.applied)||bqRows.some(r=>r.applied));}
+function bqLocked(){return bqApplied||bqPartial();}
+function bqSyncLock(){
+  const lock=bqLocked();
+  ['bq-tiers','bq-cp','bq-line','bq-prod','bq-amt','bq-preview-btn'].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=lock;});
+  document.querySelectorAll('#bq-items button').forEach(b=>b.disabled=lock);
+}
 function openBulkPrice(){
   if(bqBusy){toast('กำลังทำงานอยู่ รอสักครู่');return;}
   bqItems=[];bqRows=[];bqTierRows=[];bqShops=[];bqApplied=false;bqPreviewed=false;
+  bqSyncLock();
   document.getElementById('bq-prodlist').innerHTML=products.filter(p=>p.active!==false)
     .map(p=>'<option value="'+esc(p.sku)+' · '+esc(p.name)+'"></option>').join('');
   document.getElementById('bq-prod').value='';document.getElementById('bq-amt').value='';
@@ -4162,6 +4173,11 @@ function openBulkPrice(){
 }
 function closeBulkPrice(){
   if(bqBusy){toast('กำลังทำงานอยู่ รอสักครู่');return;}
+  if(bqPartial()){
+    const nt=bqTierRows.filter(t=>t.applied).length, nc=bqRows.filter(r=>r.applied&&r.kind==='cp').length;
+    if(!confirm('⚠️ รอบนี้ปรับไปแล้วบางส่วน (ราคากลาง/เรทกลุ่ม '+nt+' สินค้า · ราคาเฉพาะร้าน '+nc+' รายการ) แต่ยังไม่เสร็จ\n\n'
+      +'แนะนำให้กด "ทำต่อส่วนที่เหลือ" ให้จบก่อน — ถ้าปิดตอนนี้ ต้องไปเช็คราคาเองว่าส่วนที่เหลือปรับหรือยัง (ห้ามเปิดมาปรับชุดเดิมซ้ำ จะบวกซ้ำ)\n\nปิดจริงไหม?'))return;
+  }
   document.getElementById('bulkprice-modal').style.display='none';
 }
 function bqFindProd(){
@@ -4170,7 +4186,7 @@ function bqFindProd(){
   return products.find(x=>x.sku===sku)||products.find(x=>x.name===val)||null;
 }
 function bqAddItem(){
-  if(bqApplied){toast('ปรับราคารอบนี้ไปแล้ว — ปิดแล้วเปิดใหม่เพื่อเริ่มรอบใหม่');return;}
+  if(bqLocked()){toast(bqApplied?'ปรับราคารอบนี้ไปแล้ว — ปิดแล้วเปิดใหม่เพื่อเริ่มรอบใหม่':'รอบนี้ปรับไปบางส่วนแล้ว — กด "ทำต่อส่วนที่เหลือ" ให้เสร็จก่อน');return;}
   const p=bqFindProd(); const amt=Number(document.getElementById('bq-amt').value);
   if(!p){toast('เลือกสินค้าจากรายการก่อน');return;}
   if(!amt||!isFinite(amt)){toast('ใส่จำนวนที่จะปรับ เช่น 20 หรือ -10');return;}
@@ -4179,20 +4195,27 @@ function bqAddItem(){
   document.getElementById('bq-prod').value='';document.getElementById('bq-amt').value='';
   bqRenderItems(); bqPreviewDirty(); document.getElementById('bq-prod').focus();
 }
-function bqRemoveItem(i){ if(bqApplied)return; bqItems.splice(i,1); bqRenderItems(); bqPreviewDirty(); }
+function bqRemoveItem(i){ if(bqLocked())return; bqItems.splice(i,1); bqRenderItems(); bqPreviewDirty(); }
 function bqRenderItems(){
   const el=document.getElementById('bq-items');
   if(!bqItems.length){el.innerHTML='<div class="empty" style="padding:8px">ยังไม่ได้เลือกสินค้า — เลือกสินค้า ใส่จำนวนที่จะปรับ แล้วกด "+ เพิ่มสินค้า" (ใส่ได้หลายตัวในรอบเดียว ลูกค้าจะได้ไลน์ฉบับเดียวรวมทุกตัว)</div>';return;}
-  el.innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>สินค้า</th><th class="num">ราคากลางตอนนี้</th><th class="num">ปรับ</th><th class="num">ราคากลางใหม่</th><th></th></tr></thead><tbody>'
-    +bqItems.map((it,i)=>'<tr><td><b>'+esc(it.p.sku)+'</b> '+esc(it.p.name)+'</td><td class="num">฿'+fmt(it.p.base_price)+'</td>'
+  const lock=bqLocked();
+  el.innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>สินค้า</th><th class="num">ราคากลาง'+(lock?'เดิม':'ตอนนี้')+'</th><th class="num">ปรับ</th><th class="num">ราคากลางใหม่</th><th></th></tr></thead><tbody>'
+    +bqItems.map((it,i)=>{
+      // หลังปรับแล้ว ราคาในหน่วยความจำขยับไปแล้ว → โชว์เดิม→ใหม่จากที่บันทึกไว้ตอนดูตาราง ไม่ใช่คิดใหม่ (จะเพี้ยน)
+      const t=bqTierRows.find(x=>x.p.id===it.p.id);
+      const ch=t&&t.changes.base_price;
+      const oldB=ch?ch[0]:Number(it.p.base_price), newB=ch?ch[1]:bqR2(Number(it.p.base_price)+it.amt);
+      return '<tr><td><b>'+esc(it.p.sku)+'</b> '+esc(it.p.name)+'</td><td class="num">฿'+fmt(oldB)+'</td>'
       +'<td class="num" style="color:'+(it.amt>0?'#b52020':'#0f6e56')+'"><b>'+(it.amt>0?'+':'')+fmt(it.amt)+'</b></td>'
-      +'<td class="num">฿'+fmt(bqR2(Number(it.p.base_price)+it.amt))+'</td>'
-      +'<td>'+(bqApplied?'✅':'<button class="btn-g mini" onclick="bqRemoveItem('+i+')">✕</button>')+'</td></tr>').join('')
+      +'<td class="num">฿'+fmt(newB)+(t&&t.applied?' ✅':'')+'</td>'
+      +'<td>'+(lock?'':'<button class="btn-g mini" onclick="bqRemoveItem('+i+')">✕</button>')+'</td></tr>';}).join('')
     +'</tbody></table></div>';
 }
 /** ตัวเลือก/รายการเปลี่ยน → ตารางเดิมใช้ไม่ได้แล้ว ต้องกดดูใหม่ก่อนยืนยัน */
 function bqPreviewDirty(){
   if(bqApplied)return;
+  if(bqPartial()){toast('รอบนี้ปรับไปบางส่วนแล้ว — กด "ทำต่อส่วนที่เหลือ" ให้เสร็จก่อน');bqSyncLock();return;}
   bqRows=[];bqTierRows=[];bqShops=[];bqPreviewed=false;
   document.getElementById('bq-list').innerHTML='';document.getElementById('bq-tiersbox').innerHTML='';
   document.getElementById('bq-sum').textContent='';
@@ -4201,7 +4224,7 @@ function bqPreviewDirty(){
   document.getElementById('bq-msgwrap').style.display=document.getElementById('bq-line').checked?'':'none';
 }
 async function bqPreview(btn){
-  if(bqApplied){toast('ปรับราคารอบนี้ไปแล้ว — ปิดแล้วเปิดใหม่เพื่อเริ่มรอบใหม่');return;}
+  if(bqLocked()){toast(bqApplied?'ปรับราคารอบนี้ไปแล้ว — ปิดแล้วเปิดใหม่เพื่อเริ่มรอบใหม่':'รอบนี้ปรับไปบางส่วนแล้ว — กด "ทำต่อส่วนที่เหลือ" ให้เสร็จก่อน');return;}
   if(!bqItems.length){toast('เพิ่มสินค้าก่อน');return;}
   const doTiers=document.getElementById('bq-tiers').checked, doCp=document.getElementById('bq-cp').checked;
   if(!doTiers&&!doCp){toast('เลือกอย่างน้อย 1 อย่าง: ปรับราคากลาง/เรทกลุ่ม หรือ ราคาเฉพาะร้าน');return;}
@@ -4270,6 +4293,7 @@ function bqVisibleIdx(){
   return out;
 }
 function bqRender(){
+  bqRenderItems();   // ตารางสินค้าด้านบนต้องสะท้อนสถานะ ✅ ที่ปรับแล้วด้วย
   // ราคากลาง/เรทกลุ่ม
   const tb=document.getElementById('bq-tiersbox');
   const tiers=bqTierRows.filter(t=>t.on&&Object.keys(t.changes).length);
@@ -4288,16 +4312,17 @@ function bqRender(){
         return '<tr'+(!r.changed?' style="color:var(--muted)"':st===true?' style="background:#e8f6f0"':st===false?' style="background:#fdeeee"':'')+'>'
         +'<td><input type="checkbox" '+(r.sel?'checked':'')+(r.changed&&!lock?'':' disabled')+' onchange="bqRows['+i+'].sel=this.checked;bqCount()"></td>'
         +'<td><b>'+esc(r.c.code||'')+'</b> '+esc(r.c.name||'')+(r.c.branch_name?' <span style="color:var(--muted)">• '+esc(r.c.branch_name)+'</span>':'')+(r.c.line_group_id?'':' <span class="tag">ไม่มีไลน์</span>')+'</td>'
-        +'<td>'+esc(r.c.sale_name||'-')+'</td><td>'+esc(r.p.name)+'</td><td style="font-size:12.5px">'+esc(r.note)+'</td>'
+        +'<td>'+esc(r.c.sale_name||'-')+'</td><td>'+esc(r.p.name)+'</td><td style="font-size:12.5px">'+esc(r.note)
+          +(r.kind==='grp'&&r.changed&&!r.sel?' <span style="color:#b06000">· ราคายังขยับตามกลุ่ม แค่ไม่ส่งไลน์</span>':'')+'</td>'
         +'<td class="num">฿'+fmt(r.oldP)+'</td><td class="num"><b>฿'+fmt(r.newP)+'</b></td>'
         +'<td class="num" style="color:'+(r.newP>r.oldP?'#b52020':r.newP<r.oldP?'#0f6e56':'var(--muted)')+'">'+(r.changed?(r.newP>r.oldP?'+':'')+fmt(r.newP-r.oldP):'—')+'</td>'
         +'<td style="white-space:nowrap">'+(r.applied?'✅ ปรับแล้ว ':'')+(st===true?'📨 ส่งแล้ว':st===false?'✗ ส่งไม่สำเร็จ':'')+'</td></tr>';}).join('')
       +'</tbody></table></div>'
       :'<div class="empty">ไม่พบร้านตามที่ค้นหา/กรองไว้</div>')
     :(bqPreviewed?'<div class="empty">ไม่มีร้านไหนถูกจัดสินค้าเหล่านี้ไว้เลย'+(bqTierRows.some(t=>t.on&&Object.keys(t.changes).length)?' — จะปรับเฉพาะราคากลาง/เรทกลุ่ม':'')+'</div>':'');
-  bqCount();
+  bqCount(); bqSyncLock();
 }
-function bqCheckAll(v){ if(bqApplied)return; bqVisibleIdx().forEach(i=>{if(bqRows[i].changed)bqRows[i].sel=v;}); bqRender(); }
+function bqCheckAll(v){ if(bqLocked())return; bqVisibleIdx().forEach(i=>{if(bqRows[i].changed)bqRows[i].sel=v;}); bqRender(); }
 function bqBuildShops(rows){
   const m={};
   rows.forEach(r=>{(m[r.c.id]=m[r.c.id]||{c:r.c,rows:[],sent:null}).rows.push(r);});
@@ -4305,7 +4330,7 @@ function bqBuildShops(rows){
 }
 function bqMsgFor(s){
   const head=document.getElementById('bq-head').value.trim(), foot=document.getElementById('bq-foot').value.trim();
-  const lines=s.rows.map(r=>'• '+r.p.name+' : จาก '+fmt(r.oldP)+' บาท เป็น '+fmt(r.newP)+' บาท');
+  const lines=s.rows.map(r=>'• '+r.p.name+' : จาก '+bqNum(r.oldP)+' บาท เป็น '+bqNum(r.newP)+' บาท');
   return shopTag(s.c)+(head?head+'\n':'')+lines.join('\n')+(foot?'\n'+foot:'');
 }
 function bqCount(){
@@ -4341,16 +4366,21 @@ async function bqApply(btn){
       }
     }catch(e){}
     const resume=bqTierRows.some(t=>t.applied)||bqRows.some(r=>r.applied);
+    // ร้านราคากลุ่มที่ติ๊กออก: ราคาจะขยับตามราคากลุ่มอยู่ดี แค่ไม่ได้รับไลน์ — ต้องบอกให้รู้
+    const grpUnsel=new Set(bqRows.filter(r=>r.kind==='grp'&&r.changed&&!r.sel&&tierTodo.some(t=>t.p.id===r.p.id)).map(r=>r.c.id)).size;
     const cm=(resume?'ทำต่อส่วนที่ยังไม่เสร็จ (ส่วนที่ทำแล้วจะไม่ถูกบวกซ้ำ)\n\n':'ยืนยันปรับราคา '+bqItems.length+' สินค้า\n')
       +bqItems.map(it=>'• '+it.p.name+' '+(it.amt>0?'+':'')+fmt(it.amt)+' บาท').join('\n')
       +'\n\n'+(tierTodo.length?'✔ ปรับราคากลาง/เรทกลุ่ม '+tierTodo.length+' สินค้า\n':'')
       +(cpTodo.length?'✔ ปรับราคาเฉพาะร้าน '+cpTodo.length+' รายการ\n':'')
       +'✔ ร้านที่ราคาเปลี่ยนทั้งหมด '+bqShops.length+' ร้าน\n'
       +(lineOn?'✔ ส่งไลน์แจ้ง '+nLine+' กลุ่มลูกค้า (1 ข้อความ/ร้าน)':'✘ ไม่ส่งไลน์ — ต้องแจ้งลูกค้าเอง')
+      +(grpUnsel?'\n⚠️ ร้านราคากลุ่มที่ติ๊กออก '+grpUnsel+' ร้าน: ราคาจะขยับตามราคากลุ่มอยู่ดี แต่จะไม่ได้รับไลน์แจ้ง':'')
       +'\n\nราคาใหม่มีผลกับออเดอร์หลังจากนี้ทันที — ยืนยัน?';
     if(!confirm(cm))return;
     bqBusy=true;btn.disabled=true;
     const st=document.getElementById('bq-status');
+    // จำลายเซ็นรอบนี้ตั้งแต่ "เริ่มเขียน" — ถ้าล้มกลางทางแล้วมีคนเปิดมาปรับชุดเดิมซ้ำใน 10 นาที จะมีเตือน
+    try{localStorage.setItem('mf_last_bq',JSON.stringify({sig,at:Date.now()}));}catch(e){}
     try{
       // 1) ราคากลาง / เรทกลุ่ม (ทีละสินค้า — ที่ทำแล้วจะไม่ทำซ้ำ)
       for(const t of tierTodo){
