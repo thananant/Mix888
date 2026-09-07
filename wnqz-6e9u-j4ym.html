@@ -1427,11 +1427,28 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <label style="font-weight:400"><input type="checkbox" id="bq-line" checked onchange="bqPreviewDirty()"> ส่งไลน์แจ้งลูกค้าแต่ละกลุ่ม</label>
     </div>
     <div id="bq-msgwrap" style="margin-top:8px">
-      <label>ข้อความเปิด <span style="color:var(--muted);font-weight:400">(ระบบต่อรายการ "สินค้า… จาก … บาท เป็น … บาท" ของแต่ละร้านให้เอง)</span></label>
-      <textarea id="bq-head" rows="2" style="width:100%" oninput="bqCount()">📢 แจ้งปรับราคาสินค้า
+      <div style="font-size:12.5px;color:var(--muted)">ระบบเลือกข้อความให้ตามราคาของ "แต่ละร้าน" — ร้านที่ราคาขึ้นได้ข้อความขออภัย · ร้านที่ราคาลงได้ข้อความข่าวดี · ร้านที่มีทั้งขึ้นและลงได้ข้อความกลาง (แก้ได้ทุกแบบ) แล้วต่อรายการ "สินค้า… จาก … บาท เป็น/เหลือ … บาท" ให้เอง</div>
+      <div id="bq-tpl-up" style="margin-top:6px;padding:8px 10px;border:1px solid #f0d0d0;border-radius:10px;background:#fff8f8">
+        <label style="color:#b52020">📈 ร้านที่ราคาขึ้น — ข้อความเปิด</label>
+        <textarea id="bq-head-up" rows="2" style="width:100%" oninput="bqCount()">📢 แจ้งปรับราคาสินค้า
 เนื่องจากต้นทุนสินค้าปรับสูงขึ้น ทางร้านจำเป็นต้องปรับราคาดังนี้ (มีผลตั้งแต่วันนี้ค่ะ)</textarea>
-      <label style="margin-top:6px">ข้อความปิด</label>
-      <textarea id="bq-foot" rows="2" style="width:100%" oninput="bqCount()">ขออภัยมา ณ ที่นี้ค่ะ 🙏🏻 หากต้นทุนสินค้าลดลง ทางร้านจะปรับราคาลงให้ทันทีค่ะ 🥹</textarea>
+        <label style="margin-top:6px;color:#b52020">ข้อความปิด</label>
+        <textarea id="bq-foot-up" rows="2" style="width:100%" oninput="bqCount()">ขออภัยมา ณ ที่นี้ค่ะ 🙏🏻 หากต้นทุนสินค้าลดลง ทางร้านจะปรับราคาลงให้ทันทีค่ะ 🥹</textarea>
+      </div>
+      <div id="bq-tpl-down" style="margin-top:6px;padding:8px 10px;border:1px solid #cfe9dd;border-radius:10px;background:#f4fbf7">
+        <label style="color:#0f6e56">📉 ร้านที่ราคาลง — ข้อความเปิด</label>
+        <textarea id="bq-head-down" rows="2" style="width:100%" oninput="bqCount()">🎉 ข่าวดี! ปรับราคาลงค่ะ
+ต้นทุนสินค้าลดลง ทางร้านขอปรับราคาลงให้ทันทีดังนี้ (มีผลตั้งแต่วันนี้ค่ะ)</textarea>
+        <label style="margin-top:6px;color:#0f6e56">ข้อความปิด</label>
+        <textarea id="bq-foot-down" rows="2" style="width:100%" oninput="bqCount()">ขอบคุณที่อุดหนุนกันเสมอนะคะ 🙏🏻💕 สั่งได้เลยค่ะ</textarea>
+      </div>
+      <div id="bq-tpl-mix" style="margin-top:6px;padding:8px 10px;border:1px solid #e6dcc4;border-radius:10px;background:#fffbf2">
+        <label style="color:#8a6d1f">↕️ ร้านที่มีทั้งขึ้นและลง — ข้อความเปิด</label>
+        <textarea id="bq-head-mix" rows="2" style="width:100%" oninput="bqCount()">📢 แจ้งปรับราคาสินค้า
+ทางร้านขอปรับราคาสินค้าบางรายการตามต้นทุนที่เปลี่ยนไป ดังนี้ (มีผลตั้งแต่วันนี้ค่ะ)</textarea>
+        <label style="margin-top:6px;color:#8a6d1f">ข้อความปิด</label>
+        <textarea id="bq-foot-mix" rows="2" style="width:100%" oninput="bqCount()">รายการที่ขึ้นราคาขออภัยมา ณ ที่นี้ค่ะ 🙏🏻 หากต้นทุนลดลงจะปรับลงให้ทันที และขอบคุณที่อุดหนุนกันเสมอนะคะ 💕</textarea>
+      </div>
     </div>
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <button class="btn-s" id="bq-preview-btn" onclick="bqPreview(this)">🔍 ดูตารางเดิม → ใหม่ ทุกร้าน</button>
@@ -4163,6 +4180,7 @@ function openBulkPrice(){
   if(bqBusy){toast('กำลังทำงานอยู่ รอสักครู่');return;}
   bqItems=[];bqRows=[];bqTierRows=[];bqShops=[];bqApplied=false;bqPreviewed=false;
   bqSyncLock();
+  ['bq-tiers','bq-cp','bq-line'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=true;});   // เริ่มรอบใหม่ด้วยค่าปลอดภัย: ปรับทั้งสองแบบ + ส่งไลน์
   document.getElementById('bq-prodlist').innerHTML=products.filter(p=>p.active!==false)
     .map(p=>'<option value="'+esc(p.sku)+' · '+esc(p.name)+'"></option>').join('');
   document.getElementById('bq-prod').value='';document.getElementById('bq-amt').value='';
@@ -4198,6 +4216,7 @@ function bqAddItem(){
 }
 function bqRemoveItem(i){ if(bqLocked())return; bqItems.splice(i,1); bqRenderItems(); bqPreviewDirty(); }
 function bqRenderItems(){
+  bqSyncTpl();
   const el=document.getElementById('bq-items');
   if(!bqItems.length){el.innerHTML='<div class="empty" style="padding:8px">ยังไม่ได้เลือกสินค้า — เลือกสินค้า ใส่จำนวนที่จะปรับ แล้วกด "+ เพิ่มสินค้า" (ใส่ได้หลายตัวในรอบเดียว ลูกค้าจะได้ไลน์ฉบับเดียวรวมทุกตัว)</div>';return;}
   const lock=bqLocked();
@@ -4329,10 +4348,26 @@ function bqBuildShops(rows){
   rows.forEach(r=>{(m[r.c.id]=m[r.c.id]||{c:r.c,rows:[],sent:null}).rows.push(r);});
   return Object.values(m).sort((a,b)=>String(a.c.code||'').localeCompare(String(b.c.code||''),'th'));
 }
+/** ทิศทางราคาของร้านนั้น: up = ขึ้นทุกตัว · down = ลงทุกตัว · mix = มีทั้งขึ้นและลง → เลือกชุดข้อความให้เหมาะ */
+function bqShopMode(s){
+  const up=s.rows.some(r=>r.newP>r.oldP), down=s.rows.some(r=>r.newP<r.oldP);
+  return up&&down?'mix':down?'down':'up';
+}
+const BQ_MODE_LBL={up:'ราคาขึ้น',down:'ราคาลง',mix:'มีทั้งขึ้นและลง'};
 function bqMsgFor(s){
-  const head=document.getElementById('bq-head').value.trim(), foot=document.getElementById('bq-foot').value.trim();
-  const lines=s.rows.map(r=>'• '+r.p.name+' : จาก '+bqNum(r.oldP)+' บาท เป็น '+bqNum(r.newP)+' บาท');
+  const mode=bqShopMode(s);
+  const g=id=>((document.getElementById(id)||{}).value||'').trim();
+  const head=g('bq-head-'+mode), foot=g('bq-foot-'+mode);
+  const lines=s.rows.map(r=>'• '+r.p.name+(r.newP<r.oldP
+    ?' : ลดจาก '+bqNum(r.oldP)+' บาท เหลือ '+bqNum(r.newP)+' บาท'
+    :' : จาก '+bqNum(r.oldP)+' บาท เป็น '+bqNum(r.newP)+' บาท'));
   return shopTag(s.c)+(head?head+'\n':'')+lines.join('\n')+(foot?'\n'+foot:'');
+}
+/** โชว์เฉพาะชุดข้อความที่จะได้ใช้ในรอบนี้ (ดูจากทิศทางของสินค้าที่เลือกไว้) */
+function bqSyncTpl(){
+  const up=bqItems.some(it=>it.amt>0), down=bqItems.some(it=>it.amt<0);
+  const show={up:up||!bqItems.length,down,mix:up&&down};
+  ['up','down','mix'].forEach(m=>{const el=document.getElementById('bq-tpl-'+m);if(el)el.style.display=show[m]?'':'none';});
 }
 function bqCount(){
   const sel=bqRows.filter(r=>r.sel&&r.changed);
@@ -4345,8 +4380,17 @@ function bqCount(){
   const resume=bqTierRows.some(t=>t.applied)||bqRows.some(r=>r.applied);   // ค้างกลางทาง → ปุ่มต้องบอกว่า "ทำต่อ"
   if(ap&&!bqApplied)ap.textContent=(resume?'✅ ทำต่อส่วนที่เหลือ (':'✅ ยืนยันปรับราคา (')+shops.length+' ร้าน'+(lineOn?' · ส่งไลน์ '+nLine:'')+')';
   const smp=document.getElementById('bq-sample');
-  const first=shops.find(s=>s.c.line_group_id)||shops[0];
-  if(smp){ if(lineOn&&first&&bqPreviewed){smp.style.display='block';smp.textContent='ตัวอย่างข้อความที่ร้าน '+(first.c.name||'')+' จะได้รับ:\n\n'+bqMsgFor(first);} else smp.style.display='none'; }
+  if(smp){
+    if(lineOn&&shops.length&&bqPreviewed){
+      // ตัวอย่าง 1 ร้านต่อแบบข้อความที่จะได้ใช้จริง (ขึ้น / ลง / ผสม)
+      const modes=[...new Set(shops.map(bqShopMode))];
+      smp.style.display='block';
+      smp.textContent=modes.map(m=>{
+        const s=shops.find(x=>bqShopMode(x)===m&&x.c.line_group_id)||shops.find(x=>bqShopMode(x)===m);
+        return 'ตัวอย่างข้อความที่ร้าน '+(s.c.name||'')+' จะได้รับ ('+BQ_MODE_LBL[m]+'):\n\n'+bqMsgFor(s);
+      }).join('\n\n──────────────\n\n');
+    } else smp.style.display='none';
+  }
 }
 async function bqApply(btn){
   if(bqBusy)return;
