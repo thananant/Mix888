@@ -4658,32 +4658,58 @@ function bqhRender(){
   const fD=s=>new Date(s).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'});
   const stLbl=b=>b.status==='reverted'?'<span class="tag">↩ ยกเลิกแล้ว'+(b.reverted_at?' '+fD(b.reverted_at):'')+(b.reverted_by?' โดย '+esc(b.reverted_by):'')+'</span>'
     :b.status==='partial'?'<span class="tag tag-low">⚠️ ค้างบางส่วน</span>':b.status==='applying'?'<span class="tag tag-low">กำลังทำ…</span>':'<span class="tag tag-ok">✅ ปรับแล้ว</span>';
-  el.innerHTML='<table><thead><tr><th>เมื่อ</th><th>โดย</th><th>สินค้า / ปรับ</th><th class="num">ร้าน</th><th class="num">ไลน์</th><th>สถานะ</th><th></th></tr></thead><tbody>'
-    +bqhRows.map(b=>{
-      const items=(b.items||[]).map(it=>esc(it.name)+' '+(it.amt==null?'<span style="color:var(--muted)">(แก้รายตัว)</span>':'<b style="color:'+(it.amt>0?'#b52020':'#0f6e56')+'">'+(it.amt>0?'+':'')+fmt(it.amt)+'</b>')).join('<br>');
-      const canRevert=(b.status==='applied'||b.status==='partial');
-      const open=!!bqhOpen[b.id];
-      const idLbl=b.log?'📜 จากประวัติแก้ราคา'+(b.src?' · '+esc(b.src):''):'#'+b.id;
-      const revBtn=b.log?'<button class="btn-d mini" onclick="bqRevertLog(\''+b.id+'\')">↩ ยกเลิกรอบนี้</button>':'<button class="btn-d mini" onclick="bqRevert('+b.id+')">↩ ยกเลิกรอบนี้</button>';
-      let det='';
-      if(open){
-        const rows=(b.rows||[]).filter(r=>r.applied);
-        const tiers=b.tiers||[];
-        det='<tr><td colspan="7" style="background:#fafafa;padding:8px 12px">'
-          +(tiers.length?'<div style="margin-bottom:6px"><b>ราคากลาง/เรทกลุ่ม:</b> '+tiers.map(t=>esc(t.name)+': '+Object.entries(t.changes||{}).map(([k,[o,n]])=>BQ_TIER_LBL[k]+' ฿'+fmt(o)+' → ฿'+fmt(n)).join(' · ')+(t.applied?'':' <span class="tag tag-low">ยังไม่ได้ปรับ</span>')).join('<br>')+'</div>':'')
-          +(rows.length?'<div style="overflow-x:auto;max-height:280px;overflow-y:auto"><table><thead><tr><th>ร้าน</th><th>สินค้า</th><th>แบบ</th><th class="num">เดิม</th><th class="num">ใหม่</th></tr></thead><tbody>'
-            +rows.map(r=>'<tr><td><b>'+esc(r.code)+'</b> '+esc(r.name)+(r.line?'':' <span class="tag">ไม่มีไลน์</span>')+'</td><td>'+esc(r.pname)+'</td><td style="font-size:12.5px">'+(BQ_KIND_LBL[r.kind]||esc(r.kind))+'</td>'
-              +'<td class="num">'+(r.old==null?'<span style="color:var(--muted)">ราคากลุ่ม</span>':'฿'+fmt(r.old))+'</td><td class="num"><b>฿'+fmt(r.new)+'</b></td></tr>').join('')+'</tbody></table></div>':'<div class="empty">ไม่มีรายการร้านที่ปรับสำเร็จ</div>')
-          +(b.revert_note&&b.revert_note.skipped&&b.revert_note.skipped.length?'<div style="margin-top:6px;font-size:12.5px;color:#b06000">ตอนยกเลิก ข้าม '+b.revert_note.skipped.length+' รายการที่ถูกแก้ทีหลัง: '
-            +b.revert_note.skipped.slice(0,8).map(s=>esc(s.code||'')+' '+esc(s.pname||'')+' (ตอนนั้น ฿'+fmt(s.now==null?0:s.now)+')').join(', ')+(b.revert_note.skipped.length>8?' …':'')+'</div>':'')
-          +'</td></tr>';
-      }
-      return '<tr><td style="white-space:nowrap;font-size:13px">'+fD(b.created_at)+'<div style="color:var(--muted);font-size:11.5px">'+idLbl+'</div></td><td>'+esc(b.created_by||'-')+'</td><td>'+items+'</td>'
-        +'<td class="num">'+(b.shops||0)+'</td><td class="num">'+(b.log?'—':(b.line_ok||0)+(b.line_fail?' <span style="color:#b52020">(✗'+b.line_fail+')</span>':''))+'</td><td>'+stLbl(b)+'</td>'
-        +'<td style="white-space:nowrap"><button class="btn-g mini" onclick="bqhToggle(\''+b.id+'\')">'+(open?'ซ่อน':'รายละเอียด')+'</button> '
-        +(canRevert?revBtn:'')+'</td></tr>'+det;
+  const fT=s=>new Date(s).toLocaleString('th-TH',{hour:'2-digit',minute:'2-digit'});
+  const amtHtml=a=>a==null?'<span style="color:var(--muted)">(แก้รายตัว)</span>':'<b style="color:'+(a>0?'#b52020':'#0f6e56')+'">'+(a>0?'+':'')+fmt(a)+'</b>';
+  // 1 บรรทัดต่อ 1 วัน — กด "รายละเอียด" ถึงเห็นรอบในวันนั้น และกดต่ออีกชั้นถึงเห็นรายร้าน
+  const dayKey=s=>{const t=new Date(new Date(s).getTime()+7*3600000);return t.getUTCFullYear()+'-'+String(t.getUTCMonth()+1).padStart(2,'0')+'-'+String(t.getUTCDate()).padStart(2,'0');};
+  const days={};bqhRows.forEach(b=>{const k=dayKey(b.created_at);(days[k]=days[k]||[]).push(b);});
+  const keys=Object.keys(days).sort((a,b)=>b.localeCompare(a));
+  const roundRow=b=>{
+    const its=b.items||[];
+    const amts=[...new Set(its.map(i=>i.amt))];
+    const itemsLine=its.length?(its.length+' สินค้า'+(amts.length===1&&amts[0]!=null?' ('+(amts[0]>0?'+':'')+fmt(amts[0])+')':'')+' — '+esc(its[0].name)+(its.length>1?' …':'')):'—';
+    const canRevert=(b.status==='applied'||b.status==='partial');
+    const open=!!bqhOpen[b.id];
+    const idLbl=b.log?'📜 จากประวัติแก้ราคา'+(b.src?' · '+esc(b.src):''):'#'+b.id;
+    const revBtn=b.log?'<button class="btn-d mini" onclick="bqRevertLog(\''+b.id+'\')">↩ ยกเลิกรอบนี้</button>':'<button class="btn-d mini" onclick="bqRevert('+b.id+')">↩ ยกเลิกรอบนี้</button>';
+    let det='';
+    if(open){
+      const rows=(b.rows||[]).filter(r=>r.applied);
+      const tiers=b.tiers||[];
+      det='<tr><td colspan="7" style="background:#f4f4f4;padding:8px 12px">'
+        +'<div style="margin-bottom:6px"><b>สินค้าที่ปรับ:</b> '+its.map(it=>esc(it.name)+' '+amtHtml(it.amt)).join(' · ')+'</div>'
+        +(tiers.length?'<div style="margin-bottom:6px"><b>ราคากลาง/เรทกลุ่ม:</b> '+tiers.map(t=>esc(t.name)+': '+Object.entries(t.changes||{}).map(([k,[o,n]])=>BQ_TIER_LBL[k]+' ฿'+fmt(o)+' → ฿'+fmt(n)).join(' · ')+(t.applied?'':' <span class="tag tag-low">ยังไม่ได้ปรับ</span>')).join('<br>')+'</div>':'')
+        +(rows.length?'<div style="overflow-x:auto;max-height:280px;overflow-y:auto"><table><thead><tr><th>ร้าน</th><th>สินค้า</th><th>แบบ</th><th class="num">เดิม</th><th class="num">ใหม่</th></tr></thead><tbody>'
+          +rows.map(r=>'<tr><td><b>'+esc(r.code)+'</b> '+esc(r.name)+(r.line?'':' <span class="tag">ไม่มีไลน์</span>')+'</td><td>'+esc(r.pname)+'</td><td style="font-size:12.5px">'+(BQ_KIND_LBL[r.kind]||esc(r.kind))+'</td>'
+            +'<td class="num">'+(r.old==null?'<span style="color:var(--muted)">ราคากลุ่ม</span>':'฿'+fmt(r.old))+'</td><td class="num"><b>฿'+fmt(r.new)+'</b></td></tr>').join('')+'</tbody></table></div>':'<div class="empty">ไม่มีรายการร้านที่ปรับสำเร็จ</div>')
+        +(b.revert_note&&b.revert_note.skipped&&b.revert_note.skipped.length?'<div style="margin-top:6px;font-size:12.5px;color:#b06000">ตอนยกเลิก ข้าม '+b.revert_note.skipped.length+' รายการที่ถูกแก้ทีหลัง: '
+          +b.revert_note.skipped.slice(0,8).map(s=>esc(s.code||'')+' '+esc(s.pname||'')+' (ตอนนั้น ฿'+fmt(s.now==null?0:s.now)+')').join(', ')+(b.revert_note.skipped.length>8?' …':'')+'</div>':'')
+        +'</td></tr>';
+    }
+    return '<tr><td style="white-space:nowrap;font-size:13px">'+fT(b.created_at)+'<div style="color:var(--muted);font-size:11.5px">'+idLbl+'</div></td><td>'+esc(b.created_by||'-')+'</td><td>'+itemsLine+'</td>'
+      +'<td class="num">'+(b.shops||0)+'</td><td class="num">'+(b.log?'—':(b.line_ok||0)+(b.line_fail?' <span style="color:#b52020">(✗'+b.line_fail+')</span>':''))+'</td><td>'+stLbl(b)+'</td>'
+      +'<td style="white-space:nowrap"><button class="btn-g mini" onclick="bqhToggle(\''+b.id+'\')">'+(open?'ซ่อน':'รายละเอียด')+'</button> '
+      +(canRevert?revBtn:'')+'</td></tr>'+det;
+  };
+  el.innerHTML='<table><thead><tr><th>วัน</th><th>โดย</th><th>สรุป</th><th>สถานะ</th><th></th></tr></thead><tbody>'
+    +keys.map(k=>{
+      const list=days[k].slice().sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+      const who=[...new Set(list.map(b=>b.created_by||'-'))].join(', ');
+      const nItems=new Set(list.flatMap(b=>(b.items||[]).map(i=>i.product_id))).size;
+      const nShops=new Set(list.flatMap(b=>(b.rows||[]).filter(r=>r.applied).map(r=>r.customer_id))).size;
+      const nOk=list.filter(b=>b.status==='applied').length, nRev=list.filter(b=>b.status==='reverted').length, nPart=list.filter(b=>b.status==='partial'||b.status==='applying').length;
+      const open=!!bqhDayOpen[k];
+      const dLbl=new Date(list[0].created_at).toLocaleDateString('th-TH',{weekday:'short',day:'numeric',month:'short',year:'2-digit'});
+      const sub=open?'<tr><td colspan="5" style="background:#fafafa;padding:6px 10px"><div style="overflow-x:auto"><table><thead><tr><th>เวลา</th><th>โดย</th><th>สินค้า</th><th class="num">ร้าน</th><th class="num">ไลน์</th><th>สถานะ</th><th></th></tr></thead><tbody>'
+        +list.map(roundRow).join('')+'</tbody></table></div></td></tr>':'';
+      return '<tr><td style="white-space:nowrap;font-size:13px"><b>'+dLbl+'</b></td><td>'+esc(who)+'</td>'
+        +'<td>'+list.length+' รอบ · สินค้า '+nItems+' รายการ · ร้าน '+nShops+'</td>'
+        +'<td style="white-space:nowrap">'+(nOk?'<span class="tag tag-ok">✅ ปรับแล้ว '+nOk+'</span> ':'')+(nRev?'<span class="tag">↩ ยกเลิกแล้ว '+nRev+'</span> ':'')+(nPart?'<span class="tag tag-low">⚠️ ค้าง '+nPart+'</span>':'')+'</td>'
+        +'<td><button class="btn-g mini" data-day="'+k+'" onclick="bqhToggleDay(\''+k+'\')">'+(open?'ซ่อน':'รายละเอียด ('+list.length+')')+'</button></td></tr>'+sub;
     }).join('')+'</tbody></table>';
 }
+let bqhDayOpen={};
+function bqhToggleDay(k){bqhDayOpen[k]=!bqhDayOpen[k];bqhRender();}
 function bqhToggle(id){bqhOpen[id]=!bqhOpen[id];bqhRender();}
 /** ยกเลิกรอบ: ดูก่อนว่าคืนอะไรได้ → ยืนยัน → คืนจริงทีเดียว → (เลือกได้) ส่งไลน์แจ้งร้าน */
 async function bqRevert(id){
