@@ -143,7 +143,7 @@ async function fetchBills(sinceISO){
 
 /* ============ สำรองข้อมูลทั้งระบบลง NAS (วันละครั้ง) ============
    ดึงทุกตาราง (ลูกค้า ราคา ออเดอร์ บิล สต๊อก ฯลฯ) มาเก็บเป็นไฟล์ใน
-   <NAS_ROOT>/สำรองข้อมูล/YYYY-MM-DD/  · เก็บรายวันย้อนหลัง 14 วัน
+   <NAS_ROOT>/สำรองข้อมูล/YYYY-MM-DD/  · เก็บรายวันย้อนหลัง 90 วัน (วันที่ 1 ของเดือนเก็บตลอด)
    ส่วนของวันที่ 1 ของทุกเดือนเก็บไว้ตลอดไป */
 const BACKUP_TABLES = ['customers','products','customer_prices','orders','order_items','bills',
   'sales','warehouses','stock','stock_lots','stock_movements','stock_receives','stock_receive_items',
@@ -202,9 +202,10 @@ async function dailyBackup(ROOT){
     + 'ใช้เวลา ' + Math.round((Date.now() - t0) / 1000) + ' วินาที\r\n\r\n' + lines.join('\r\n') + '\r\n');
   if(!failCount) fs.writeFileSync(marker, 'สำรองครบ ' + okCount + ' ตาราง');   // พลาดบางตาราง = ไม่ปักธง รอบชั่วโมงถัดไปลองใหม่เอง
   log('🗄️ สำรองข้อมูลเสร็จ ' + okCount + ' ตาราง' + (failCount ? ' · พลาด ' + failCount + ' (จะลองใหม่รอบถัดไป)' : ''));
-  // เก็บกวาด: รายวันเก็บ 14 วัน · โฟลเดอร์ของวันที่ 1 เก็บตลอดไป
+  // เก็บกวาด: รายวันเก็บ 90 วัน · โฟลเดอร์ของวันที่ 1 เก็บตลอดไป
+  // (เดิม 14 วัน — น้อยไป: ตอนต้องกู้ราคาที่หายเมื่อ 18–21 ส.ค. สำรองก่อนวันนั้นถูกลบไปแล้ว · วันละ ~10 MB → 90 วัน ≈ 1 GB)
   try{
-    const keepMs = 14 * 24 * 3600 * 1000;
+    const keepMs = 90 * 24 * 3600 * 1000;
     for(const name of fs.readdirSync(baseDir)){
       const m = name.match(/^(\d{4})-(\d{2})-(\d{2})$/);
       if(!m || m[3] === '01') continue;
