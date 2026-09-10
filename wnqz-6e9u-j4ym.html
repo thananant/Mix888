@@ -4588,7 +4588,68 @@ async function bqhLoad(){
   el.innerHTML='<div class="empty">กำลังโหลด…</div>';
   const {data,error}=await db.from('price_adjust_batches').select('*').order('created_at',{ascending:false}).limit(60);
   if(error){el.innerHTML='<div class="empty">โหลดประวัติไม่ได้: '+esc(error.message)+'<br>ต้องรันไฟล์ mix888-price-adjust-log.sql ใน Supabase ก่อน</div>';return;}
-  bqhRows=data||[]; bqhRender();
+  bqhRows=data||[];
+  // รอบที่ทำไว้ "ก่อน" มีตารางประวัติ → สร้างย้อนหลังจากประวัติแก้ราคา (price_log) ที่ trigger เก็บไว้ทุกครั้ง
+  try{
+    const since=new Date(Date.now()-90*86400000).toISOString();
+    const logs=await fetchAllPages(()=>db.from('price_log').select('id,customer_id,product_id,field,old_price,new_price,action,source,changed_by,changed_at').gte('changed_at',since).order('id',{ascending:true}));
+    bqhRows=bqhRows.concat(bqhLogGroups(logs||[],bqhRows));
+  }catch(e){console.warn('price_log',e);}
+  bqhRows.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  bqhRender();
+}
+const BQ_FIELD_COL={'ราคาตั้งต้น':'base_price','ราคา ร20':'price_r20','ราคา ร50':'price_r50','ราคา UPC':'price_upc'};
+/** จับกลุ่มประวัติแก้ราคาเป็น "รอบ": คนเดียวกัน แก้ต่อเนื่องห่างกันไม่เกิน 3 นาที · ข้ามรอบที่มีในตารางประวัติอยู่แล้ว และข้ามการยกเลิก/กู้ราคาของระบบ */
+function bqhLogGroups(logs,batches){
+  const skipSrc=s=>/^(ยกเลิกการปรับราคา|กู้ราคา)/.test(String(s||''));
+  const rows=logs.filter(l=>l.action==='change'&&!skipSrc(l.source)&&l.new_price!=null);
+  const groups=[];let cur=null;
+  for(const l of rows){
+    const t=new Date(l.changed_at).getTime();
+    if(!cur||cur.by!==(l.changed_by||'-')||t-cur.lastT>3*60000){cur={by:l.changed_by||'-',firstT:t,lastT:t,list:[]};groups.push(cur);}
+    cur.lastT=t;cur.list.push(l);
+  }
+  const cById={};customers.forEach(c=>cById[c.id]=c);
+  const pById={};products.forEach(p=>pById[p.id]=p);
+  const out=[];
+  for(const g of groups){
+    // ถ้ามีรอบจริงในตารางประวัติช่วงเวลาเดียวกัน (±3 นาที) ไม่ต้องสร้างซ้ำ
+    if(batches.some(b=>Math.abs(new Date(b.created_at).getTime()-g.firstT)<3*60000||(new Date(b.created_at).getTime()>=g.firstT-60000&&new Date(b.created_at).getTime()<=g.lastT+60000)))continue;
+    const rws=[],tiersMap={},items={};
+    for(const l of g.list){
+      const p=pById[l.product_id]||{name:'#'+l.product_id};
+      if(l.customer_id==null){
+        const col=BQ_FIELD_COL[l.field];if(!col)continue;
+        (tiersMap[l.product_id]=tiersMap[l.product_id]||{product_id:l.product_id,name:p.name,changes:{},applied:true}).changes[col]=[l.old_price==null?null:Number(l.old_price),Number(l.new_price)];
+        if(col==='base_price'&&l.old_price!=null)(items[l.product_id]=items[l.product_id]||{product_id:l.product_id,sku:p.sku||'',name:p.name,amts:new Set()}).amts.add(bqR2(Number(l.new_price)-Number(l.old_price)));
+      }else{
+        const c=cById[l.customer_id]||{code:'#'+l.customer_id,name:'',line_group_id:null};
+        const wasGroup=l.old_price==null;
+        rws.push({customer_id:l.customer_id,code:c.code||'',name:(c.name||'')+(c.branch_name?' • '+c.branch_name:''),product_id:l.product_id,pname:p.name,
+          kind:wasGroup?'grp2cp':'cp',old:wasGroup?null:Number(l.old_price),new:Number(l.new_price),applied:true,line:!!c.line_group_id});
+        if(!wasGroup)(items[l.product_id]=items[l.product_id]||{product_id:l.product_id,sku:p.sku||'',name:p.name,amts:new Set()}).amts.add(bqR2(Number(l.new_price)-Number(l.old_price)));
+      }
+    }
+    if(!rws.length&&!Object.keys(tiersMap).length)continue;
+    const itemList=Object.values(items).map(it=>({product_id:it.product_id,sku:it.sku,name:it.name,amt:it.amts.size===1?[...it.amts][0]:null}));
+    // สินค้าที่มีแต่ราคากลุ่มเปลี่ยน (ไม่มี base) ก็ให้ขึ้นชื่อด้วย
+    Object.values(tiersMap).forEach(t=>{if(!itemList.some(i=>i.product_id===t.product_id))itemList.push({product_id:t.product_id,sku:'',name:t.name,amt:null});});
+    rws.forEach(r=>{if(!itemList.some(i=>i.product_id===r.product_id))itemList.push({product_id:r.product_id,sku:'',name:r.pname,amt:null});});
+    out.push({id:'L'+g.list[0].id,log:true,created_at:new Date(g.firstT).toISOString(),created_by:g.by,status:'applied',
+      items:itemList,options:{tiers:!!Object.keys(tiersMap).length,cp:true,line:true},tiers:Object.values(tiersMap),rows:rws,
+      shops:new Set(rws.map(r=>r.customer_id)).size,line_ok:null,line_fail:0,src:[...new Set(g.list.map(l=>l.source).filter(Boolean))].join(', ')});
+  }
+  return out;
+}
+/** ยกเลิกรอบที่สร้างจากประวัติแก้ราคา: บันทึกเป็นรอบจริงก่อน แล้วใช้ขั้นตอนยกเลิกปกติ (ดูก่อน → ยืนยัน → คืนทีเดียว) */
+async function bqRevertLog(lid){
+  if(bqhBusy)return;
+  const g=bqhRows.find(x=>x.id===lid);if(!g)return;
+  const {data,error}=await db.from('price_adjust_batches').insert({created_by:g.created_by,status:'applied',items:g.items,options:g.options,tiers:g.tiers,rows:g.rows,shops:g.shops,
+    created_at:g.created_at}).select('id').single();
+  if(error||!data){toast('บันทึกรอบจากประวัติไม่ได้: '+(error?.message||'')+' (รัน mix888-price-adjust-log.sql หรือยัง?)');return;}
+  await bqhLoad();
+  await bqRevert(data.id);
 }
 const BQ_KIND_LBL={cp:'ราคาเฉพาะร้าน',grp:'ตามราคากลุ่ม',grp2cp:'ราคากลุ่ม → เฉพาะร้าน'};
 function bqhRender(){
@@ -4599,9 +4660,11 @@ function bqhRender(){
     :b.status==='partial'?'<span class="tag tag-low">⚠️ ค้างบางส่วน</span>':b.status==='applying'?'<span class="tag tag-low">กำลังทำ…</span>':'<span class="tag tag-ok">✅ ปรับแล้ว</span>';
   el.innerHTML='<table><thead><tr><th>เมื่อ</th><th>โดย</th><th>สินค้า / ปรับ</th><th class="num">ร้าน</th><th class="num">ไลน์</th><th>สถานะ</th><th></th></tr></thead><tbody>'
     +bqhRows.map(b=>{
-      const items=(b.items||[]).map(it=>esc(it.name)+' <b style="color:'+(it.amt>0?'#b52020':'#0f6e56')+'">'+(it.amt>0?'+':'')+fmt(it.amt)+'</b>').join('<br>');
+      const items=(b.items||[]).map(it=>esc(it.name)+' '+(it.amt==null?'<span style="color:var(--muted)">(แก้รายตัว)</span>':'<b style="color:'+(it.amt>0?'#b52020':'#0f6e56')+'">'+(it.amt>0?'+':'')+fmt(it.amt)+'</b>')).join('<br>');
       const canRevert=(b.status==='applied'||b.status==='partial');
       const open=!!bqhOpen[b.id];
+      const idLbl=b.log?'📜 จากประวัติแก้ราคา'+(b.src?' · '+esc(b.src):''):'#'+b.id;
+      const revBtn=b.log?'<button class="btn-d mini" onclick="bqRevertLog(\''+b.id+'\')">↩ ยกเลิกรอบนี้</button>':'<button class="btn-d mini" onclick="bqRevert('+b.id+')">↩ ยกเลิกรอบนี้</button>';
       let det='';
       if(open){
         const rows=(b.rows||[]).filter(r=>r.applied);
@@ -4610,15 +4673,15 @@ function bqhRender(){
           +(tiers.length?'<div style="margin-bottom:6px"><b>ราคากลาง/เรทกลุ่ม:</b> '+tiers.map(t=>esc(t.name)+': '+Object.entries(t.changes||{}).map(([k,[o,n]])=>BQ_TIER_LBL[k]+' ฿'+fmt(o)+' → ฿'+fmt(n)).join(' · ')+(t.applied?'':' <span class="tag tag-low">ยังไม่ได้ปรับ</span>')).join('<br>')+'</div>':'')
           +(rows.length?'<div style="overflow-x:auto;max-height:280px;overflow-y:auto"><table><thead><tr><th>ร้าน</th><th>สินค้า</th><th>แบบ</th><th class="num">เดิม</th><th class="num">ใหม่</th></tr></thead><tbody>'
             +rows.map(r=>'<tr><td><b>'+esc(r.code)+'</b> '+esc(r.name)+(r.line?'':' <span class="tag">ไม่มีไลน์</span>')+'</td><td>'+esc(r.pname)+'</td><td style="font-size:12.5px">'+(BQ_KIND_LBL[r.kind]||esc(r.kind))+'</td>'
-              +'<td class="num">฿'+fmt(r.old)+'</td><td class="num"><b>฿'+fmt(r.new)+'</b></td></tr>').join('')+'</tbody></table></div>':'<div class="empty">ไม่มีรายการร้านที่ปรับสำเร็จ</div>')
+              +'<td class="num">'+(r.old==null?'<span style="color:var(--muted)">ราคากลุ่ม</span>':'฿'+fmt(r.old))+'</td><td class="num"><b>฿'+fmt(r.new)+'</b></td></tr>').join('')+'</tbody></table></div>':'<div class="empty">ไม่มีรายการร้านที่ปรับสำเร็จ</div>')
           +(b.revert_note&&b.revert_note.skipped&&b.revert_note.skipped.length?'<div style="margin-top:6px;font-size:12.5px;color:#b06000">ตอนยกเลิก ข้าม '+b.revert_note.skipped.length+' รายการที่ถูกแก้ทีหลัง: '
             +b.revert_note.skipped.slice(0,8).map(s=>esc(s.code||'')+' '+esc(s.pname||'')+' (ตอนนั้น ฿'+fmt(s.now==null?0:s.now)+')').join(', ')+(b.revert_note.skipped.length>8?' …':'')+'</div>':'')
           +'</td></tr>';
       }
-      return '<tr><td style="white-space:nowrap;font-size:13px">'+fD(b.created_at)+'<div style="color:var(--muted);font-size:11.5px">#'+b.id+'</div></td><td>'+esc(b.created_by||'-')+'</td><td>'+items+'</td>'
-        +'<td class="num">'+(b.shops||0)+'</td><td class="num">'+(b.line_ok||0)+(b.line_fail?' <span style="color:#b52020">(✗'+b.line_fail+')</span>':'')+'</td><td>'+stLbl(b)+'</td>'
-        +'<td style="white-space:nowrap"><button class="btn-g mini" onclick="bqhToggle('+b.id+')">'+(open?'ซ่อน':'รายละเอียด')+'</button> '
-        +(canRevert?'<button class="btn-d mini" onclick="bqRevert('+b.id+')">↩ ยกเลิกรอบนี้</button>':'')+'</td></tr>'+det;
+      return '<tr><td style="white-space:nowrap;font-size:13px">'+fD(b.created_at)+'<div style="color:var(--muted);font-size:11.5px">'+idLbl+'</div></td><td>'+esc(b.created_by||'-')+'</td><td>'+items+'</td>'
+        +'<td class="num">'+(b.shops||0)+'</td><td class="num">'+(b.log?'—':(b.line_ok||0)+(b.line_fail?' <span style="color:#b52020">(✗'+b.line_fail+')</span>':''))+'</td><td>'+stLbl(b)+'</td>'
+        +'<td style="white-space:nowrap"><button class="btn-g mini" onclick="bqhToggle(\''+b.id+'\')">'+(open?'ซ่อน':'รายละเอียด')+'</button> '
+        +(canRevert?revBtn:'')+'</td></tr>'+det;
     }).join('')+'</tbody></table>';
 }
 function bqhToggle(id){bqhOpen[id]=!bqhOpen[id];bqhRender();}
@@ -4660,7 +4723,7 @@ async function bqRevert(id){
         const c=customers.find(x=>x.id===Number(ids[i]));
         if(!c||!c.line_group_id){fail++;continue;}
         st.textContent='กำลังส่งไลน์… '+(i+1)+'/'+ids.length;
-        const lines=shops[ids[i]].map(r=>'• '+r.pname+' : กลับเป็น '+bqNum(r.old)+' บาท');
+        const lines=shops[ids[i]].map(r=>'• '+r.pname+(r.old==null?' : กลับเป็นราคาเดิม':' : กลับเป็น '+bqNum(r.old)+' บาท'));
         const txt=shopTag(c)+'↩️ แจ้งยกเลิกการปรับราคา\nราคาสินค้าต่อไปนี้กลับเป็นราคาเดิมแล้วค่ะ\n'+lines.join('\n')+'\nขออภัยในความไม่สะดวกค่ะ 🙏🏻';
         const r=await notifyCustomer(c.line_group_id,txt); if(r.ok)ok++;else fail++;
         await new Promise(x=>setTimeout(x,250));
