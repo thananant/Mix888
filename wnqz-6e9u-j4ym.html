@@ -4733,7 +4733,7 @@ async function bqRevert(id){
     st.textContent='';
     await bqhLoad();
   }catch(e){st.textContent='⚠️ '+(e.message||e);toast(String(e.message||e));}
-  bqhBusy=false;
+  finally{bqhBusy=false;}   // กด Cancel / ไม่มีอะไรให้คืน ก็ต้องปลดสถานะ "กำลังทำงาน" ไม่งั้นปุ่มปิดจะกดไม่ได้
 }
 function skuSuffix(sku){
   const m=String(sku||'').match(/^[A-Z]+\d+([A-Z]*)$/);
