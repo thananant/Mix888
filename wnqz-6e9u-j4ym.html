@@ -2795,7 +2795,7 @@ async function showStockDetail(pid){
 }
 const MOVE_LABEL={reserve:['🛒 จอง (ออเดอร์)','#a04a00'],unreserve:['↩️ คืนยอดจอง','#4a7a00'],
   ship:['🚚 ตัดส่ง (บิล)','#b52020'],receive:['📥 รับเข้า','#159b78'],
-  adjust:['⚖️ ปรับสต๊อก','#7a5a00'],convert_out:['🔄 แปลงออก','#a04a00'],convert_in:['🔄 แปลงเข้า','#159b78'],
+  adjust:['⚖️ ปรับสต๊อก','#7a5a00'],convert_out:['🔄 แปลงออก','#a04a00'],convert_in:['🔄 แปลงเข้า','#159b78'],receive_cancel:['↩ ยกเลิกรับเข้า','#b52020'],
   waste:['🗑️ ตัดของเสีย','#b52020'],transfer_out:['📤 โอนออก','#a04a00'],transfer_in:['📥 โอนเข้า','#159b78']};
 async function loadStockMoves(pid,unit){
   const box=document.getElementById('sd-moves');
@@ -5983,20 +5983,57 @@ function updateRcvBtn(){
   document.getElementById('rcv-save').disabled=!ok.length;
 }
 function clearRcv(){rcv=[];renderRcv();}
+/** หาใบรับล่าสุด (ภายใน minutes นาที) ที่ผู้ขาย + รายการ/จำนวน เหมือนกับที่กำลังจะบันทึกทุกตัว — กันรับซ้ำ */
+async function rcFindDuplicate(items,supplier,minutes){
+  try{
+    const since=new Date(Date.now()-minutes*60000).toISOString();
+    const {data}=await db.from('stock_receives').select('id,receive_no,created_at,supplier,stock_receive_items(product_id,qty)')
+      .gte('created_at',since).order('created_at',{ascending:false}).limit(20);
+    const key=list=>JSON.stringify((list||[]).map(i=>[Number(i.product_id),Number(i.qty)]).sort((a,b)=>a[0]-b[0]||a[1]-b[1]));
+    const want=key(items);
+    return (data||[]).find(r=>(r.supplier||'')===(supplier||'')&&key(r.stock_receive_items)===want)||null;
+  }catch(e){return null;}
+}
+let rcSaving=false;
 async function saveReceive(){
+  if(rcSaving)return;   // กันกดซ้ำระหว่างรอฐานข้อมูล
   const items=rcv.filter(r=>parseFloat(r.qty)>0)
     .map(r=>({product_id:r.product.id,qty:parseFloat(r.qty),cost:r.cost?parseFloat(r.cost):null,expiry:r.expiry||''}));
   if(!items.length)return;
+  const supplier=document.getElementById('supplier').value.trim();
+  const wh=Number(document.getElementById('rc-wh').value)||null;
   const btn=document.getElementById('rcv-save');
-  btn.disabled=true;
-  const {error}=await db.rpc('receive_stock',{
-    p_supplier:document.getElementById('supplier').value.trim()||null,
-    p_items:items,
-    p_created_by:document.getElementById('rc-staff').value.trim()||null,
-    p_warehouse:Number(document.getElementById('rc-wh').value)||null
-  });
-  btn.disabled=false;
-  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  rcSaving=true; btn.disabled=true;
+  const fT=s=>new Date(s).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  try{
+    // กันรับซ้ำ ① ในเครื่องนี้: ชุดเดียวกัน (ผู้ขาย/โกดัง/รายการ/จำนวน) ภายใน 10 นาที
+    const sig=JSON.stringify({s:supplier,w:wh,i:items.map(i=>[i.product_id,i.qty]).sort((a,b)=>a[0]-b[0])});
+    try{
+      const last=JSON.parse(localStorage.getItem('mf_last_rcv')||'{}');
+      if(last.sig===sig&&Date.now()-last.at<10*60000){
+        if(!confirm('⚠️ เพิ่งรับสินค้าชุดเดียวกันนี้ไปเมื่อ '+Math.max(1,Math.round((Date.now()-last.at)/60000))+' นาทีก่อน'+(last.no?' (ใบ '+last.no+')':'')
+          +'\nกดตกลง = รับเข้าซ้ำอีกรอบ สต๊อกจะเพิ่มเป็น 2 เท่า!\n\nแน่ใจว่าต้องการรับซ้ำ?'))return;
+      }
+    }catch(e){}
+    // กันรับซ้ำ ② ในฐานข้อมูล: มีใบรับรายการเหมือนกันทุกตัวใน 15 นาทีนี้ไหม (เผื่อรอบก่อนขึ้น error แต่จริง ๆ บันทึกไปแล้ว หรืออีกเครื่องกดไปแล้ว)
+    const dup=await rcFindDuplicate(items,supplier,15);
+    if(dup&&!confirm('⚠️ พบใบรับ '+dup.receive_no+' เมื่อ '+fT(dup.created_at)+' ที่รายการและจำนวนเหมือนกันทุกตัว\n(อาจเป็นรอบก่อนที่ขึ้น error แต่ระบบบันทึกไปแล้ว)\n\nกดตกลง = รับเข้าซ้ำอีกรอบ · กดยกเลิก = ไม่บันทึกซ้ำ'))return;
+    try{localStorage.setItem('mf_last_rcv',JSON.stringify({sig,at:Date.now()}));}catch(e){}
+    const {error}=await db.rpc('receive_stock',{
+      p_supplier:supplier||null,
+      p_items:items,
+      p_created_by:document.getElementById('rc-staff').value.trim()||null,
+      p_warehouse:wh
+    });
+    if(error){
+      // ตอบกลับพัง แต่ฐานข้อมูลอาจบันทึกไปแล้ว → เช็คก่อน ถ้ามีใบรับชุดนี้เกิดขึ้นเมื่อครู่ = สำเร็จแล้ว ห้ามให้กดซ้ำ
+      const done=await rcFindDuplicate(items,supplier,3);
+      if(!done){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+      toast('บันทึกสำเร็จแล้ว (ใบ '+done.receive_no+') — ระบบตอบกลับช้าเท่านั้น ไม่ต้องกดซ้ำ');
+      try{localStorage.setItem('mf_last_rcv',JSON.stringify({sig,at:Date.now(),no:done.receive_no}));}catch(e){}
+      rcv=[];renderRcv(); await loadProducts(); loadRcvHistory(); return;
+    }
+    try{const d=await rcFindDuplicate(items,supplier,3);if(d)localStorage.setItem('mf_last_rcv',JSON.stringify({sig,at:Date.now(),no:d.receive_no}));}catch(e){}
   // FIFO: สร้างลอตต่อรายการ (ทุน = ราคาซื้อที่กรอก, ไม่กรอกใช้ราคาซื้อล่าสุด)
   try{
     const supplier=document.getElementById('supplier').value.trim();
@@ -6015,22 +6052,43 @@ async function saveReceive(){
   toast('รับสินค้าเข้า '+items.length+' รายการเรียบร้อย ✓ (บันทึกลอต FIFO แล้ว)');
   rcv=[];renderRcv();
   await loadProducts(); loadRcvHistory();
+  }finally{rcSaving=false;btn.disabled=false;updateRcvBtn();}
 }
+/** ↩ ยกเลิกใบรับ (รับซ้ำ/รับผิด) — ย้อนสต๊อกทั้งใบทีเดียวด้วย receive_cancel (mix888-receive-cancel.sql) */
+async function cancelReceive(id){
+  const r=(rcvHistRows||[]).find(x=>x.id===id);if(!r)return;
+  const items=r.stock_receive_items||[];
+  const lines=items.slice(0,12).map(it=>'• '+((it.products||{}).name||'?')+' −'+Number(it.qty)+' '+((it.products||{}).unit||'')).join('\n')+(items.length>12?'\n… และอีก '+(items.length-12)+' รายการ':'');
+  if(!confirm('↩ ยกเลิกใบรับ '+r.receive_no+'\n'+new Date(r.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})+(r.supplier?' · '+r.supplier:'')
+    +'\n\nสต๊อกจะถูกหักกลับเท่าที่ใบนี้เคยบวกเข้า:\n'+lines+'\n\nใช้เมื่อรับซ้ำ/รับผิดเท่านั้น — ยืนยัน?'))return;
+  const note=prompt('เหตุผล (ไม่ใส่ก็ได้):','รับเข้าซ้ำ')||'';
+  let wh=null;
+  if(!r.warehouse_id&&whList.length>1){wh=await pickWarehouse('ใบนี้รับเข้าโกดังไหน? (จะหักสต๊อกกลับจากโกดังนั้น)');if(!wh)return;}
+  const {data,error}=await db.rpc('receive_cancel',{p_receive_id:id,p_by:currentUser?.display_name||currentUser?.username||null,p_note:note||null,p_warehouse:wh});
+  if(error){toast(/function|does not exist|schema cache/i.test(error.message||'')?'ยังไม่ได้รันไฟล์ mix888-receive-cancel.sql ใน Supabase':'ยกเลิกไม่สำเร็จ: '+error.message);return;}
+  toast('↩ ยกเลิกใบรับ '+(data?.receive_no||r.receive_no)+' แล้ว — หักสต๊อกกลับ '+(data?.items||items.length)+' รายการ'+(data?.lots_reduced?' · ปรับลอต FIFO '+data.lots_reduced:''));
+  await loadRcvHistory(); await loadProducts();
+}
+let rcvHistRows=[];
 async function loadRcvHistory(){
   const {data,error}=await db.from('stock_receives')
     .select('*, stock_receive_items(qty,cost,products(sku,name,unit))')
     .order('created_at',{ascending:false}).limit(30);
   if(error)return;
+  rcvHistRows=data||[];
   const el=document.getElementById('rcv-hist');
   if(!data||!data.length){el.innerHTML='<div class="empty">ยังไม่มีประวัติ</div>';return;}
   el.innerHTML=data.map(r=>{
     const d=new Date(r.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'});
     const n=r.stock_receive_items.length;
-    return `<div style="padding:10px 0;border-bottom:1px solid var(--line)">
+    const cx=r.cancelled_at?new Date(r.cancelled_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--line)${r.cancelled_at?';opacity:.65':''}">
       <div class="ohead">
-        <b>${esc(r.receive_no)}</b>
+        <b style="${r.cancelled_at?'text-decoration:line-through':''}">${esc(r.receive_no)}</b>
         <span class="oc">${d}${r.supplier?' · '+esc(r.supplier):''}${r.created_by?' · โดย '+esc(r.created_by):''}</span>
+        ${r.cancelled_at?'<span class="tag" title="'+esc(r.cancel_note||'')+'">↩ ยกเลิกแล้ว '+cx+(r.cancelled_by?' โดย '+esc(r.cancelled_by):'')+(r.cancel_note?' · '+esc(r.cancel_note):'')+'</span>':''}
         <span style="margin-left:auto">${n} รายการ</span>
+        ${r.cancelled_at?'':'<button class="btn-g mini" style="color:#b52020" onclick="cancelReceive('+r.id+')" title="รับซ้ำ/รับผิด → หักสต๊อกกลับทั้งใบ">↩ ยกเลิกใบรับ</button>'}
       </div>
       <details><summary>ดูรายการ</summary>
         <table style="margin-top:6px"><tbody>
@@ -7381,7 +7439,7 @@ async function loadMovements(btn){
   try{
     const [mv,rcv,sold,tf,adj,cvF,cvT]=await Promise.all([
       db.from('stock_movements').select('*').eq('product_id',p.id).order('created_at',{ascending:false}).limit(300),
-      db.from('stock_receive_items').select('qty,cost,stock_receives(receive_no,created_at,created_by)').eq('product_id',p.id).limit(300),
+      db.from('stock_receive_items').select('qty,cost,stock_receives(*)').eq('product_id',p.id).limit(300),
       db.from('order_items').select('qty,order_id').eq('product_id',p.id).limit(400),
       db.from('transfer_items').select('qty,received_qty,transfers(tf_no,status,received_at,from_wh,to_wh,received_by)').eq('product_id',p.id).limit(200),
       db.from('stock_adjustments').select('*,warehouses(name)').eq('product_id',p.id).limit(200),
@@ -7401,8 +7459,13 @@ async function loadMovements(btn){
     }
     const rows=[
       ...soldRows,
-      ...(rcv.data||[]).filter(r=>r.stock_receives).map(r=>({date:r.stock_receives.created_at,type:'รับเข้า',
+      ...(rcv.data||[]).filter(r=>r.stock_receives&&!r.stock_receives.cancelled_at).map(r=>({date:r.stock_receives.created_at,type:'รับเข้า',
         qty:+Number(r.qty),ref:r.stock_receives.receive_no||'',wh:'',by:r.stock_receives.created_by||'',note:''})),
+      // ใบรับที่ถูกยกเลิก: โชว์ทั้งขา "รับเข้า" เดิมและขา "ยกเลิก" ให้เห็นว่าหักกลับแล้ว (ยอดสุทธิ 0)
+      ...(rcv.data||[]).filter(r=>r.stock_receives&&r.stock_receives.cancelled_at).map(r=>({date:r.stock_receives.created_at,type:'รับเข้า',
+        qty:+Number(r.qty),ref:r.stock_receives.receive_no||'',wh:'',by:r.stock_receives.created_by||'',note:'ใบนี้ถูกยกเลิกแล้ว'})),
+      ...(mv.data||[]).filter(r=>r.type==='receive_cancel').map(r=>({date:r.created_at,type:'ยกเลิกรับเข้า',
+        qty:-Math.abs(Number(r.qty)),ref:'',wh:wn(r.warehouse_id),by:r.created_by||'',note:r.note||''})),
       ...(mv.data||[]).filter(r=>r.type==='waste').map(r=>({date:r.created_at,type:'ตีเสีย',
         qty:-Math.abs(Number(r.qty)),ref:'',wh:wn(r.warehouse_id),by:r.created_by||'',note:r.note||''})),
       ...(tf.data||[]).filter(r=>r.transfers?.status==='received').map(r=>({date:r.transfers.received_at,type:'โอนโกดัง',
@@ -7416,7 +7479,7 @@ async function loadMovements(btn){
         qty:+Number(r.to_qty),ref:r.cv_no||'',wh:wn(r.warehouse_id),by:r.created_by||'',note:'← '+(r.pf?.name||'')})),
     ].sort((a,b)=>new Date(b.date)-new Date(a.date));
 
-    const tin=rows.filter(r=>r.type==='รับเข้า'||r.type==='แปลงเข้า').reduce((s,r)=>s+r.qty,0);
+    const tin=rows.filter(r=>r.type==='รับเข้า'||r.type==='แปลงเข้า'||r.type==='ยกเลิกรับเข้า').reduce((s,r)=>s+r.qty,0);   // ยกเลิกรับเข้าเป็นลบ → หักออกจากยอดเข้า
     const tout=rows.filter(r=>r.type==='ขายออก'||r.type==='แปลงออก').reduce((s,r)=>s+Math.abs(r.qty),0);
     const twaste=rows.filter(r=>r.type==='ตีเสีย').reduce((s,r)=>s+Math.abs(r.qty),0);
     const sum=document.getElementById('mv-sum');
@@ -7424,7 +7487,7 @@ async function loadMovements(btn){
     sum.innerHTML=`<b>${esc(p.sku)} · ${esc(p.name)}</b> — คงเหลือปัจจุบัน <b>${Number(p.stock_qty||0)}</b>
       <span class="tag tag-ok">เข้า +${tin}</span> <span class="tag tag-low">ออก −${tout}</span>
       <span class="tag tag-out">เสีย −${twaste}</span> · ${rows.length} รายการ`;
-    const colorOf=t=>({'รับเข้า':'var(--ok,#159b78)','แปลงเข้า':'var(--ok,#159b78)','ขายออก':'#b06000','แปลงออก':'#b06000','ตีเสีย':'var(--danger,#b52020)','ปรับสต๊อก':'#555','โอนโกดัง':'#555'}[t]||'#555');
+    const colorOf=t=>({'รับเข้า':'var(--ok,#159b78)','แปลงเข้า':'var(--ok,#159b78)','ขายออก':'#b06000','แปลงออก':'#b06000','ตีเสีย':'var(--danger,#b52020)','ยกเลิกรับเข้า':'var(--danger,#b52020)','ปรับสต๊อก':'#555','โอนโกดัง':'#555'}[t]||'#555');
     document.getElementById('mv-body').innerHTML=!rows.length
       ?'<div class="empty">ยังไม่มีความเคลื่อนไหวของสินค้านี้</div>'
       :'<table><thead><tr><th>วันที่</th><th>ประเภท</th><th class="num">จำนวน</th><th>อ้างอิง</th><th>โกดัง</th><th>โดย</th><th>หมายเหตุ</th></tr></thead><tbody>'
