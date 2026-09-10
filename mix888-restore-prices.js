@@ -6,9 +6,10 @@
    โปรแกรมจะเทียบไฟล์สำรองรายวันกับราคาปัจจุบัน แล้วบอกว่า
    หายไปกี่รายการ หายตั้งแต่วันไหน และกู้คืนให้ได้
 
-   ⚠️ ปลอดภัย: กู้เฉพาะราคาที่ "หายไป" เท่านั้น
+   ⚠️ ปลอดภัย: โหมดปกติกู้เฉพาะราคาที่ "หายไป" เท่านั้น
       ถ้าตอนนี้ร้านนั้นมีราคาเฉพาะร้านอยู่แล้ว (คนละเลข) จะไม่ไปทับ
       และไม่มีการลบอะไรทั้งสิ้น
+      ถ้าต้องการ "เอาราคาของวันนั้นทั้งหมด" รวมทับตัวเลขที่ต่างด้วย → เพิ่ม --overwrite (ข้อ ⑥)
 
    วิธีใช้ (รันบน NAS ที่เดียวกับ mix888-nas-archiver.js):
 
@@ -26,6 +27,11 @@
 
    ⑤ เฉพาะร้านเดียว (ใส่รหัสร้าน) — ใช้ร่วมกับทุกโหมดข้างบน
         node mix888-restore-prices.js --date 2026-08-20 --shop SKG00397 --apply
+
+   ⑥ ดึงราคาของวันนั้น "ทั้งหมด" — รวมทับรายการที่ตอนนี้เป็นคนละตัวเลขด้วย
+      (ดูรายงานก่อนด้วยคำสั่งแรก แล้วค่อยกู้จริงด้วยคำสั่งที่สอง)
+        node mix888-restore-prices.js --date 2026-08-20 --overwrite
+        node mix888-restore-prices.js --date 2026-08-20 --overwrite --apply
 
    ทุกครั้งจะเขียนรายงานเปิดด้วย Excel ไว้ที่
    <NAS_ROOT>/สำรองข้อมูล/รายงานกู้ราคา.csv
@@ -48,6 +54,7 @@ const DATE  = argOf('--date');
 const DIFF  = argOf('--diff');
 const SHOP  = (argOf('--shop') || '').trim().toUpperCase();
 const APPLY = argv.includes('--apply');
+const OVERWRITE = argv.includes('--overwrite');   // ทับรายการที่ตอนนี้เป็นคนละตัวเลขด้วย (ต้องตั้งใจใช้)
 
 function resolveNasRoot(){
   if(NAS_ROOT) return fs.existsSync(NAS_ROOT) ? NAS_ROOT : null;
@@ -296,7 +303,10 @@ function diffPrices(prevRows, curRows){
   };
   console.log('\n📋 เทียบราคาปัจจุบัน กับสำรองวันที่ ' + DATE + (SHOP ? ' · เฉพาะร้าน ' + SHOP : '') + '\n');
   console.log('   ✅ จะกู้คืนให้    ' + String(lost.length).padStart(5) + ' รายการ  (ราคาหายไป/กลายเป็นราคากลาง)');
-  console.log('   ⚠️ ต้องตรวจเอง  ' + String(diff.length).padStart(5) + ' รายการ  (มีราคาเฉพาะร้านอยู่ แต่คนละตัวเลข — ระบบจะไม่ไปทับ)');
+  if(OVERWRITE)
+    console.log('   🔁 จะทับด้วยราคาสำรอง ' + String(diff.length).padStart(3) + ' รายการ  (ตอนนี้เป็นคนละตัวเลข — โหมด --overwrite เอาราคาของวันที่ ' + DATE + ' มาแทน)');
+  else
+    console.log('   ⚠️ ต้องตรวจเอง  ' + String(diff.length).padStart(5) + ' รายการ  (มีราคาเฉพาะร้านอยู่ แต่คนละตัวเลข — ระบบจะไม่ไปทับ · ถ้าต้องการทับ เพิ่ม --overwrite)');
   console.log('   ℹ️ ไม่เกี่ยวข้อง ' + String(other.length).padStart(5) + ' รายการ  (ตั้งเพิ่มทีหลัง / รายการใหม่)');
   if(lost.length){
     console.log('\n✅ รายการที่จะกู้คืน' + (lost.length > 25 ? ' (แสดง 25 แรก — ดูครบในไฟล์ CSV)' : '') + ':');
@@ -358,28 +368,32 @@ function diffPrices(prevRows, curRows){
     console.log('\n📄 รายงานเต็มทุกรายการ (เปิดด้วย Excel): ' + path.join(baseDir, 'รายงานกู้ราคา.csv'));
   }catch(e){ console.log('⚠️ เขียนไฟล์รายงานไม่ได้: ' + e.message); }
 
+  // รายการที่จะเขียนจริง: โหมดปกติ = ที่หายไป · โหมด --overwrite = ที่หายไป + ที่ตอนนี้เป็นคนละตัวเลข
+  const targets = OVERWRITE ? lost.concat(diff) : lost;
   if(!APPLY){
     console.log('\n👀 นี่คือการดูเฉย ๆ ยังไม่ได้แก้อะไรเลย');
-    if(lost.length){
+    if(targets.length){
       console.log('   ถ้าถูกต้องแล้ว สั่งกู้จริงด้วย:');
-      console.log('   node mix888-restore-prices.js --date ' + DATE + (SHOP ? ' --shop ' + SHOP : '') + ' --apply');
+      console.log('   node mix888-restore-prices.js --date ' + DATE + (SHOP ? ' --shop ' + SHOP : '') + (OVERWRITE ? ' --overwrite' : '') + ' --apply');
+      if(!OVERWRITE && diff.length)
+        console.log('   (ถ้าต้องการเอาราคาของวันนั้นมาทับ ' + diff.length + ' รายการที่เป็นคนละตัวเลขด้วย: เพิ่ม --overwrite แล้วดูรายงานอีกครั้งก่อนกู้จริง)');
     }else console.log('   ไม่มีรายการที่ต้องกู้คืน');
     return;
   }
-  if(!lost.length){ console.log('\n✅ ไม่มีรายการที่ต้องกู้คืน'); return; }
+  if(!targets.length){ console.log('\n✅ ไม่มีรายการที่ต้องกู้คืน'); return; }
 
-  console.log('\n🔧 กำลังกู้คืน ' + lost.length + ' รายการ…');
-  let miss = 0, cen = 0, kept = 0;
-  for(let i = 0; i < lost.length; i += 500){
-    const chunk = lost.slice(i, i + 500).map(r => {
+  console.log('\n🔧 กำลังกู้คืน ' + targets.length + ' รายการ…' + (OVERWRITE ? ' (รวมทับด้วยราคาสำรอง ' + diff.length + ' รายการ)' : ''));
+  let miss = 0, cen = 0, kept = 0, over = 0;
+  for(let i = 0; i < targets.length; i += 500){
+    const chunk = targets.slice(i, i + 500).map(r => {
       const [cid, pid] = r.k.split('|').map(Number);
       return {customer_id: cid, product_id: pid, price: r.was};
     });
-    const res = await rpc('nas_restore_prices', {p_key: NAS_EXPORT_KEY, p_rows: chunk, p_apply: true});
-    miss += res.lost_missing || 0; cen += res.lost_to_central || 0; kept += res.kept_new_price || 0;
+    const res = await rpc('nas_restore_prices', {p_key: NAS_EXPORT_KEY, p_rows: chunk, p_apply: true, p_overwrite: OVERWRITE});
+    miss += res.lost_missing || 0; cen += res.lost_to_central || 0; kept += res.kept_new_price || 0; over += res.overwritten || 0;
   }
-  console.log('✅ กู้คืนแล้ว ' + (miss + cen) + ' รายการ'
-    + ' (เพิ่มรายการที่หายไป ' + miss + ' · คืนราคาที่กลายเป็นราคากลาง ' + cen + ')');
-  if(kept) console.log('ℹ️ ข้าม ' + kept + ' รายการ เพราะตอนนี้มีราคาเฉพาะร้านใหม่อยู่แล้ว — ไม่ไปทับให้');
+  console.log('✅ กู้คืนแล้ว ' + (miss + cen + over) + ' รายการ'
+    + ' (เพิ่มรายการที่หายไป ' + miss + ' · คืนราคาที่กลายเป็นราคากลาง ' + cen + (over ? ' · ทับด้วยราคาสำรอง ' + over : '') + ')');
+  if(kept) console.log('ℹ️ ข้าม ' + kept + ' รายการ เพราะตอนนี้มีราคาเฉพาะร้านใหม่อยู่แล้ว — ไม่ไปทับให้ (ถ้าต้องการทับ ใช้ --overwrite)');
   console.log('เปิดหลังบ้าน → จัดสินค้า เพื่อตรวจดูอีกครั้งได้เลยครับ');
 })().catch(e => { console.error('❌ ผิดพลาด: ' + (e.message || e)); process.exit(1); });

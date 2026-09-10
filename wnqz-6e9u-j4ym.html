@@ -1414,7 +1414,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <h3 style="margin:0;font-size:16px">📈 ปรับราคาทุกร้านเท่ากัน</h3>
       <button class="btn-g mini" onclick="closeBulkPrice()">ปิด</button>
     </div>
-    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">ใส่จำนวนที่จะบวก/ลบ <b>เท่ากันทุกร้าน</b> เช่น +20 → ร้านที่ 480 เป็น 500, ร้านที่ 550 เป็น 570 · ระบบจะโชว์ตารางเดิม → ใหม่ของทุกร้านให้ดูก่อน และ<b>ไม่แก้ราคาจนกว่าจะกดยืนยัน</b></div>
+    <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">ใส่จำนวนที่จะบวก/ลบ <b>เท่ากันทุกร้าน</b> เช่น +20 → ร้านที่ 480 เป็น 500, ร้านที่ 550 เป็น 570 · ระบบจะโชว์ตารางเดิม → ใหม่ของทุกร้านให้ดู <b>ไม่ติ๊กร้านให้เอง</b> — เลือกร้านเองทีละร้าน หรือกรอง (เซลล์ / ขนส่ง / จังหวัด / ค้นหา) แล้วกด "เลือกเฉพาะที่แสดงอยู่" · <b>ไม่แก้ราคาจนกว่าจะกดยืนยัน</b></div>
     <div class="row" style="align-items:flex-end;gap:8px;flex-wrap:wrap">
       <div style="flex:1;min-width:220px"><label>สินค้า</label><input id="bq-prod" list="bq-prodlist" placeholder="พิมพ์ชื่อหรือ SKU แล้วเลือกจากรายการ" style="width:100%"><datalist id="bq-prodlist"></datalist></div>
       <div><label>ปรับ (บาท) · บวก = ขึ้น · ลบ = ลง</label><input id="bq-amt" type="number" step="0.01" style="width:120px" class="num" placeholder="เช่น 20 หรือ -10" onkeydown="if(event.key==='Enter')bqAddItem()"></div>
@@ -1422,8 +1422,8 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div id="bq-items" style="margin-top:8px"></div>
     <div style="margin-top:10px;display:flex;gap:14px;flex-wrap:wrap;font-size:13.5px">
-      <label style="font-weight:400"><input type="checkbox" id="bq-tiers" checked onchange="bqPreviewDirty()"> ปรับราคากลาง/เรทกลุ่มด้วย (ร้านที่ใช้ราคากลุ่มจะขยับตาม)</label>
-      <label style="font-weight:400"><input type="checkbox" id="bq-cp" checked onchange="bqPreviewDirty()"> ปรับราคาเฉพาะร้านที่ตั้งไว้</label>
+      <label style="font-weight:400"><input type="checkbox" id="bq-tiers" onchange="bqPreviewDirty()"> ปรับราคากลาง/เรทกลุ่มด้วย (ทุกร้านที่ใช้ราคากลุ่มจะขยับตาม แม้ไม่ได้ติ๊ก)</label>
+      <label style="font-weight:400"><input type="checkbox" id="bq-cp" checked onchange="bqPreviewDirty()"> ปรับราคาเฉพาะร้านที่ติ๊กเลือก (ร้านที่ใช้ราคากลุ่ม ถ้าติ๊กจะถูกตั้งเป็นราคาเฉพาะร้าน)</label>
       <label style="font-weight:400"><input type="checkbox" id="bq-line" checked onchange="bqPreviewDirty()"> ส่งไลน์แจ้งลูกค้าแต่ละกลุ่ม</label>
     </div>
     <div id="bq-msgwrap" style="margin-top:8px">
@@ -1457,9 +1457,11 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div id="bq-tiersbox" style="margin-top:8px;font-size:13px"></div>
     <div id="bq-filter" style="display:none;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px">
       <select id="bq-sale-f" onchange="bqRender()"></select>
+      <select id="bq-ship-f" onchange="bqRender()"></select>
+      <select id="bq-prov-f" onchange="bqRender()"></select>
       <input id="bq-shop-q" placeholder="ค้นหาชื่อร้าน/รหัส" oninput="bqRender()" style="min-width:160px">
-      <button class="btn-g mini" onclick="bqCheckAll(true)">เลือกที่แสดงทั้งหมด</button>
-      <button class="btn-g mini" onclick="bqCheckAll(false)">ไม่เลือกที่แสดง</button>
+      <button class="btn-g mini" id="bq-sel-vis" onclick="bqCheckAll(true)" title="ติ๊กเฉพาะร้านที่ผ่านตัวกรองและแสดงอยู่ในตารางตอนนี้">☑ เลือกเฉพาะที่แสดงอยู่</button>
+      <button class="btn-g mini" id="bq-unsel-vis" onclick="bqCheckAll(false)">☐ เอาที่แสดงอยู่ออก</button>
       <span id="bq-filter-info" style="font-size:12.5px;color:var(--muted)"></span>
     </div>
     <div id="bq-list" style="margin-top:8px"></div>
@@ -4180,7 +4182,9 @@ function openBulkPrice(){
   if(bqBusy){toast('กำลังทำงานอยู่ รอสักครู่');return;}
   bqItems=[];bqRows=[];bqTierRows=[];bqShops=[];bqApplied=false;bqPreviewed=false;
   bqSyncLock();
-  ['bq-tiers','bq-cp','bq-line'].forEach(id=>{const el=document.getElementById(id);if(el)el.checked=true;});   // เริ่มรอบใหม่ด้วยค่าปลอดภัย: ปรับทั้งสองแบบ + ส่งไลน์
+  // เริ่มรอบใหม่ด้วยค่าปลอดภัย: ไม่แตะราคากลาง (เฉพาะร้านที่ติ๊กเท่านั้น) + ส่งไลน์
+  const cb=(id,v)=>{const el=document.getElementById(id);if(el)el.checked=v;};
+  cb('bq-tiers',false); cb('bq-cp',true); cb('bq-line',true);
   document.getElementById('bq-prodlist').innerHTML=products.filter(p=>p.active!==false)
     .map(p=>'<option value="'+esc(p.sku)+' · '+esc(p.name)+'"></option>').join('');
   document.getElementById('bq-prod').value='';document.getElementById('bq-amt').value='';
@@ -4274,13 +4278,18 @@ async function bqPreview(btn){
         if(explicit){
           if(doCp){kind='cp';newP=bqR2(oldP+amt);note='ราคาเฉพาะร้าน';}
           else{kind='cp-off';newP=oldP;note='ราคาเฉพาะร้าน — ไม่ปรับ (ตามที่เลือก)';}
+        }else if(doTiers){
+          kind='grp';newP=effPrice(pAfter,grp);note='ตาม'+BQ_GRP_LBL[grp]+' (ขยับตามราคากลุ่ม)';
+        }else if(doCp){
+          // ไม่แตะราคากลุ่ม แต่ถ้าพนักงานติ๊กร้านนี้ → ตั้งเป็นราคาเฉพาะร้าน (ราคากลุ่มเดิม ± จำนวนที่ปรับ)
+          kind='grp2cp';newP=bqR2(oldP+amt);note='ใช้'+BQ_GRP_LBL[grp]+' → ถ้าติ๊ก จะตั้งเป็นราคาเฉพาะร้าน';
         }else{
-          kind='grp';newP=doTiers?effPrice(pAfter,grp):oldP;
-          note=doTiers?'ตาม'+BQ_GRP_LBL[grp]:'ใช้'+BQ_GRP_LBL[grp]+' — ไม่ปรับ (ตามที่เลือก)';
+          kind='grp-off';newP=oldP;note='ใช้'+BQ_GRP_LBL[grp]+' — ไม่ปรับ (ตามที่เลือก)';
         }
         if(newP<=0){note='ราคาใหม่ ≤ 0 — ข้าม';newP=oldP;}
         const changed=newP!==oldP;
-        bqRows.push({c,p,amt,kind,oldP,newP,note,sel:changed,changed,applied:false});
+        // ไม่ติ๊กให้เอง — พนักงานเลือกร้านเอง (หรือกรองแล้วกด "เลือกเฉพาะที่แสดงอยู่")
+        bqRows.push({c,p,amt,kind,oldP,newP,note,sel:false,changed,applied:false});
       });
     }
     bqRows.sort((a,b)=>String(a.c.code||'').localeCompare(String(b.c.code||''),'th')||String(a.p.sku).localeCompare(String(b.p.sku)));
@@ -4288,11 +4297,16 @@ async function bqPreview(btn){
     const chg=bqRows.filter(r=>r.changed);
     const shopsChg=new Set(chg.map(r=>r.c.id));
     const noline=[...shopsChg].filter(id=>!(byId[id]||{}).line_group_id).length;
-    document.getElementById('bq-sum').textContent=bqItems.length+' สินค้า · ร้านที่ราคาเปลี่ยน '+shopsChg.size+' ร้าน ('+chg.length+' รายการ)'
+    document.getElementById('bq-sum').textContent=bqItems.length+' สินค้า · ปรับได้ '+shopsChg.size+' ร้าน ('+chg.length+' รายการ) — ยังไม่ได้ติ๊กร้านใดเลย เลือกเอง หรือกรองแล้วกด "เลือกเฉพาะที่แสดงอยู่"'
       +(bqRows.length-chg.length?' · ไม่เปลี่ยน '+(bqRows.length-chg.length):'')
       +(noline?' · ไม่ผูกกลุ่มไลน์ '+noline+' ร้าน':'')+(skipped?' · ไม่มีราคาเดิม '+skipped:'')+(inactive?' · ปิดใช้งาน '+inactive:'');
-    const saleNames=[...new Set(bqRows.map(r=>r.c.sale_name||'-'))].sort((a,b)=>String(a).localeCompare(String(b),'th'));
+    const thSort=(a,b)=>String(a).localeCompare(String(b),'th');
+    const saleNames=[...new Set(bqRows.map(r=>r.c.sale_name||'-'))].sort(thSort);
     document.getElementById('bq-sale-f').innerHTML='<option value="">เซลล์: ทั้งหมด</option>'+saleNames.map(s=>'<option>'+esc(s)+'</option>').join('');
+    const shipNames=[...new Set(bqRows.map(r=>bqShipOf(r.c)))].sort(thSort);
+    document.getElementById('bq-ship-f').innerHTML='<option value="">ขนส่ง: ทั้งหมด</option>'+shipNames.map(s=>'<option>'+esc(s)+'</option>').join('');
+    const provNames=[...new Set(bqRows.map(r=>bqProvOf(r.c)))].sort(thSort);
+    document.getElementById('bq-prov-f').innerHTML='<option value="">จังหวัด: ทั้งหมด</option>'+provNames.map(s=>'<option>'+esc(s)+'</option>').join('');
     document.getElementById('bq-shop-q').value='';
     document.getElementById('bq-filter').style.display=bqRows.length?'flex':'none';
     bqRender();
@@ -4301,12 +4315,18 @@ async function bqPreview(btn){
   }catch(e){toast('ดูตารางไม่สำเร็จ: '+(e.message||e));}
   btn.disabled=false;
 }
+const bqShipOf=c=>(c&&c.delivery_method)||'อื่นๆ';
+const bqProvOf=c=>(c&&(c.ship_province||c.bill_province))||'ไม่ระบุ';
 function bqVisibleIdx(){
   const q=((document.getElementById('bq-shop-q')||{}).value||'').trim().toLowerCase();
   const sf=(document.getElementById('bq-sale-f')||{}).value||'';
+  const shf=(document.getElementById('bq-ship-f')||{}).value||'';
+  const pvf=(document.getElementById('bq-prov-f')||{}).value||'';
   const out=[];
   bqRows.forEach((r,i)=>{
     if(sf&&(r.c.sale_name||'-')!==sf)return;
+    if(shf&&bqShipOf(r.c)!==shf)return;
+    if(pvf&&bqProvOf(r.c)!==pvf)return;
     if(q&&!(String(r.c.code||'').toLowerCase().includes(q)||String(r.c.name||'').toLowerCase().includes(q)||String(r.c.branch_name||'').toLowerCase().includes(q)))return;
     out.push(i);
   });
@@ -4374,8 +4394,11 @@ function bqCount(){
   const shops=bqBuildShops(sel);
   const lineOn=document.getElementById('bq-line').checked;
   const nLine=shops.filter(s=>s.c.line_group_id).length;
+  const vis=bqVisibleIdx();
   const inf=document.getElementById('bq-filter-info');
-  if(inf)inf.textContent=bqRows.length?('แสดง '+bqVisibleIdx().length+'/'+bqRows.length+' รายการ · เลือกไว้ '+sel.length+' รายการ · '+shops.length+' ร้าน'):'';
+  if(inf)inf.textContent=bqRows.length?('แสดง '+vis.length+'/'+bqRows.length+' รายการ · เลือกไว้ '+sel.length+' รายการ · '+shops.length+' ร้าน'):'';
+  const sv=document.getElementById('bq-sel-vis');
+  if(sv){const n=vis.filter(i=>bqRows[i].changed).length;sv.textContent='☑ เลือกเฉพาะที่แสดงอยู่ ('+n+')';}
   const ap=document.getElementById('bq-apply');
   const resume=bqTierRows.some(t=>t.applied)||bqRows.some(r=>r.applied);   // ค้างกลางทาง → ปุ่มต้องบอกว่า "ทำต่อ"
   if(ap&&!bqApplied)ap.textContent=(resume?'✅ ทำต่อส่วนที่เหลือ (':'✅ ยืนยันปรับราคา (')+shops.length+' ร้าน'+(lineOn?' · ส่งไลน์ '+nLine:'')+')';
@@ -4397,9 +4420,11 @@ async function bqApply(btn){
   if(!bqPreviewed){toast('กด "ดูตารางเดิม → ใหม่" ก่อน');return;}
   const doTiers=document.getElementById('bq-tiers').checked, lineOn=document.getElementById('bq-line').checked;
   const sel=bqRows.filter(r=>r.sel&&r.changed);
-  const cpTodo=sel.filter(r=>r.kind==='cp'&&!r.applied);
+  const cpTodo=sel.filter(r=>(r.kind==='cp'||r.kind==='grp2cp')&&!r.applied);   // grp2cp = ร้านราคากลุ่มที่ติ๊ก → ตั้งเป็นราคาเฉพาะร้าน
   const tierTodo=doTiers?bqTierRows.filter(t=>Object.keys(t.changes).length&&!t.applied):[];
   if(!bqApplied){
+    // ต้องติ๊กร้านอย่างน้อย 1 ร้านเสมอ — แม้ติ๊ก "ปรับราคากลาง" ก็ไม่ให้ยืนยันโดยไม่เลือกร้าน (กันกดพลาดแล้วราคากลุ่มขยับทั้งระบบ)
+    if(!sel.length){toast('ยังไม่ได้ติ๊กเลือกร้านเลย — ติ๊กเอง หรือกรองแล้วกด "เลือกเฉพาะที่แสดงอยู่"');return;}
     if(!cpTodo.length&&!tierTodo.length){toast('ไม่มีอะไรจะปรับ (ไม่ได้เลือกร้าน และไม่มีราคากลางที่เปลี่ยน)');return;}
     bqShops=bqBuildShops(sel);
     const nLine=lineOn?bqShops.filter(s=>s.c.line_group_id).length:0;
@@ -4416,8 +4441,9 @@ async function bqApply(btn){
     const cm=(resume?'ทำต่อส่วนที่ยังไม่เสร็จ (ส่วนที่ทำแล้วจะไม่ถูกบวกซ้ำ)\n\n':'ยืนยันปรับราคา '+bqItems.length+' สินค้า\n')
       +bqItems.map(it=>'• '+it.p.name+' '+(it.amt>0?'+':'')+fmt(it.amt)+' บาท').join('\n')
       +'\n\n'+(tierTodo.length?'✔ ปรับราคากลาง/เรทกลุ่ม '+tierTodo.length+' สินค้า\n':'')
-      +(cpTodo.length?'✔ ปรับราคาเฉพาะร้าน '+cpTodo.length+' รายการ\n':'')
-      +'✔ ร้านที่ราคาเปลี่ยนทั้งหมด '+bqShops.length+' ร้าน\n'
+      +(cpTodo.length?'✔ ปรับราคาเฉพาะร้าน '+cpTodo.length+' รายการ'
+        +(cpTodo.some(r=>r.kind==='grp2cp')?' (ร้านราคากลุ่มที่ติ๊ก '+cpTodo.filter(r=>r.kind==='grp2cp').length+' รายการ จะถูกตั้งเป็นราคาเฉพาะร้าน)':'')+'\n':'')
+      +'✔ ร้านที่ติ๊กเลือกทั้งหมด '+bqShops.length+' ร้าน\n'
       +(lineOn?'✔ ส่งไลน์แจ้ง '+nLine+' กลุ่มลูกค้า (1 ข้อความ/ร้าน)':'✘ ไม่ส่งไลน์ — ต้องแจ้งลูกค้าเอง')
       +(grpUnsel?'\n⚠️ ร้านราคากลุ่มที่ติ๊กออก '+grpUnsel+' ร้าน: ราคาจะขยับตามราคากลุ่มอยู่ดี แต่จะไม่ได้รับไลน์แจ้ง':'')
       +'\n\nราคาใหม่มีผลกับออเดอร์หลังจากนี้ทันที — ยืนยัน?';

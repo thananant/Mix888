@@ -1,20 +1,22 @@
 -- ============================================================
 --  Mix Fresh 168 — ประตูกู้ "ราคาเฉพาะร้าน" คืนจากสำรองข้อมูล NAS
 --  รันทั้งไฟล์ใน Supabase (โปรเจกต์ Mix Fresh) → SQL Editor → Run
---  รันซ้ำได้ ไม่กระทบระบบเดิม
+--  รันซ้ำได้ ไม่กระทบระบบเดิม  (เวอร์ชันนี้เพิ่มโหมด "ทับด้วยราคาสำรอง")
 --
 --  ใช้คู่กับโปรแกรม mix888-restore-prices.js ที่รันบน NAS
 --  ต้องแนบรหัสลับเดียวกับ nas_export_bills / nas_backup_dump เท่านั้น
 --
 --  ⚠️ กฎความปลอดภัยของการกู้ (สำคัญ):
---   • คืนเฉพาะรายการที่ "เคยตั้งราคาเอง" ในไฟล์สำรอง แต่ตอนนี้หายไปแล้ว
---     (ไม่มีรายการ หรือกลายเป็นราคากลาง)
---   • ถ้าตอนนี้ร้านนั้นมีราคาเฉพาะร้านอยู่แล้ว "คนละตัวเลข" → ไม่แตะ
---     (อาจเป็นราคาใหม่ที่ตั้งใจตั้ง) แค่รายงานให้ดูเฉย ๆ
---   • ไม่ลบอะไรทั้งสิ้น
+--   • โหมดปกติ: คืนเฉพาะรายการที่ "เคยตั้งราคาเอง" ในไฟล์สำรอง แต่ตอนนี้หายไปแล้ว
+--     (ไม่มีรายการ หรือกลายเป็นราคากลาง) — ถ้าตอนนี้มีราคาเฉพาะร้าน "คนละตัวเลข" → ไม่แตะ แค่รายงาน
+--   • โหมดทับ (p_overwrite = true — ใช้กับ --overwrite ของโปรแกรมบน NAS): รายการที่ตอนนี้เป็นคนละตัวเลข
+--     จะถูก "ทับด้วยราคาในไฟล์สำรอง" ด้วย — ใช้เมื่อพนักงานตรวจรายงานแล้วยืนยันว่าต้องการราคาของวันนั้นทั้งหมด
+--   • ไม่ลบอะไรทั้งสิ้น · ทุกการเปลี่ยนถูกบันทึกในประวัติแก้ราคา (ถ้าติดตั้ง mix888-price-log.sql)
 -- ============================================================
 
-create or replace function nas_restore_prices(p_key text, p_rows jsonb, p_apply boolean default false)
+drop function if exists nas_restore_prices(text, jsonb, boolean);
+
+create or replace function nas_restore_prices(p_key text, p_rows jsonb, p_apply boolean default false, p_overwrite boolean default false)
 returns jsonb
 language plpgsql
 security definer
@@ -25,7 +27,7 @@ declare
   cid bigint; pid bigint; bp numeric;
   curp numeric; hasrow boolean;
   out_arr jsonb := '[]'::jsonb;
-  n_missing int := 0; n_null int := 0; n_same int := 0; n_diff int := 0;
+  n_missing int := 0; n_null int := 0; n_same int := 0; n_diff int := 0; n_over int := 0;
 begin
   if p_key is null or p_key <> 'PASTE_NAS_EXPORT_KEY_HERE' then
     raise exception 'BAD_KEY';
@@ -34,7 +36,8 @@ begin
     raise exception 'BAD_ROWS';
   end if;
   -- ให้ประวัติแก้ราคา (mix888-price-log.sql) รู้ว่าการเปลี่ยนรอบนี้มาจากการกู้ข้อมูล
-  perform set_config('app.price_source', 'กู้ราคาจากสำรองข้อมูล NAS', true);
+  perform set_config('app.price_source',
+    case when p_overwrite then 'กู้ราคาจากสำรองข้อมูล NAS (ทับด้วยราคาสำรอง)' else 'กู้ราคาจากสำรองข้อมูล NAS' end, true);
 
   for ent in select * from jsonb_array_elements(p_rows) loop
     cid := nullif(ent->>'customer_id','')::bigint;
@@ -64,9 +67,18 @@ begin
         'customer_id', cid, 'product_id', pid, 'now', 'ถูกเปลี่ยนเป็นราคากลาง', 'restore_to', bp, 'action', 'กู้คืน'));
 
     elsif abs(curp - bp) > 0.001 then
-      n_diff := n_diff + 1;   -- มีราคาเฉพาะร้านอยู่แล้วแต่คนละเลข — อาจตั้งใหม่ทีหลัง ไม่แตะ
-      out_arr := out_arr || jsonb_build_array(jsonb_build_object(
-        'customer_id', cid, 'product_id', pid, 'now', curp, 'restore_to', bp, 'action', 'ข้าม (มีราคาใหม่อยู่แล้ว)'));
+      if p_overwrite then
+        n_over := n_over + 1;   -- โหมดทับ: เอาราคาในไฟล์สำรองมาแทนตัวเลขปัจจุบัน
+        if p_apply then
+          update customer_prices set price = bp where customer_id = cid and product_id = pid;
+        end if;
+        out_arr := out_arr || jsonb_build_array(jsonb_build_object(
+          'customer_id', cid, 'product_id', pid, 'now', curp, 'restore_to', bp, 'action', 'ทับด้วยราคาสำรอง'));
+      else
+        n_diff := n_diff + 1;   -- มีราคาเฉพาะร้านอยู่แล้วแต่คนละเลข — อาจตั้งใหม่ทีหลัง ไม่แตะ
+        out_arr := out_arr || jsonb_build_array(jsonb_build_object(
+          'customer_id', cid, 'product_id', pid, 'now', curp, 'restore_to', bp, 'action', 'ข้าม (มีราคาใหม่อยู่แล้ว)'));
+      end if;
 
     else
       n_same := n_same + 1;   -- เหมือนเดิม ไม่ต้องทำอะไร
@@ -75,12 +87,14 @@ begin
 
   return jsonb_build_object(
     'applied', p_apply,
+    'overwrite', p_overwrite,
     'lost_missing', n_missing,      -- รายการที่หายไปเลย
     'lost_to_central', n_null,      -- รายการที่กลายเป็นราคากลาง
+    'overwritten', n_over,          -- รายการที่ทับด้วยราคาสำรอง (เฉพาะโหมดทับ)
     'unchanged', n_same,
     'kept_new_price', n_diff,
     'items', out_arr);
 end $$;
 
-revoke execute on function nas_restore_prices(text, jsonb, boolean) from public;
-grant  execute on function nas_restore_prices(text, jsonb, boolean) to anon, authenticated;
+revoke execute on function nas_restore_prices(text, jsonb, boolean, boolean) from public;
+grant  execute on function nas_restore_prices(text, jsonb, boolean, boolean) to anon, authenticated;
