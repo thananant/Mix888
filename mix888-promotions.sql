@@ -199,50 +199,73 @@ end $$;
 revoke execute on function promo_apply_order(bigint) from public, anon;
 
 -- 6.3) ครอบ place_order_v2 (ฟังก์ชันรับออเดอร์ของหน้าลูกค้า) ให้ใส่ราคาโปรหลังบันทึก
---      • รันครั้งแรก: เปลี่ยนชื่อของเดิมเป็น place_order_v2_base แล้วสร้าง place_order_v2 ตัวใหม่
---        ที่รับพารามิเตอร์/คืนค่าชนิดเดิมทุกอย่าง → หน้าลูกค้าไม่ต้องแก้อะไร
+--      • รันครั้งแรก: เปลี่ยนชื่อของเดิมเป็น place_order_v2_base (ถ้ามีหลายแบบ/overload → _base, _base_2, …
+--        คนละชื่อ กันเรียกสลับตัว) แล้วสร้าง place_order_v2 ตัวใหม่ที่รับพารามิเตอร์/คืนค่าชนิดเดิมทุกอย่าง
+--        ครบทุกแบบ → หน้าลูกค้าไม่ต้องแก้อะไร
 --      • รันซ้ำ: สร้างตัวครอบทับของเดิม (ไม่เปลี่ยนชื่อซ้ำ ไม่มีวันเรียกตัวเองวน)
+--      • แบบที่ไม่คืน json/jsonb หรือพารามิเตอร์ไม่มีชื่อ → ปล่อยไว้ตามเดิม (แจ้ง notice)
 --      • ถ้าขั้นใส่ราคาโปรพลาด → ออเดอร์ยังบันทึกที่ราคาปกติ ไม่ล้มทั้งใบ (แจ้ง warning ใน log)
 do $$
 declare
-  base_oid oid; n int;
-  args text; idargs text; ret text; callargs text; body text;
+  f record; k int; base_name text; ref_base text;
+  n_wrapped int := 0; callargs text; body text;
 begin
-  select count(*) into n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
-   where ns.nspname = 'public' and p.proname = 'place_order_v2_base';
-  if n > 1 then raise exception 'พบ place_order_v2_base มากกว่า 1 ตัว — ติดต่อผู้ดูแลระบบ'; end if;
-  if n = 0 then
-    select count(*) into n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
-     where ns.nspname = 'public' and p.proname = 'place_order_v2';
-    if n = 0 then raise exception 'ไม่พบฟังก์ชัน place_order_v2 ในฐานข้อมูล — ราคาโปรจะยังไม่มีผลตอนลูกค้าสั่ง'; end if;
-    if n > 1 then raise exception 'พบ place_order_v2 มากกว่า 1 ตัว (overload) — ติดต่อผู้ดูแลระบบ'; end if;
-    select p.oid into base_oid from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
-     where ns.nspname = 'public' and p.proname = 'place_order_v2';
-    if position('place_order_v2_base' in pg_get_functiondef(base_oid)) > 0 then
-      raise exception 'place_order_v2 ปัจจุบันเป็นตัวครอบอยู่แล้ว แต่ไม่พบ place_order_v2_base — ติดต่อผู้ดูแลระบบ';
+  -- 1) เปลี่ยนชื่อของเดิมทุกแบบ (ที่ยังไม่ใช่ตัวครอบ) เป็นชื่อฐานที่ไม่ซ้ำกัน
+  for f in
+    select p.oid, p.proargnames, pg_get_function_result(p.oid) as ret,
+           pg_get_function_identity_arguments(p.oid) as idargs, pg_get_functiondef(p.oid) as def
+      from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+     where ns.nspname = 'public' and p.proname = 'place_order_v2' and p.prokind = 'f'
+     order by p.oid
+  loop
+    if position('place_order_v2_base' in f.def) > 0 then
+      -- ตัวครอบจากการรันครั้งก่อน → ฐานที่มันเรียกต้องยังอยู่
+      ref_base := substring(f.def from '(place_order_v2_base(?:_[0-9]+)?)');
+      if not exists (select 1 from pg_proc b join pg_namespace bn on bn.oid = b.pronamespace
+                      where bn.nspname = 'public' and b.proname = ref_base) then
+        raise exception 'place_order_v2(%) เป็นตัวครอบอยู่แล้ว แต่ไม่พบฟังก์ชันฐาน % — ติดต่อผู้ดูแลระบบ', f.idargs, ref_base;
+      end if;
+      continue;
     end if;
-    execute format('alter function %s rename to place_order_v2_base', base_oid::regprocedure);
-  end if;
-  select p.oid into base_oid from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
-   where ns.nspname = 'public' and p.proname = 'place_order_v2_base';
-  args   := pg_get_function_arguments(base_oid);            -- รวมค่า default
-  idargs := pg_get_function_identity_arguments(base_oid);
-  ret    := pg_get_function_result(base_oid);
-  if ret not in ('json', 'jsonb') then
-    raise exception 'place_order_v2 คืนค่าชนิด % (คาดว่า json/jsonb) — ติดต่อผู้ดูแลระบบ', ret;
-  end if;
-  select string_agg(format('%I => %I', a, a), ', ' order by ord) into callargs
-    from unnest((select proargnames from pg_proc where oid = base_oid)) with ordinality as t(a, ord);
-  if callargs is null then raise exception 'place_order_v2 ไม่มีชื่อพารามิเตอร์ — ติดต่อผู้ดูแลระบบ'; end if;
-  -- ตัวฐานเรียกผ่านตัวครอบเท่านั้น (กันหน้าเว็บ/คนนอกเรียกข้ามราคาโปร)
-  execute format('revoke execute on function %s from public, anon, authenticated', base_oid::regprocedure);
-  body := format($f$
+    if f.ret not in ('json', 'jsonb') or f.proargnames is null
+       or exists (select 1 from unnest(f.proargnames) a where coalesce(a, '') = '') then
+      raise notice 'ข้าม place_order_v2(%) — คืนค่า % / พารามิเตอร์ไม่มีชื่อ (ครอบเฉพาะแบบที่คืน json/jsonb)', f.idargs, f.ret;
+      continue;
+    end if;
+    k := 1; base_name := 'place_order_v2_base';
+    while exists (select 1 from pg_proc b join pg_namespace bn on bn.oid = b.pronamespace
+                   where bn.nspname = 'public' and b.proname = base_name) loop
+      k := k + 1; base_name := 'place_order_v2_base_' || k;
+    end loop;
+    execute format('alter function %s rename to %I', f.oid::regprocedure, base_name);
+    raise notice 'เปลี่ยนชื่อ place_order_v2(%) → %', f.idargs, base_name;
+  end loop;
+
+  -- 2) สร้างตัวครอบให้ทุกฐาน (ชื่อ/พารามิเตอร์/ค่า default/ชนิดผลลัพธ์เหมือนฐานของมัน)
+  for f in
+    select p.oid, p.proname, p.proargnames,
+           pg_get_function_arguments(p.oid) as args,            -- รวมค่า default
+           pg_get_function_identity_arguments(p.oid) as idargs,
+           pg_get_function_result(p.oid) as ret
+      from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+     where ns.nspname = 'public' and p.proname ~ '^place_order_v2_base(_[0-9]+)?$' and p.prokind = 'f'
+     order by p.oid
+  loop
+    if f.ret not in ('json', 'jsonb') then
+      raise exception '%(%) คืนค่าชนิด % (คาดว่า json/jsonb) — ติดต่อผู้ดูแลระบบ', f.proname, f.idargs, f.ret;
+    end if;
+    select string_agg(format('%I => %I', a, a), ', ' order by ord) into callargs
+      from unnest(f.proargnames) with ordinality as t(a, ord);
+    if callargs is null then raise exception '%(%) ไม่มีชื่อพารามิเตอร์ — ติดต่อผู้ดูแลระบบ', f.proname, f.idargs; end if;
+    -- ตัวฐานเรียกผ่านตัวครอบเท่านั้น (กันหน้าเว็บ/คนนอกเรียกข้ามราคาโปร)
+    execute format('revoke execute on function %s from public, anon, authenticated', f.oid::regprocedure);
+    body := format($f$
 create or replace function public.place_order_v2(%s) returns %s
 language plpgsql security definer set search_path = public, pg_temp
 as $w$
 declare res jsonb; v_no text; v_oid bigint; v_total numeric; ap jsonb;
 begin
-  res := (place_order_v2_base(%s))::jsonb;
+  res := (%I(%s))::jsonb;
   begin
     v_no := res->>'order_no';
     if v_no is not null then
@@ -260,10 +283,16 @@ begin
     raise warning 'promo_apply_order %%: %%', v_no, sqlerrm;   -- ราคาโปรพลาด → ออเดอร์ยังอยู่ที่ราคาปกติ
   end;
   return res::%s;
-end $w$;$f$, args, ret, callargs, ret);
-  execute body;
-  execute format('revoke execute on function public.place_order_v2(%s) from public', idargs);
-  execute format('grant execute on function public.place_order_v2(%s) to anon, authenticated', idargs);
+end $w$;$f$, f.args, f.ret, f.proname, callargs, f.ret);
+    execute body;
+    execute format('revoke execute on function public.place_order_v2(%s) from public', f.idargs);
+    execute format('grant execute on function public.place_order_v2(%s) to anon, authenticated', f.idargs);
+    n_wrapped := n_wrapped + 1;
+  end loop;
+  if n_wrapped = 0 then
+    raise exception 'ไม่พบฟังก์ชัน place_order_v2 ที่ครอบได้ — ราคาโปรจะยังไม่มีผลตอนลูกค้าสั่ง';
+  end if;
+  raise notice 'ครอบ place_order_v2 แล้ว % แบบ', n_wrapped;
 end $$;
 notify pgrst, 'reload schema';
 
@@ -326,3 +355,14 @@ select cron.schedule('promo-announce', '*/5 * * * *', $$
     headers := '{"Content-Type":"application/json","Authorization":"Bearer sb_publishable_HqLNQDwR4omYcb7BNUEKIw_vyHCo4N-"}'::jsonb,
     body    := '{"run":true}'::jsonb)
 $$);
+
+-- 9) สรุปผล (ตารางที่โชว์หลังรัน): ต้องเห็น place_order_v2 = "ตัวครอบ (ราคาโปรมีผล)" คู่กับฐาน place_order_v2_base…
+select p.proname as "ฟังก์ชัน",
+       pg_get_function_identity_arguments(p.oid) as "พารามิเตอร์",
+       pg_get_function_result(p.oid) as "คืนค่า",
+       case when p.proname = 'place_order_v2' and position('place_order_v2_base' in pg_get_functiondef(p.oid)) > 0 then '✅ ตัวครอบ (ราคาโปรมีผลตอนสั่ง)'
+            when p.proname = 'place_order_v2' then '⚠️ ยังไม่ได้ครอบ (ดู notice ด้านบน)'
+            else 'ฐานเดิม (เรียกผ่านตัวครอบเท่านั้น)' end as "สถานะ"
+  from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+ where ns.nspname = 'public' and p.proname ~ '^place_order_v2(_base(_[0-9]+)?)?$'
+ order by p.proname, 2;
