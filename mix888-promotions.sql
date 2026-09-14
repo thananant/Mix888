@@ -135,12 +135,17 @@ begin
     into result
     from (
       select distinct on (p.product_id)
-             p.product_id, p.promo_price, nullif(ent->>'normal','')::numeric as normal, p.ends_at, p.win_label
+             p.product_id, p.promo_price,
+             (case when ent->>'normal' ~ '^-?[0-9]+\.?[0-9]*$' then (ent->>'normal')::numeric end) as normal,
+             p.ends_at, p.win_label
         from promotions p
-        cross join lateral jsonb_array_elements(coalesce(p.customers,'[]'::jsonb)) ent
+        -- กันข้อมูล customers รูปแบบผิด (ไม่ใช่ array / id ไม่ใช่ตัวเลข) — แถวเสีย 1 แถวต้องไม่ทำให้ทุกร้านพัง
+        cross join lateral jsonb_array_elements(
+          case when jsonb_typeof(p.customers) = 'array' then p.customers else '[]'::jsonb end) ent
        where p.status in ('scheduled','active')
+         and p.promo_price > 0
          and now() >= p.starts_at and now() < p.ends_at
-         and nullif(ent->>'customer_id','')::bigint = cid
+         and (case when ent->>'customer_id' ~ '^[0-9]+$' then (ent->>'customer_id')::bigint end) = cid
        order by p.product_id, p.promo_price asc, p.id desc) t;
   return result;
 end $$;
@@ -153,13 +158,15 @@ language sql stable security definer set search_path = public, pg_temp
 as $$
   select min(p.promo_price)
     from promotions p
-    cross join lateral jsonb_array_elements(coalesce(p.customers,'[]'::jsonb)) ent
+    cross join lateral jsonb_array_elements(
+      case when jsonb_typeof(p.customers) = 'array' then p.customers else '[]'::jsonb end) ent
    where p.product_id = p_product
      and p.status in ('scheduled','active')
+     and p.promo_price > 0
      and now() >= p.starts_at and now() < p.ends_at
-     and nullif(ent->>'customer_id','')::bigint = p_customer;
+     and (case when ent->>'customer_id' ~ '^[0-9]+$' then (ent->>'customer_id')::bigint end) = p_customer;
 $$;
-revoke execute on function promo_price_for(bigint, bigint) from public, anon;
+revoke execute on function promo_price_for(bigint, bigint) from public, anon, authenticated;
 
 -- 6.2) ใส่ราคาโปรให้ออเดอร์ที่เพิ่งบันทึก — เฉพาะรายการที่ราคาโปร "ถูกกว่า" ราคาที่คิดไว้
 --      แก้แค่ order_items.price ของออเดอร์ใบนี้ + orders.total (ลดลงเท่าส่วนลด)
@@ -182,7 +189,7 @@ begin
       from order_items oi
      where oi.order_id = p_order_id
   loop
-    if r.promo is null or r.promo < 0 or r.price is null or r.promo >= r.price then continue; end if;
+    if r.promo is null or r.promo <= 0 or r.price is null or r.promo >= r.price then continue; end if;
     if coalesce(amt_plain, false) then
       update order_items set price = r.promo, amount = r.promo * coalesce(qty, 0) where id = r.id;
     else
@@ -196,23 +203,26 @@ begin
   end if;
   return jsonb_build_object('changed', n, 'reduction', cut);
 end $$;
-revoke execute on function promo_apply_order(bigint) from public, anon;
+-- เรียกได้เฉพาะจากในฐานข้อมูล (ตัวครอบ place_order_v2) — คนนอก/พนักงานเรียกตรงไม่ได้ กันไปไล่ลดออเดอร์เก่า
+revoke execute on function promo_apply_order(bigint) from public, anon, authenticated;
 
 -- 6.3) ครอบ place_order_v2 (ฟังก์ชันรับออเดอร์ของหน้าลูกค้า) ให้ใส่ราคาโปรหลังบันทึก
 --      • รันครั้งแรก: เปลี่ยนชื่อของเดิมเป็น place_order_v2_base (ถ้ามีหลายแบบ/overload → _base, _base_2, …
 --        คนละชื่อ กันเรียกสลับตัว) แล้วสร้าง place_order_v2 ตัวใหม่ที่รับพารามิเตอร์/คืนค่าชนิดเดิมทุกอย่าง
 --        ครบทุกแบบ → หน้าลูกค้าไม่ต้องแก้อะไร
---      • รันซ้ำ: สร้างตัวครอบทับของเดิม (ไม่เปลี่ยนชื่อซ้ำ ไม่มีวันเรียกตัวเองวน)
---      • แบบที่ไม่คืน json/jsonb หรือพารามิเตอร์ไม่มีชื่อ → ปล่อยไว้ตามเดิม (แจ้ง notice)
+--      • รันซ้ำ: สร้างตัวครอบใหม่แทนของเดิม (ไม่เปลี่ยนชื่อซ้ำ ไม่มีวันเรียกตัวเองวน)
+--      • ⭐ ถ้าภายหลังมีการวางฟังก์ชัน place_order_v2 เวอร์ชันใหม่ทับ (ตัวครอบจะหายไป ราคาโปรหยุดทำงาน)
+--        แค่รันไฟล์นี้ซ้ำ = กลับมาครอบเวอร์ชันใหม่ให้เอง และลบฐานรุ่นเก่าที่ถูกแทนที่ทิ้ง
+--      • แบบที่ไม่คืน json/jsonb / พารามิเตอร์ไม่มีชื่อ / มี OUT-VARIADIC → ปล่อยไว้ตามเดิม (แจ้ง notice)
 --      • ถ้าขั้นใส่ราคาโปรพลาด → ออเดอร์ยังบันทึกที่ราคาปกติ ไม่ล้มทั้งใบ (แจ้ง warning ใน log)
 do $$
 declare
   f record; k int; base_name text; ref_base text;
-  n_wrapped int := 0; callargs text; body text;
+  n_wrapped int := 0; callargs text; cid_snip text; body text;
 begin
   -- 1) เปลี่ยนชื่อของเดิมทุกแบบ (ที่ยังไม่ใช่ตัวครอบ) เป็นชื่อฐานที่ไม่ซ้ำกัน
   for f in
-    select p.oid, p.proargnames, pg_get_function_result(p.oid) as ret,
+    select p.oid, p.proargnames, p.proargmodes, pg_get_function_result(p.oid) as ret,
            pg_get_function_identity_arguments(p.oid) as idargs, pg_get_functiondef(p.oid) as def
       from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
      where ns.nspname = 'public' and p.proname = 'place_order_v2' and p.prokind = 'f'
@@ -227,9 +237,9 @@ begin
       end if;
       continue;
     end if;
-    if f.ret not in ('json', 'jsonb') or f.proargnames is null
+    if f.ret not in ('json', 'jsonb') or f.proargnames is null or f.proargmodes is not null
        or exists (select 1 from unnest(f.proargnames) a where coalesce(a, '') = '') then
-      raise notice 'ข้าม place_order_v2(%) — คืนค่า % / พารามิเตอร์ไม่มีชื่อ (ครอบเฉพาะแบบที่คืน json/jsonb)', f.idargs, f.ret;
+      raise notice 'ข้าม place_order_v2(%) — คืนค่า % / พารามิเตอร์แบบพิเศษหรือไม่มีชื่อ (ครอบเฉพาะแบบธรรมดาที่คืน json/jsonb)', f.idargs, f.ret;
       continue;
     end if;
     k := 1; base_name := 'place_order_v2_base';
@@ -241,9 +251,23 @@ begin
     raise notice 'เปลี่ยนชื่อ place_order_v2(%) → %', f.idargs, base_name;
   end loop;
 
+  -- 1.5) ฐานลายเซ็นซ้ำกัน (เกิดเมื่อมีคนวางฟังก์ชันรับออเดอร์เวอร์ชันใหม่ทับ แล้วรันไฟล์นี้ซ้ำ)
+  --      → เก็บเฉพาะตัวใหม่สุด ลบตัวเก่าทิ้ง กัน create ตัวครอบชนกันเองจน error
+  for f in
+    select q.oid from (
+      select p.oid,   -- จับคู่ด้วย "ชนิด" พารามิเตอร์ (ตัวตนจริงของฟังก์ชัน) — ชื่อพารามิเตอร์อาจถูกเปลี่ยนตอน redeploy
+             row_number() over (partition by p.proargtypes order by p.oid desc) as rn
+        from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+       where ns.nspname = 'public' and p.proname ~ '^place_order_v2_base(_[0-9]+)?$' and p.prokind = 'f') q
+     where q.rn > 1
+  loop
+    raise notice 'ลบฐานรุ่นเก่าที่ถูกวางเวอร์ชันใหม่ทับแล้ว: %', f.oid::regprocedure;
+    execute format('drop function %s', f.oid::regprocedure);
+  end loop;
+
   -- 2) สร้างตัวครอบให้ทุกฐาน (ชื่อ/พารามิเตอร์/ค่า default/ชนิดผลลัพธ์เหมือนฐานของมัน)
   for f in
-    select p.oid, p.proname, p.proargnames,
+    select p.oid, p.proname, p.proargnames, p.proargmodes,
            pg_get_function_arguments(p.oid) as args,            -- รวมค่า default
            pg_get_function_identity_arguments(p.oid) as idargs,
            pg_get_function_result(p.oid) as ret
@@ -251,25 +275,42 @@ begin
      where ns.nspname = 'public' and p.proname ~ '^place_order_v2_base(_[0-9]+)?$' and p.prokind = 'f'
      order by p.oid
   loop
-    if f.ret not in ('json', 'jsonb') then
-      raise exception '%(%) คืนค่าชนิด % (คาดว่า json/jsonb) — ติดต่อผู้ดูแลระบบ', f.proname, f.idargs, f.ret;
+    if f.ret not in ('json', 'jsonb') or f.proargnames is null or f.proargmodes is not null then
+      raise notice 'ข้ามฐาน %(%) — ครอบไม่ได้ (คืนค่า % / พารามิเตอร์แบบพิเศษ)', f.proname, f.idargs, f.ret;
+      continue;
     end if;
     select string_agg(format('%I => %I', a, a), ', ' order by ord) into callargs
       from unnest(f.proargnames) with ordinality as t(a, ord);
-    if callargs is null then raise exception '%(%) ไม่มีชื่อพารามิเตอร์ — ติดต่อผู้ดูแลระบบ', f.proname, f.idargs; end if;
+    if callargs is null then
+      raise notice 'ข้ามฐาน %(%) — ไม่มีชื่อพารามิเตอร์', f.proname, f.idargs;
+      continue;
+    end if;
+    -- หาออเดอร์ที่เพิ่งบันทึกให้แม่น: จำกัดด้วยร้าน (จาก p_token) + เพิ่งสร้างไม่เกิน 1 นาที
+    -- กันกรณีเลขออเดอร์ซ้ำข้ามร้าน แล้วไปลดราคาผิดใบ
+    cid_snip := case when 'p_token' = any(f.proargnames)
+      then 'select id into v_cid from customers where order_token = p_token or slug = p_token limit 1;'
+      else 'v_cid := null;' end;
     -- ตัวฐานเรียกผ่านตัวครอบเท่านั้น (กันหน้าเว็บ/คนนอกเรียกข้ามราคาโปร)
     execute format('revoke execute on function %s from public, anon, authenticated', f.oid::regprocedure);
+    -- drop แล้วสร้างใหม่ (แทน create or replace) — กันติดกฎห้ามเปลี่ยนชื่อพารามิเตอร์/ค่า default ของตัวครอบเก่า
+    execute format('drop function if exists public.place_order_v2(%s)', f.idargs);
+    -- search_path มี extensions ด้วย ให้เหมือนตอน Supabase เรียกตรง — ฟังก์ชันฐานที่ใช้ crypt()/uuid ฯลฯ ทำงานเหมือนเดิม
     body := format($f$
-create or replace function public.place_order_v2(%s) returns %s
-language plpgsql security definer set search_path = public, pg_temp
+create function public.place_order_v2(%s) returns %s
+language plpgsql security definer set search_path = public, extensions, pg_temp
 as $w$
-declare res jsonb; v_no text; v_oid bigint; v_total numeric; ap jsonb;
+declare res jsonb; v_no text; v_oid bigint; v_total numeric; ap jsonb; v_cid bigint;
 begin
   res := (%I(%s))::jsonb;
   begin
     v_no := res->>'order_no';
     if v_no is not null then
-      select id into v_oid from orders where order_no = v_no order by id desc limit 1;
+      %s
+      select id into v_oid from orders
+       where order_no = v_no
+         and (v_cid is null or customer_id = v_cid)
+         and coalesce(created_at, now()) >= now() - interval '1 minute'
+       order by id desc limit 1;
       if v_oid is not null then
         ap := promo_apply_order(v_oid);
         if coalesce((ap->>'changed')::int, 0) > 0 then
@@ -283,7 +324,7 @@ begin
     raise warning 'promo_apply_order %%: %%', v_no, sqlerrm;   -- ราคาโปรพลาด → ออเดอร์ยังอยู่ที่ราคาปกติ
   end;
   return res::%s;
-end $w$;$f$, f.args, f.ret, f.proname, callargs, f.ret);
+end $w$;$f$, f.args, f.ret, f.proname, callargs, cid_snip, f.ret);
     execute body;
     execute format('revoke execute on function public.place_order_v2(%s) from public', f.idargs);
     execute format('grant execute on function public.place_order_v2(%s) to anon, authenticated', f.idargs);
