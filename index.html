@@ -344,7 +344,7 @@ const PROMO_CAT='__promo';   // ค่าพิเศษของแถบ "🔥
 function pmPrice(it){
   const pm=promos[it.product_id];if(!pm)return null;
   const pp=Number(pm.promo_price);
-  if(!(pp>=0)||!(pp<Number(it.price)))return null;
+  if(!(pp>0)||!(pp<Number(it.price)))return null;
   if(pm.ends_at&&new Date(pm.ends_at).getTime()<=Date.now())return null;
   return pp;
 }
@@ -545,17 +545,18 @@ async function placeOrder(){
   const ci=cartItems();if(!ci.length)return;
   const btn=document.getElementById('confirm-btn');
   btn.disabled=true;btn.textContent='กำลังส่งออเดอร์…';
-  // โปรอาจหมดเวลาระหว่างเปิดหน้าค้างไว้ → ดึงราคาโปรล่าสุดก่อนส่ง ถ้ายอดเปลี่ยนให้ลูกค้าดูใหม่ก่อน (ไม่ให้ยอดในบิลต่างจากที่เห็น)
-  if(ci.some(x=>x.promo)){
+  // โปรอาจเริ่ม/หมดเวลาระหว่างเปิดหน้าค้างไว้ → ดึงราคาโปรล่าสุดก่อนส่งทุกครั้ง
+  // ถ้ายอดเปลี่ยนให้ลูกค้าดูใหม่ก่อน (ยอดในบิลต้องตรงกับที่ลูกค้าเห็นตอนยืนยัน)
+  try{
     await loadPromos();
     const sum=a=>a.reduce((s,x)=>s+x.amount,0);
     if(Math.abs(sum(cartItems())-sum(ci))>0.004){
       btn.disabled=false;btn.textContent='✓ ยืนยันสั่งสินค้า';
       closeConfirm();render();
-      toast('ราคาพิเศษบางรายการหมดเวลาแล้ว — ยอดรวมเปลี่ยน กรุณาตรวจสอบแล้วกดสั่งอีกครั้ง');
+      toast('ราคาบางรายการเปลี่ยน (โปรเริ่ม/หมดเวลาพอดี) — ยอดรวมเปลี่ยน กรุณาตรวจสอบแล้วกดสั่งอีกครั้ง');
       return;
     }
-  }
+  }catch(e){}
   let pin=savedPin();
   if(customer&&customer.has_pin&&!pin){
     btn.disabled=false;btn.textContent='✓ ยืนยันสั่งสินค้า';
