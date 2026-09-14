@@ -62,6 +62,8 @@ main{max-width:640px;margin:0 auto;padding:12px}
 .cchip{flex:none;font:inherit;font-size:13px;font-weight:600;padding:7px 15px;border-radius:99px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap}
 .cchip.on{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 2px 8px rgba(192,32,31,.25)}
 .cchip .cn2{opacity:.65;font-weight:400;margin-left:3px}
+.cchip.pr{border-color:#e0261f;color:#c0201f;background:#fff4f2}
+.cchip.pr.on{background:#e0261f;color:#fff}
 .cathead{display:flex;align-items:center;gap:8px;margin:14px 0 8px;font-family:var(--display);font-size:15px;font-weight:700;color:var(--accent-deep)}
 .cathead::after{content:'';flex:1;height:1px;background:var(--line)}
 .cathead:first-child{margin-top:2px}
@@ -182,7 +184,7 @@ body{padding-bottom:calc(90px + env(safe-area-inset-bottom))}
 
     <div id="page-order">
       <input class="searchbox" id="search" placeholder="🔍 ค้นหาสินค้า…" oninput="render()">
-      <div id="promobanner"></div>
+      <div id="promobanner" style="cursor:pointer" onclick="pickCat(PROMO_CAT)"></div>
       <div id="catchips"></div>
       <div id="list"></div>
     </div>
@@ -336,6 +338,17 @@ async function loadShipInfo(){
   }catch(e){}   // ยังไม่ได้ติดตั้ง — หน้าใช้งานได้ปกติ ไม่แจ้งเรื่องค่าส่ง
 }
 let promos={};   // product_id → โปรที่กำลังลดของร้านนี้ {promo_price, normal, ends_at}
+const PROMO_CAT='__promo';   // ค่าพิเศษของแถบ "🔥 สินค้าลดราคาพิเศษ" (ไม่ใช่หมวด SKU จริง)
+/** ราคาโปรที่ใช้จริงกับสินค้านี้ตอนนี้ — null = ไม่มีโปร / โปรไม่ถูกกว่าราคาปกติของร้าน / หมดเวลาแล้ว
+ *  (ตอนบันทึกออเดอร์ ฝั่งเซิร์ฟเวอร์ใช้เงื่อนไขเดียวกัน จึงได้ราคาเท่าที่เห็นบนหน้า) */
+function pmPrice(it){
+  const pm=promos[it.product_id];if(!pm)return null;
+  const pp=Number(pm.promo_price);
+  if(!(pp>=0)||!(pp<Number(it.price)))return null;
+  if(pm.ends_at&&new Date(pm.ends_at).getTime()<=Date.now())return null;
+  return pp;
+}
+const hasPromo=it=>pmPrice(it)!=null;
 async function loadPromos(){
   try{
     const {data,error}=await db.rpc('get_customer_promos',{p_token:token});
@@ -356,7 +369,7 @@ async function loadCatalog(){
   render();
 }
 
-/** แถบเลือกหมวด — ขึ้นเฉพาะเมื่อร้านนี้มีสินค้ามากกว่า 1 หมวด */
+/** แถบเลือกหมวด — ขึ้นเมื่อร้านนี้มีสินค้ามากกว่า 1 หมวด หรือมีสินค้าลดราคาพิเศษอยู่ (แถบ 🔥 ขึ้นก่อนหมวดอื่น) */
 function renderCatChips(){
   const el=document.getElementById('catchips');if(!el)return;
   const cnt=new Map();
@@ -364,11 +377,14 @@ function renderCatChips(){
   const order=(pre)=>{const c=skuCats.find(x=>String(x.prefix||'').toUpperCase()===pre);return c?Number(c.sort_order||999):9999;};
   const cats=[...cnt.keys()].sort((a,b)=>order(a)-order(b)||catLabel(a).localeCompare(catLabel(b),'th'));
   const q=(document.getElementById('search').value||'').trim();
-  if(cats.length<2||q||!skuCats.length){el.innerHTML='';return;}   // ยังไม่ติดตั้งหมวด → ไม่ต้องมีแถบ
-  if(catFilter&&!cnt.has(catFilter))catFilter='';
+  const pn=items.filter(hasPromo).length;
+  const showCats=cats.length>=2&&skuCats.length>0;   // ยังไม่ติดตั้งหมวด → ไม่มีแถบหมวด (แถบโปรยังขึ้นได้)
+  if(q||(!showCats&&!pn)){el.innerHTML='';return;}
+  if(catFilter===PROMO_CAT?!pn:(catFilter&&!cnt.has(catFilter)))catFilter='';
   el.innerHTML='<button class="cchip'+(catFilter?'':' on')+'" onclick="pickCat(\'\')">ทั้งหมด<span class="cn2">'+items.length+'</span></button>'
-    +cats.map(c=>'<button class="cchip'+(catFilter===c?' on':'')+'" onclick="pickCat(\''+c+'\')">'
-      +esc(catLabel(c))+'<span class="cn2">'+cnt.get(c)+'</span></button>').join('');
+    +(pn?'<button class="cchip pr'+(catFilter===PROMO_CAT?' on':'')+'" onclick="pickCat(PROMO_CAT)">🔥 สินค้าลดราคาพิเศษ<span class="cn2">'+pn+'</span></button>':'')
+    +(showCats?cats.map(c=>'<button class="cchip'+(catFilter===c?' on':'')+'" onclick="pickCat(\''+c+'\')">'
+      +esc(catLabel(c))+'<span class="cn2">'+cnt.get(c)+'</span></button>').join(''):'');
 }
 function pickCat(c){
   catFilter=(catFilter===c)?'':c;
@@ -378,15 +394,15 @@ function pickCat(c){
 function render(){
   const q=(document.getElementById('search').value||'').toLowerCase();
   let list=items.filter(it=>!q||it.name.toLowerCase().includes(q)||it.sku.toLowerCase().includes(q));
-  if(!q&&catFilter)list=list.filter(it=>catOf(it.sku)===catFilter);
+  if(!q&&catFilter)list=list.filter(it=>catFilter===PROMO_CAT?hasPromo(it):catOf(it.sku)===catFilter);
   // สินค้าที่กำลังลดราคาขึ้นก่อนเสมอ (ในกลุ่มเดียวกันคงลำดับชื่อไทยเดิม)
-  list.sort((a,b)=>(promos[b.product_id]?1:0)-(promos[a.product_id]?1:0));
+  list.sort((a,b)=>(hasPromo(b)?1:0)-(hasPromo(a)?1:0));
   renderCatChips();
   const banner=document.getElementById('promobanner');
-  const pn=items.filter(it=>promos[it.product_id]).length;
+  const pn=items.filter(hasPromo).length;
   if(banner){
     banner.style.display=pn?'block':'none';
-    if(pn)banner.textContent='🔥 โปรพิเศษสำหรับร้านคุณ '+pn+' รายการ — ลดจริงถึงเวลาหมดเขต สั่งเลย!';
+    if(pn)banner.textContent='🔥 สินค้าลดราคาพิเศษสำหรับร้านคุณ '+pn+' รายการ — ลดจริงถึงเวลาหมดเขต แตะเพื่อดู';
   }
   const el=document.getElementById('list');
   if(!items.length){el.innerHTML='<div class="empty">ยังไม่มีสินค้าในรายการของคุณ<br>กรุณาติดต่อทางร้าน</div>';updateCartBar();return;}
@@ -403,14 +419,15 @@ function render(){
     const img=it.image_url
       ?`<img class="pimg" src="${esc(it.image_url)}" loading="lazy" alt="" onclick="showImg('${esc(it.image_url)}')">`
       :`<div class="pimg-ph">🧺</div>`;
-    const pm=promos[it.product_id];
-    const pmSave=pm&&!hidePrice()&&Number(pm.normal)>Number(it.price);
-    const badge=pm?`<div class="pbadge">🔥 โปรพิเศษ${pmSave?' ลด '+Math.round((pm.normal-it.price)/pm.normal*100)+'%':''}</div>`:'';
+    // ราคาโปร: ขีดราคาปกติของร้าน แล้วโชว์ราคาโปรที่จะสั่งได้จริง (ตอนบันทึกออเดอร์ได้ราคาเดียวกันนี้)
+    const pm=promos[it.product_id], pp=pmPrice(it);
+    const pmSave=pp!=null&&!hidePrice();
+    const badge=pp!=null?`<div class="pbadge">🔥 ลดราคาพิเศษ${pmSave?' ลด '+Math.round((it.price-pp)/it.price*100)+'%':''}</div>`:'';
     const priceHtml=hidePrice()?'':(pmSave
-      ?`<div class="price promo-p"><span class="old">${fmt(pm.normal)}</span>${fmt(it.price)} <small>/ ${esc(it.unit)}</small><span class="psave">ประหยัด ${fmt(pm.normal-it.price)}</span></div>`
+      ?`<div class="price promo-p"><span class="old">${fmt(it.price)}</span>${fmt(pp)} <small>/ ${esc(it.unit)}</small><span class="psave">ประหยัด ${fmt(it.price-pp)}</span></div>`
       :`<div class="price">${fmt(it.price)} <small>/ ${esc(it.unit)}</small></div>`);
-    const ends=pm?`<div class="pends">⏳ ลดถึง ${fmtEnds(pm.ends_at)} น. เท่านั้น</div>`:'';
-    return `<div class="item ${out?'out':''}${pm?' promo':''}">
+    const ends=pp!=null?`<div class="pends">⏳ ราคาพิเศษถึง ${fmtEnds(pm.ends_at)} น. เท่านั้น</div>`:'';
+    return `<div class="item ${out?'out':''}${pp!=null?' promo':''}">
       ${img}
       <div class="info">
         ${badge}
@@ -433,14 +450,14 @@ function render(){
   if(!grouped){
     el.innerHTML=list.map(cardHtml).join('');
   }else{
-    const promoItems=list.filter(it=>promos[it.product_id]);
-    const rest=list.filter(it=>!promos[it.product_id]);
+    const promoItems=list.filter(hasPromo);
+    const rest=list.filter(it=>!hasPromo(it));
     const byCat=new Map();
     for(const it of rest){const c=catOf(it.sku);if(!byCat.has(c))byCat.set(c,[]);byCat.get(c).push(it);}
     const order=(pre)=>{const c=skuCats.find(x=>String(x.prefix||'').toUpperCase()===pre);return c?Number(c.sort_order||999):9999;};
     const cats=[...byCat.keys()].sort((a,b)=>order(a)-order(b)||catLabel(a).localeCompare(catLabel(b),'th'));
     let html=promoItems.length
-      ? '<div class="cathead">🔥 โปรพิเศษของร้านคุณ</div>'+promoItems.map(cardHtml).join('')
+      ? '<div class="cathead">🔥 สินค้าลดราคาพิเศษของร้านคุณ</div>'+promoItems.map(cardHtml).join('')
       : '';
     for(const c of cats)
       html+='<div class="cathead">'+esc(catLabel(c))+'</div>'+byCat.get(c).map(cardHtml).join('');
@@ -469,8 +486,10 @@ function setQty(pid,val){
 
 function cartItems(){
   return Object.entries(cart).filter(([,q])=>q>0).map(([pid,q])=>{
-    const it=items.find(x=>x.product_id===Number(pid));
-    return it?{...it,qty:q,amount:q*Number(it.price)}:null;
+    const it=items.find(x=>x.product_id===Number(pid));if(!it)return null;
+    const pp=pmPrice(it);                       // ราคาโปร (ถ้ามีและถูกกว่า) — ฝั่งบันทึกออเดอร์ใช้เงื่อนไขเดียวกัน
+    const price=pp!=null?pp:Number(it.price);
+    return {...it,price,normal_price:Number(it.price),promo:pp!=null,qty:q,amount:q*price};
   }).filter(Boolean);
 }
 function updateCartBar(){
@@ -502,7 +521,7 @@ function openConfirm(){
     <div class="cline" style="align-items:center">
       ${img?'<img src="'+img+'" onerror="this.style.display=\'none\'" style="width:44px;height:44px;object-fit:cover;border-radius:10px;flex:none;margin-right:8px;background:#f6efe9">':''}
       <span class="cn">${esc(x.name)}</span>
-      <span class="cq">${x.qty} ${esc(x.unit)}${hidePrice()?'':' × '+fmt(x.price)}</span>
+      <span class="cq">${x.qty} ${esc(x.unit)}${hidePrice()?'':' × '+fmt(x.price)+(x.promo?' 🔥':'')}</span>
       <span class="ca">${hidePrice()?'':fmt(x.amount)}</span>
     </div>`;}).join('');
   const cTotal=ci.reduce((s,x)=>s+x.amount,0);
@@ -526,6 +545,17 @@ async function placeOrder(){
   const ci=cartItems();if(!ci.length)return;
   const btn=document.getElementById('confirm-btn');
   btn.disabled=true;btn.textContent='กำลังส่งออเดอร์…';
+  // โปรอาจหมดเวลาระหว่างเปิดหน้าค้างไว้ → ดึงราคาโปรล่าสุดก่อนส่ง ถ้ายอดเปลี่ยนให้ลูกค้าดูใหม่ก่อน (ไม่ให้ยอดในบิลต่างจากที่เห็น)
+  if(ci.some(x=>x.promo)){
+    await loadPromos();
+    const sum=a=>a.reduce((s,x)=>s+x.amount,0);
+    if(Math.abs(sum(cartItems())-sum(ci))>0.004){
+      btn.disabled=false;btn.textContent='✓ ยืนยันสั่งสินค้า';
+      closeConfirm();render();
+      toast('ราคาพิเศษบางรายการหมดเวลาแล้ว — ยอดรวมเปลี่ยน กรุณาตรวจสอบแล้วกดสั่งอีกครั้ง');
+      return;
+    }
+  }
   let pin=savedPin();
   if(customer&&customer.has_pin&&!pin){
     btn.disabled=false;btn.textContent='✓ ยืนยันสั่งสินค้า';
