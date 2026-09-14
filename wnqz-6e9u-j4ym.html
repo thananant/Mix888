@@ -338,14 +338,16 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       </div>
 
       <div id="bc-mode-promo" style="display:none">
-        <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">เลือกสินค้าและราคาโปร — ระบบส่งเฉพาะร้านที่<b>ถูกจัดสินค้าตัวนี้ไว้</b> และ<b>ราคาปกติของเขาแพงกว่าโปร</b>เท่านั้น (ใครได้ถูกกว่า/เท่ากับโปรอยู่แล้ว ไม่ส่ง)</div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="font-size:12.5px;color:var(--muted);margin:4px 0 10px">ใส่สินค้าได้<b>หลายตัวในโปรเดียว</b> — ระบบส่งเฉพาะร้านที่<b>ถูกจัดสินค้านั้นไว้</b> และ<b>ราคาปกติของเขาแพงกว่าโปร</b> (ใครได้ถูกกว่า/เท่ากับโปรอยู่แล้ว ไม่ส่ง) แต่ละร้านได้ไลน์ฉบับเดียว เห็นเฉพาะสินค้าที่ตัวเองได้โปร · แนบรูป/วิดีโอได้</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
           <div style="flex:2;min-width:220px;position:relative"><label>สินค้า</label>
             <input id="bp-prod" placeholder="พิมพ์ชื่อหรือ SKU…" style="width:100%" autocomplete="off" oninput="bpSuggest()" onfocus="bpSuggest()">
             <div id="bp-sugg" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:50;background:#fff;border:1px solid var(--line,#ddd);border-radius:10px;max-height:260px;overflow-y:auto;box-shadow:0 6px 18px rgba(0,0,0,.12)"></div></div>
           <div style="flex:1;min-width:110px"><label>ราคาโปร (฿)</label>
-            <input id="bp-price" type="number" min="0" step="0.01" style="width:100%" onchange="bpReset()"></div>
+            <input id="bp-price" type="number" min="0" step="0.01" style="width:100%" onkeydown="if(event.key==='Enter')bpAddItem()"></div>
+          <button class="btn-s" type="button" onclick="bpAddItem()">+ เพิ่มสินค้า</button>
         </div>
+        <div id="bp-items" style="margin-top:6px"></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
           <div><label>เริ่มวันที่</label><input id="bp-from" type="date"></div>
           <div><label>เวลาเริ่ม</label><input id="bp-from-time" type="time" value="00:00"></div>
@@ -368,6 +370,14 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <label style="margin-top:6px">ข้อความเพิ่มเติม (ไม่บังคับ)</label>
         <div class="bc-emoji" style="display:flex;flex-wrap:wrap;gap:2px;margin:2px 0"></div>
         <textarea id="bp-note" rows="2" style="width:100%" placeholder="เช่น สั่งในลิงก์ประจำร้านได้เลยครับ"></textarea>
+        <div style="display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap">
+          <label class="btn-g mini" style="cursor:pointer">🖼️ แนบรูป/วิดีโอ (ไม่บังคับ)<input type="file" id="bp-media" accept="image/png,image/jpeg,image/webp,video/mp4,video/quicktime" style="display:none" onchange="bpMediaPick(this)"></label>
+          <span id="bp-media-name" style="font-size:12.5px;color:var(--muted)"></span>
+          <button class="btn-g mini" id="bp-media-clear" style="display:none" onclick="bpMediaClear()">✕ เอาออก</button>
+          <span style="font-size:11.5px;color:var(--muted)">รูป JPG/PNG · วิดีโอ MP4 ≤50MB · ลูกค้าได้รับพร้อมข้อความโปร (GIF ใช้ไม่ได้)</span>
+        </div>
+        <img id="bp-media-prev" style="display:none;max-width:180px;max-height:180px;border-radius:10px;border:1px solid var(--line);margin-bottom:8px">
+        <video id="bp-media-vid" controls muted playsinline style="display:none;max-width:240px;border-radius:10px;border:1px solid var(--line);margin-bottom:8px"></video>
         <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
           <button class="btn-s" onclick="bpScan(this)">🔎 ค้นหาร้านที่เข้าเกณฑ์</button>
           <span class="count" id="bp-sum"></span>
@@ -2970,11 +2980,52 @@ function bpAnnUI(){
 
 /* ---- 🔥 โปรลดราคาสินค้า: หาเฉพาะร้านที่ถูกจัดสินค้าตัวนี้ และราคาปกติแพงกว่าโปร ---- */
 let bpRows=[],bpProd=null,bpSending=false,bpProdSel=null,bpPromoCur=null;
+let bpItems=[],bpMediaFile=null,bpMediaMsg=null;   // สินค้าในโปร [{p,promo}] · ไฟล์แนบ · ลิงก์สื่อที่อัปแล้ว (ใช้ซ้ำตอนกดส่งต่อ)
 function bpReset(){bpRows=[];bpPromoCur=null;document.getElementById('bp-list').innerHTML='';document.getElementById('bp-sum').textContent='';document.getElementById('bp-send').style.display='none';document.getElementById('bp-status').textContent='';const f=document.getElementById('bp-filter');if(f)f.style.display='none';}
+/* ---- รายการสินค้าในโปร (ใส่ได้หลายตัว) ---- */
+function bpAddItem(){
+  const p=bpFindProd(), promo=Number(document.getElementById('bp-price').value);
+  if(!p){toast('เลือกสินค้าจากรายการก่อน');return;}
+  if(!(promo>0)){toast('ใส่ราคาโปรก่อน');return;}
+  const ex=bpItems.find(x=>x.p.id===p.id);
+  if(ex)ex.promo=promo; else bpItems.push({p,promo});
+  bpProdSel=null; document.getElementById('bp-prod').value=''; document.getElementById('bp-price').value='';
+  document.getElementById('bp-sugg').style.display='none';
+  bpRenderItems(); bpReset(); document.getElementById('bp-prod').focus();
+}
+function bpRemoveItem(i){bpItems.splice(i,1);bpRenderItems();bpReset();}
+function bpRenderItems(){
+  const el=document.getElementById('bp-items');if(!el)return;
+  if(!bpItems.length){el.innerHTML='<div class="empty" style="padding:6px">ยังไม่ได้เลือกสินค้า — เลือกสินค้า ใส่ราคาโปร แล้วกด "+ เพิ่มสินค้า" (ใส่ได้หลายตัว ลูกค้าได้ไลน์ฉบับเดียว)</div>';return;}
+  el.innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>สินค้าในโปร</th><th class="num">ราคากลาง</th><th class="num">ราคาโปร</th><th></th></tr></thead><tbody>'
+    +bpItems.map((it,i)=>'<tr><td><b>'+esc(it.p.sku)+'</b> '+esc(it.p.name)+'</td><td class="num">฿'+fmt(it.p.base_price)+'</td>'
+      +'<td class="num"><b style="color:#b52020">฿'+fmt(it.promo)+'</b></td><td><button class="btn-g mini" onclick="bpRemoveItem('+i+')">✕</button></td></tr>').join('')
+    +'</tbody></table></div>';
+}
+/* ---- รูป/วิดีโอแนบไปกับโปร ---- */
+function bpMediaPick(input){
+  const f=input.files&&input.files[0];if(!f)return;
+  if(f.type==='image/gif'){toast('LINE ไม่รองรับ GIF — แปลงเป็นวิดีโอ MP4 แล้วแนบแทน');input.value='';return;}
+  if(f.size>50*1024*1024){toast('ไฟล์ใหญ่เกิน 50MB');input.value='';return;}
+  bpMediaFile=f; bpMediaMsg=null;
+  document.getElementById('bp-media-name').textContent=f.name+' ('+Math.round(f.size/1024)+' KB)';
+  document.getElementById('bp-media-clear').style.display='inline-block';
+  const p=document.getElementById('bp-media-prev'),v=document.getElementById('bp-media-vid');
+  if(f.type.startsWith('video/')){p.style.display='none';v.src=URL.createObjectURL(f);v.style.display='block';}
+  else{v.style.display='none';p.src=URL.createObjectURL(f);p.style.display='block';}
+}
+function bpMediaClear(){
+  bpMediaFile=null; bpMediaMsg=null;
+  const i=document.getElementById('bp-media');if(i)i.value='';
+  document.getElementById('bp-media-name').textContent='';
+  document.getElementById('bp-media-clear').style.display='none';
+  document.getElementById('bp-media-prev').style.display='none';
+  const v=document.getElementById('bp-media-vid');if(v){v.style.display='none';v.removeAttribute('src');}
+}
 /* ลิสต์ค้นหาสินค้าแบบวาดเอง — datalist ของเบราว์เซอร์ค้นภาษาไทยไม่ติดในหลายเครื่อง */
 function bpSuggest(){
   const q=(document.getElementById('bp-prod').value||'').trim().toLowerCase();
-  bpProdSel=null; bpReset();
+  bpProdSel=null;
   const box=document.getElementById('bp-sugg');
   if(!q){box.style.display='none';return;}
   const hits=products.filter(p=>p.active!==false&&(String(p.name).toLowerCase().includes(q)||String(p.sku).toLowerCase().includes(q))).slice(0,30);
@@ -2988,7 +3039,7 @@ function bpPick(id){
   bpProdSel=p;
   document.getElementById('bp-prod').value=p.sku+' · '+p.name;
   document.getElementById('bp-sugg').style.display='none';
-  bpReset();
+  setTimeout(()=>{const pr=document.getElementById('bp-price');if(pr)pr.focus();},0);
 }
 document.addEventListener('click',e=>{
   const b=document.getElementById('bp-sugg');
@@ -3019,28 +3070,32 @@ function bpAnnLabel(d){
     +String(t.getUTCHours()).padStart(2,'0')+':'+String(t.getUTCMinutes()).padStart(2,'0')+' น.';
 }
 async function bpScan(btn){
-  const p=bpFindProd(),promo=Number(document.getElementById('bp-price').value);
-  if(!p){toast('เลือกสินค้าจากรายการก่อน');return;}
-  if(!(promo>0)){toast('ใส่ราคาโปรก่อน');return;}
+  // ยังไม่กด "+ เพิ่มสินค้า" แต่กรอกสินค้า+ราคาค้างไว้ → เพิ่มให้เลย
+  if(bpFindProd()&&Number(document.getElementById('bp-price').value)>0)bpAddItem();
+  if(!bpItems.length){toast('เพิ่มสินค้าอย่างน้อย 1 ตัวก่อน (เลือกสินค้า ใส่ราคาโปร แล้วกด "+ เพิ่มสินค้า")');return;}
   if(!document.getElementById('bp-from').value||!document.getElementById('bp-to').value){toast('เลือกช่วงวันที่ก่อน');return;}
   btn.disabled=true;
   bpPromoCur=null;   // ค้นหาชุดใหม่ = โปรตัวใหม่
   try{
-    const cps=await fetchAllPages(()=>db.from('customer_prices').select('customer_id,price').eq('product_id',p.id));
-    bpProd=p;
+    const ids=bpItems.map(it=>it.p.id);
+    const cps=await fetchAllPages(()=>db.from('customer_prices').select('customer_id,product_id,price').in('product_id',ids));
+    bpProd=bpItems[0].p;
     const byId={};customers.forEach(c=>byId[c.id]=c);
     let cheaper=0,noline=0,inactive=0;
-    bpRows=[];
+    const shops={};
     (cps||[]).forEach(cp=>{
       const c=byId[cp.customer_id];if(!c)return;
+      const it=bpItems.find(x=>x.p.id===cp.product_id);if(!it)return;
       if(c.active===false){inactive++;return;}
-      const normal=(cp.price!=null&&cp.price!=='')?Number(cp.price):effPrice(p,c.price_group);
-      if(!(normal>promo)){cheaper++;return;}            // ได้ถูกกว่า/เท่ากับโปรอยู่แล้ว — ไม่ส่ง
+      const normal=(cp.price!=null&&cp.price!=='')?Number(cp.price):effPrice(it.p,c.price_group);
+      if(!(normal>it.promo)){cheaper++;return;}            // ได้ถูกกว่า/เท่ากับโปรอยู่แล้ว — ไม่ส่งตัวนี้
       if(!c.line_group_id){noline++;return;}
-      bpRows.push({c,normal,sel:true,sent:null});
+      (shops[c.id]=shops[c.id]||{c,prods:[],sel:true,sent:null}).prods.push({p:it.p,normal,promo:it.promo});
     });
-    bpRows.sort((a,b)=>(b.normal-promo)-(a.normal-promo));
-    document.getElementById('bp-sum').textContent='เข้าเกณฑ์ '+bpRows.length+' ร้าน · ได้ราคาดีอยู่แล้วไม่ส่ง '+cheaper+' · ไม่ผูกกลุ่มไลน์ '+noline+(inactive?' · ปิดใช้งาน '+inactive:'');
+    bpRows=Object.values(shops);
+    bpRows.forEach(r=>{r.prods.sort((a,b)=>(b.normal-b.promo)-(a.normal-a.promo));r.save=r.prods.reduce((s,x)=>s+(x.normal-x.promo),0);});
+    bpRows.sort((a,b)=>b.prods.length-a.prods.length||b.save-a.save);
+    document.getElementById('bp-sum').textContent='เข้าเกณฑ์ '+bpRows.length+' ร้าน ('+bpItems.length+' สินค้า) · รายการที่ได้ราคาดีอยู่แล้วไม่ส่ง '+cheaper+' · ไม่ผูกกลุ่มไลน์ '+noline+(inactive?' · ปิดใช้งาน '+inactive:'');
     const saleNames=[...new Set(bpRows.map(r=>r.c.sale_name||'-'))].sort((a,b)=>String(a).localeCompare(String(b),'th'));
     document.getElementById('bp-sale-f').innerHTML='<option value="">เซลล์: ทั้งหมด</option>'+saleNames.map(s=>'<option>'+esc(s)+'</option>').join('');
     document.getElementById('bp-shop-q').value='';
@@ -3064,24 +3119,24 @@ function bpVisible(){
 }
 function bpCheckAll(on){bpVisible().forEach(i=>bpRows[i].sel=on);bpRender();}
 function bpRender(){
-  const promo=Number(document.getElementById('bp-price').value);
   const vis=bpVisible();
   const f=document.getElementById('bp-filter');if(f)f.style.display=bpRows.length?'flex':'none';
+  const multi=bpItems.length>1;
   document.getElementById('bp-list').innerHTML=bpRows.length?
     (vis.length?
-    '<div style="overflow-x:auto;max-height:320px;overflow-y:auto"><table><thead><tr><th></th><th>ร้าน</th><th>เซลล์</th>'
-    +'<th class="num">ราคาปกติของเขา</th><th class="num">ราคาโปร</th><th class="num">ลด</th><th class="num">ลด %</th><th></th></tr></thead><tbody>'
+    '<div style="overflow-x:auto;max-height:360px;overflow-y:auto"><table><thead><tr><th></th><th>ร้าน</th><th>เซลล์</th>'
+    +'<th>สินค้าที่ได้โปร'+(multi?' (ของร้านนี้)':'')+'</th><th class="num">ลดรวม</th><th></th></tr></thead><tbody>'
     +vis.map(i=>{const r=bpRows[i];return '<tr'+(r.sent===true?' style="background:#e8f6f0"':r.sent===false?' style="background:#fdeeee"':'')+'>'
       +'<td><input type="checkbox" '+(r.sel?'checked':'')+' onchange="bpRows['+i+'].sel=this.checked;bpCount()"></td>'
       +'<td><b>'+esc(r.c.code)+'</b> '+esc(r.c.name)+(r.c.branch_name?' <span style="color:var(--muted)">• '+esc(r.c.branch_name)+'</span>':'')+'</td>'
       +'<td>'+esc(r.c.sale_name||'-')+'</td>'
-      +'<td class="num">฿'+fmt(r.normal)+'</td><td class="num"><b>฿'+fmt(promo)+'</b></td>'
-      +'<td class="num" style="color:#0f6e56"><b>฿'+fmt(r.normal-promo)+'</b></td>'
-      +'<td class="num">'+Math.round((r.normal-promo)/r.normal*100)+'%</td>'
+      +'<td style="font-size:12.5px">'+(multi?'<b>'+r.prods.length+'/'+bpItems.length+' รายการ</b><br>':'')
+        +r.prods.map(x=>esc(x.p.name)+' <span style="color:var(--muted)">฿'+fmt(x.normal)+'</span> → <b>฿'+fmt(x.promo)+'</b> <span style="color:#0f6e56">(−'+Math.round((x.normal-x.promo)/x.normal*100)+'%)</span>').join('<br>')+'</td>'
+      +'<td class="num" style="color:#0f6e56"><b>฿'+fmt(r.save)+'</b></td>'
       +'<td>'+(r.sent===true?'✅ ส่งแล้ว':r.sent===false?'✗ ไม่สำเร็จ':'')+'</td></tr>';}).join('')
     +'</tbody></table></div>'
     :'<div class="empty">ไม่พบร้านตามที่ค้นหา/กรองไว้</div>')
-    :'<div class="empty">ไม่มีร้านเข้าเกณฑ์ (ต้องถูกจัดสินค้าตัวนี้ไว้ และราคาปกติแพงกว่าโปร)</div>';
+    :'<div class="empty">ไม่มีร้านเข้าเกณฑ์ (ต้องถูกจัดสินค้าในโปรไว้ และราคาปกติแพงกว่าโปร)</div>';
   bpCount();
 }
 function bpCount(){
@@ -3091,11 +3146,15 @@ function bpCount(){
   const inf=document.getElementById('bp-filter-info');
   if(inf)inf.textContent=bpRows.length?('แสดง '+bpVisible().length+'/'+bpRows.length+' ร้าน · เลือกไว้ '+n):'';
 }
+/** ข้อความโปรของร้านนั้น — เห็นเฉพาะสินค้าที่ตัวเองได้โปร ราคาปกติของตัวเอง */
+function bpMsgFor(r,win,note){
+  const lines=r.prods.map(x=>(r.prods.length>1?'• ':'')+x.p.name+'\n'+(r.prods.length>1?'   ':'')+'จากราคาปกติ ฿'+fmt(x.normal)+' → เหลือ ฿'+fmt(x.promo)+' (ลด ฿'+fmt(x.normal-x.promo)+')');
+  return shopTag(r.c)+'🔥 โปรพิเศษเฉพาะร้านคุณ'+(r.prods.length>1?' '+r.prods.length+' รายการ':'')+'\n'+lines.join('\n')+'\n⏰ '+win+(note?'\n'+note:'');
+}
 async function bpSend(btn){
   if(bpSending)return;
-  const promo=Number(document.getElementById('bp-price').value);
   const targets=bpRows.filter(r=>r.sel&&r.sent!==true);
-  if(!bpProd||!targets.length){toast('ยังไม่ได้เลือกร้าน');return;}
+  if(!bpItems.length||!targets.length){toast('ยังไม่ได้เลือกร้าน');return;}
   const win=bpWindowLabel();
   const note=document.getElementById('bp-note').value.trim();
   const startAt=bpTs(document.getElementById('bp-from').value,(document.getElementById('bp-from-time')||{}).value||'00:00');
@@ -3111,53 +3170,60 @@ async function bpSend(btn){
     if(annAt>=endAt){toast('เวลาส่งข้อความต้องอยู่ก่อนโปรหมดเขต');return;}
   }
   const applyPrice=false;   // ระบบไม่แก้ราคาเอง — พนักงานตั้งราคาที่หน้าจัดสินค้าเท่านั้น
-  const sample=shopTag(targets[0].c)+'🔥 โปรพิเศษเฉพาะร้านคุณ\n'+bpProd.name
-    +'\nจากราคาปกติ ฿'+fmt(targets[0].normal)+' → เหลือ ฿'+fmt(promo)+' (ลด ฿'+fmt(targets[0].normal-promo)+')'
-    +'\n⏰ '+win+(note?'\n'+note:'');
-  const cm='โปร "'+bpProd.name+'" ฿'+fmt(promo)+' ถึง '+targets.length+' ร้าน\n⏰ '+win+'\n'
+  const isVid=!!(bpMediaFile&&bpMediaFile.type.startsWith('video/'));
+  const prodLbl=bpItems.map(it=>it.p.name+' ฿'+fmt(it.promo)).join(', ');
+  const sample=bpMsgFor(targets[0],win,note);
+  const cm='โปร '+bpItems.length+' สินค้า ('+prodLbl+')\nถึง '+targets.length+' ร้าน · ⏰ '+win+'\n'
+    +(bpMediaFile?(isVid?'🎬 พร้อมวิดีโอแนบ 1 คลิป\n':'🖼️ พร้อมรูปแนบ 1 รูป\n'):'')
     +'📣 แจ้งข่าวอย่างเดียว — ระบบไม่แก้ราคาให้ ต้องไปตั้งราคาเองที่หน้าจัดสินค้า\n'
-    +(annSched?('🕐 ข้อความจะถูกส่ง'+bpAnnLabel(annAt)):'✉️ ส่งข้อความทันที — แต่ละร้านเห็นราคาปกติของตัวเอง เช่น:\n\n'+sample)
+    +(annSched?('🕐 ข้อความจะถูกส่ง'+bpAnnLabel(annAt)):'✉️ ส่งข้อความทันที — แต่ละร้านเห็นเฉพาะสินค้าที่ตัวเองได้โปร ราคาปกติของตัวเอง เช่น:\n\n'+sample)
     +'\n\nยืนยัน?';
   if(!confirm(cm))return;
   bpSending=true;btn.disabled=true;
   const st=document.getElementById('bp-status');
   try{
-    // 1) บันทึกโปรลงฐานข้อมูล — ระบบเวลา (ทุก 5 นาที) จะแก้/คืนราคา และส่งข้อความตามที่ตั้ง
+    // 0) อัปโหลดรูป/วิดีโอครั้งเดียว ใช้ลิงก์เดียวกันทุกร้าน (กดส่งซ้ำใช้ลิงก์เดิม ไม่อัปใหม่)
+    if(bpMediaFile&&!bpMediaMsg)bpMediaMsg=await uploadLineMedia(bpMediaFile,st,'promo');
+    const media=bpMediaFile?bpMediaMsg:null;
+    // 1) บันทึกโปร: 1 แถวต่อสินค้า ผูกกันเป็นชุดด้วย batch_id — ระบบเวลาจะส่งข้อความรวมทุกสินค้าให้ร้านฉบับเดียว
     //    (กดซ้ำเพื่อส่งต่อร้านที่พลาด ไม่สร้างโปรใหม่ซ้ำ)
-    const snap=r=>({customer_id:r.c.id,code:r.c.code,name:r.c.name,gid:r.c.line_group_id,normal:r.normal,tag:shopTag(r.c),sent:r.sent===true?true:(r.sent===false?false:null)});
+    const snapFor=it=>bpRows.filter(r=>r.sel&&r.prods.some(x=>x.p.id===it.p.id)).map(r=>{const x=r.prods.find(x=>x.p.id===it.p.id);
+      return {customer_id:r.c.id,code:r.c.code,name:r.c.name,gid:r.c.line_group_id,normal:x.normal,tag:shopTag(r.c),sent:r.sent===true?true:(r.sent===false?false:null)};});
     if(!bpPromoCur){
-      const {data:ins,error:insErr}=await db.from('promotions').insert({
-        product_id:bpProd.id,product_name:bpProd.name,promo_price:promo,
+      const batch='PB'+Date.now().toString(36)+rndTag(4);
+      const rows=bpItems.map(it=>({
+        product_id:it.p.id,product_name:it.p.name,promo_price:it.promo,
         starts_at:startAt.toISOString(),ends_at:endAt.toISOString(),
         announce_at:annSched?annAt.toISOString():null,
         apply_price:applyPrice,win_label:win,note:note||null,
-        customers:bpRows.filter(r=>r.sel).map(snap),
-        created_by:currentUser?.display_name||currentUser?.username||null
-      }).select('id').single();
+        customers:snapFor(it),
+        created_by:currentUser?.display_name||currentUser?.username||null,
+        batch_id:batch,media_url:media?media.originalContentUrl:null,media_type:media?media.type:null,media_preview_url:media?media.previewImageUrl:null
+      }));
+      const {data:ins,error:insErr}=await db.from('promotions').insert(rows).select('id');
       if(insErr){
-        if(annSched)throw new Error('บันทึกโปรไม่สำเร็จ: '+insErr.message+' (รัน mix888-promotions.sql ใน SQL Editor หรือยัง?)');
-        console.warn('promotions insert',insErr);   // โหมดส่งทันที+ไม่แก้ราคา: ส่งต่อได้แม้ยังไม่ติดตั้งตาราง
-      }else bpPromoCur=ins.id;
+        if(annSched)throw new Error('บันทึกโปรไม่สำเร็จ: '+insErr.message+' (รันไฟล์ mix888-promotions.sql เวอร์ชันล่าสุดใน SQL Editor หรือยัง?)');
+        console.warn('promotions insert',insErr);   // โหมดส่งทันที+ไม่แก้ราคา: ส่งต่อได้แม้ยังไม่ติดตั้ง/อัปเดตตาราง
+      }else bpPromoCur=(ins||[]).map(x=>x.id);   // id เรียงตามลำดับสินค้าที่ส่งเข้าไป
     }
+    const who=currentUser?.display_name||currentUser?.username||'-';
     if(annSched){
       st.textContent='🕐 ตั้งเวลาส่งไว้แล้ว — ข้อความจะถูกส่ง'+bpAnnLabel(annAt);
       if(appSettings.line_central_group){
         try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
-          messages:[{type:'text',text:'🕐 ตั้งโปร "'+bpProd.name+'" ฿'+fmt(promo)+' ('+win+')\nส่งข้อความ'+bpAnnLabel(annAt)+' · '+targets.length+' ร้าน'
-            +(applyPrice?'\n💸 แก้ราคาจริงตามช่วงโปร':'')+'\nโดย '+(currentUser?.display_name||currentUser?.username||'-')}]}});}catch(e){}
+          messages:[{type:'text',text:'🕐 ตั้งโปร '+bpItems.length+' สินค้า: '+prodLbl+' ('+win+')\nส่งข้อความ'+bpAnnLabel(annAt)+' · '+targets.length+' ร้าน'+(media?' · แนบ'+(isVid?'วิดีโอ':'รูป'):'')+'\nโดย '+who}]}});}catch(e){}
       }
       toast('🕐 ตั้งโปรเรียบร้อย — ข้อความจะถูกส่ง'+bpAnnLabel(annAt));
     }else{
-      // 2) ส่งข้อความทันที
+      // 2) ส่งข้อความทันที — ร้านละฉบับ (ข้อความ + รูป/วิดีโอ)
       let ok=0,fail=0;
       for(let i=0;i<targets.length;i++){
         const r=targets[i];
         st.textContent='กำลังส่ง… '+(i+1)+'/'+targets.length;
-        const text=shopTag(r.c)+'🔥 โปรพิเศษเฉพาะร้านคุณ\n'+bpProd.name
-          +'\nจากราคาปกติ ฿'+fmt(r.normal)+' → เหลือ ฿'+fmt(promo)+' (ลด ฿'+fmt(r.normal-promo)+')'
-          +'\n⏰ '+win+(note?'\n'+note:'');
+        const messages=[{type:'text',text:bpMsgFor(r,win,note).slice(0,4900)}];
+        if(media)messages.push(media);
         try{
-          const {error}=await db.functions.invoke('line-push',{body:{to:r.c.line_group_id,messages:[{type:'text',text:text.slice(0,4900)}]}});
+          const {error}=await db.functions.invoke('line-push',{body:{to:r.c.line_group_id,messages}});
           if(error)throw error;
           r.sent=true;ok++;
         }catch(e){r.sent=false;fail++;console.warn('promo',r.c.code,e);}
@@ -3166,14 +3232,15 @@ async function bpSend(btn){
       bpRender();
       st.innerHTML=fail?('⚠️ ส่งแล้ว '+ok+' ร้าน · ไม่สำเร็จ '+fail+' ร้าน (แถวสีแดง) — กดส่งซ้ำได้ ระบบข้ามร้านที่ได้แล้ว')
         :('✅ ส่งครบ '+ok+' ร้านเรียบร้อย');
-      if(bpPromoCur){
-        try{await db.from('promotions').update({announced_at:new Date().toISOString(),
-          customers:bpRows.filter(r=>r.sel).map(snap)}).eq('id',bpPromoCur);}catch(e){console.warn('promo mark sent',e);}
+      if(Array.isArray(bpPromoCur)&&bpPromoCur.length){
+        for(let i=0;i<bpPromoCur.length&&i<bpItems.length;i++){
+          try{await db.from('promotions').update({announced_at:new Date().toISOString(),customers:snapFor(bpItems[i])}).eq('id',bpPromoCur[i]);}catch(e){console.warn('promo mark sent',e);}
+        }
       }
       if(appSettings.line_central_group){
         try{await db.functions.invoke('line-push',{body:{to:appSettings.line_central_group,
-          messages:[{type:'text',text:'🔥 โปรบรอดแคสต์ "'+bpProd.name+'" ฿'+fmt(promo)+' ('+win+')'
-            +(applyPrice?'\n💸 แก้ราคาจริงตามช่วงโปร':'')+'\nโดย '+(currentUser?.display_name||currentUser?.username||'-')+' · ส่งแล้ว '+ok+'/'+targets.length+' ร้าน'}]}});}catch(e){}
+          messages:[{type:'text',text:'🔥 โปรบรอดแคสต์ '+bpItems.length+' สินค้า: '+prodLbl+' ('+win+')'+(media?' · แนบ'+(isVid?'วิดีโอ':'รูป'):'')
+            +'\nโดย '+who+' · ส่งแล้ว '+ok+'/'+targets.length+' ร้าน'}]}});}catch(e){}
       }
       toast(fail?'ส่งไม่ครบ — กดส่งซ้ำเฉพาะที่เหลือได้':'🔥 ส่งโปรครบ '+ok+' ร้าน');
     }
@@ -3185,34 +3252,47 @@ async function bpSend(btn){
 async function bpLoadPromos(){
   const box=document.getElementById('bp-promos');if(!box)return;
   try{
-    const {data,error}=await db.from('promotions').select('*').order('id',{ascending:false}).limit(12);
+    const {data,error}=await db.from('promotions').select('*').order('id',{ascending:false}).limit(40);
     if(error||!data||!data.length){box.innerHTML='';return;}   // ยังไม่รัน SQL / ยังไม่มีโปร — ไม่ต้องโชว์
     const chip=s=>s==='scheduled'?'<span class="tag tag-low">รอเริ่ม</span>'
       :s==='active'?'<span class="tag tag-ok">กำลังลดราคา</span>'
       :s==='done'?'<span class="tag">จบแล้ว</span>':'<span class="tag tag-out">ยกเลิก</span>';
     const fD=x=>x?new Date(x).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'-';
+    // โปรหลายสินค้า = หลายแถวที่ batch_id เดียวกัน → โชว์เป็นการ์ดเดียว
+    const groups=[];const byKey={};
+    data.forEach(p=>{const k=p.batch_id||('id'+p.id);if(!byKey[k]){byKey[k]={key:k,rows:[]};groups.push(byKey[k]);}byKey[k].rows.push(p);});
     box.innerHTML='<div style="font-weight:700;margin-bottom:6px">📋 โปรที่ตั้งไว้ล่าสุด</div>'
-      +data.map(p=>{
-        const cs=Array.isArray(p.customers)?p.customers:[];
-        const sentN=cs.filter(c=>c.sent===true).length;
-        const ann=p.announced_at?('ส่งข้อความแล้ว '+sentN+'/'+cs.length+' ร้าน')
+      +groups.slice(0,12).map(g=>{
+        const rows=g.rows.slice().sort((a,b)=>a.id-b.id), p=rows[0];
+        const shopIds=new Set(), sentIds=new Set();
+        rows.forEach(r=>(Array.isArray(r.customers)?r.customers:[]).forEach(c=>{shopIds.add(c.customer_id);if(c.sent===true)sentIds.add(c.customer_id);}));
+        const ann=p.announced_at?('ส่งข้อความแล้ว '+sentIds.size+'/'+shopIds.size+' ร้าน')
           :(p.announce_at?('🕐 จะส่งข้อความ '+fD(p.announce_at)):'ยังไม่ได้ส่งข้อความ');
+        const live=rows.some(r=>r.status==='scheduled'||r.status==='active');
+        const sts=[...new Set(rows.map(r=>r.status))];
+        const media=p.media_url?(p.media_type==='video'?'<span class="tag">🎬 มีวิดีโอ</span>':'<span class="tag">🖼️ มีรูป</span>'):'';
         return '<div style="border:1px solid var(--line,#eee);border-radius:12px;padding:10px 12px;margin-bottom:8px">'
-          +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>'+esc(p.product_name||'')+'</b> ฿'+fmt(p.promo_price)+' '+chip(p.status)
-          +(p.apply_price?'<span class="tag" style="background:#e8f6f0;color:#0f6e56">💸 แก้ราคาจริง</span>':'')+'</div>'
-          +'<div style="font-size:12.5px;color:var(--muted);margin-top:3px">⏰ '+esc(p.win_label||(fD(p.starts_at)+' – '+fD(p.ends_at)))+' · '+cs.length+' ร้าน · '+ann+'</div>'
-          +((p.status==='scheduled'||p.status==='active')
-            ?'<div style="margin-top:6px"><button class="btn-d mini" onclick="bpCancelPromo('+p.id+',this)">✖ ยกเลิกโปรนี้</button></div>':'')
+          +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+          +(rows.length>1?'<b>โปร '+rows.length+' สินค้า</b>':'<b>'+esc(p.product_name||'')+'</b> ฿'+fmt(p.promo_price))+' '+sts.map(chip).join(' ')+media+'</div>'
+          +(rows.length>1?'<div style="font-size:12.5px;margin-top:3px">'+rows.map(r=>'• '+esc(r.product_name||'')+' <b>฿'+fmt(r.promo_price)+'</b>').join('<br>')+'</div>':'')
+          +'<div style="font-size:12.5px;color:var(--muted);margin-top:3px">⏰ '+esc(p.win_label||(fD(p.starts_at)+' – '+fD(p.ends_at)))+' · '+shopIds.size+' ร้าน · '+ann+(p.created_by?' · โดย '+esc(p.created_by):'')+'</div>'
+          +(live?'<div style="margin-top:6px"><button class="btn-d mini" onclick="bpCancelPromo(\''+rows.filter(r=>r.status==='scheduled'||r.status==='active').map(r=>r.id).join(',')+'\',this)">✖ ยกเลิกโปรนี้'+(rows.length>1?' (ทั้งชุด)':'')+'</button></div>':'')
           +'</div>';
       }).join('');
   }catch(e){box.innerHTML='';}
 }
-async function bpCancelPromo(id,btn){
-  if(!confirm('ยกเลิกโปรนี้?\n• ถ้าแก้ราคาไปแล้ว ระบบจะคืนราคาเดิมให้ทันที\n• ข้อความที่ตั้งเวลาไว้จะไม่ถูกส่ง'))return;
+async function bpCancelPromo(ids,btn){
+  const list=String(ids).split(',').map(Number).filter(Boolean);
+  if(!list.length)return;
+  if(!confirm('ยกเลิกโปรนี้'+(list.length>1?' (ทั้งชุด '+list.length+' สินค้า)':'')+'?\n• ป้ายโปรในหน้าสั่งของลูกค้าจะหายไป\n• ข้อความที่ตั้งเวลาไว้จะไม่ถูกส่ง\n• ราคาที่พนักงานตั้งไว้ไม่ถูกแตะ (ระบบไม่แก้ราคาเอง)'))return;
   btn.disabled=true;
-  const {data,error}=await db.rpc('promo_cancel',{p_id:id});
-  if(error){toast('ยกเลิกไม่สำเร็จ: '+error.message);btn.disabled=false;return;}
-  toast('ยกเลิกโปรแล้ว'+(data&&data.reverted!=null?' · คืนราคาเดิมให้ '+data.reverted+' ร้าน':''));
+  let ok=0,fail=0;
+  for(const id of list){
+    const {error}=await db.rpc('promo_cancel',{p_id:id});
+    if(error){fail++;console.warn('promo_cancel',id,error);}else ok++;
+  }
+  if(fail){toast('ยกเลิกไม่สำเร็จ '+fail+' รายการ (สำเร็จ '+ok+')');btn.disabled=false;}
+  else toast('ยกเลิกโปรแล้ว'+(list.length>1?' ('+ok+' สินค้า)':''));
   bpLoadPromos();
 }
 
@@ -3358,6 +3438,34 @@ function bcVideoFrame(file){
     v.src=URL.createObjectURL(file);
   });
 }
+/** อัปโหลดรูป/วิดีโอขึ้น storage แล้วคืน "ข้อความ LINE" (image/video) — ใช้ร่วมบรอดแคสต์ทั่วไปและโปรลดราคา */
+async function uploadLineMedia(file,st,prefix){
+  const say=t=>{if(st)st.textContent=t;};
+  if(file.type.startsWith('video/')){
+    say('กำลังเตรียมวิดีโอ…');
+    const frame=await bcVideoFrame(file);              // LINE บังคับมีภาพตัวอย่าง
+    const tag=(prefix||'media')+'-'+Date.now()+'-'+rndTag(6);
+    say('กำลังอัปโหลดวิดีโอ…');
+    const {error:ve}=await db.storage.from('products').upload(tag+'.mp4',file,{contentType:file.type||'video/mp4',upsert:true});
+    if(ve)throw new Error('อัปวิดีโอไม่สำเร็จ: '+ve.message);
+    const {error:pe}=await db.storage.from('products').upload(tag+'-prev.jpg',frame,{contentType:'image/jpeg',upsert:true});
+    if(pe)throw new Error('อัปภาพตัวอย่างไม่สำเร็จ: '+pe.message);
+    return {type:'video',
+      originalContentUrl:db.storage.from('products').getPublicUrl(tag+'.mp4').data.publicUrl,
+      previewImageUrl:db.storage.from('products').getPublicUrl(tag+'-prev.jpg').data.publicUrl};
+  }
+  say('กำลังอัปโหลดรูป…');
+  const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error('อ่านไฟล์รูปไม่ได้'));i.src=URL.createObjectURL(file);});
+  const sc=Math.min(1,1600/Math.max(img.width,img.height));
+  const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(img.width*sc));cv.height=Math.max(1,Math.round(img.height*sc));
+  cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+  const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.88));
+  const path=(prefix||'media')+'-'+Date.now()+'-'+rndTag(6)+'.jpg';
+  const {error:ue}=await db.storage.from('products').upload(path,blob,{contentType:'image/jpeg',upsert:true});
+  if(ue)throw new Error('อัปรูปไม่สำเร็จ: '+ue.message);
+  const u=db.storage.from('products').getPublicUrl(path).data.publicUrl;
+  return {type:'image',originalContentUrl:u,previewImageUrl:u};
+}
 async function bcSend(btn){
   if(bcSending)return;
   const text=document.getElementById('bc-text').value.trim();
@@ -3376,32 +3484,7 @@ async function bcSend(btn){
   const st=document.getElementById('bc-status');
   try{
     // อัปสื่อครั้งเดียว ใช้ลิงก์เดียวกันทุกกลุ่ม
-    let mediaMsg=null;
-    if(bcImgFile&&isVid){
-      st.textContent='กำลังเตรียมวิดีโอ…';
-      const frame=await bcVideoFrame(bcImgFile);              // LINE บังคับมีภาพตัวอย่าง
-      const tag='broadcast-'+Date.now()+'-'+rndTag(6);
-      st.textContent='กำลังอัปโหลดวิดีโอ…';
-      const {error:ve}=await db.storage.from('products').upload(tag+'.mp4',bcImgFile,{contentType:bcImgFile.type||'video/mp4',upsert:true});
-      if(ve)throw new Error('อัปวิดีโอไม่สำเร็จ: '+ve.message);
-      const {error:pe}=await db.storage.from('products').upload(tag+'-prev.jpg',frame,{contentType:'image/jpeg',upsert:true});
-      if(pe)throw new Error('อัปภาพตัวอย่างไม่สำเร็จ: '+pe.message);
-      mediaMsg={type:'video',
-        originalContentUrl:db.storage.from('products').getPublicUrl(tag+'.mp4').data.publicUrl,
-        previewImageUrl:db.storage.from('products').getPublicUrl(tag+'-prev.jpg').data.publicUrl};
-    }else if(bcImgFile){
-      st.textContent='กำลังอัปโหลดรูป…';
-      const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(bcImgFile);});
-      const sc=Math.min(1,1600/Math.max(img.width,img.height));
-      const cv=document.createElement('canvas');cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);
-      cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
-      const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.88));
-      const path='broadcast-'+Date.now()+'-'+rndTag(6)+'.jpg';
-      const {error:ue}=await db.storage.from('products').upload(path,blob,{contentType:'image/jpeg',upsert:true});
-      if(ue)throw new Error('อัปรูปไม่สำเร็จ: '+ue.message);
-      const u=db.storage.from('products').getPublicUrl(path).data.publicUrl;
-      mediaMsg={type:'image',originalContentUrl:u,previewImageUrl:u};
-    }
+    const mediaMsg=bcImgFile?await uploadLineMedia(bcImgFile,st,'broadcast'):null;
     const messages=[];
     if(mediaMsg)messages.push(mediaMsg);
     if(text)messages.push({type:'text',text:text.slice(0,4900)});

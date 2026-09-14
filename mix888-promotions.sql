@@ -34,6 +34,12 @@ create table if not exists promotions (
   created_by    text,
   created_at    timestamptz not null default now()
 );
+-- โปรหลายสินค้าในชุดเดียว + รูป/วิดีโอแนบ (เวอร์ชันใหม่ — รันซ้ำเพื่อเพิ่มคอลัมน์ให้ตารางเดิม)
+alter table promotions add column if not exists batch_id text;            -- แถวที่ batch_id เดียวกัน = โปรชุดเดียวกัน (ลูกค้าได้ข้อความฉบับเดียวรวมทุกสินค้า)
+alter table promotions add column if not exists media_url text;           -- ลิงก์รูป/วิดีโอที่แนบ
+alter table promotions add column if not exists media_type text;          -- image / video
+alter table promotions add column if not exists media_preview_url text;   -- ภาพตัวอย่างของวิดีโอ (LINE บังคับ)
+create index if not exists promotions_batch_idx on promotions(batch_id);
 alter table promotions enable row level security;
 drop policy if exists "promo_auth_all" on promotions;
 create policy "promo_auth_all" on promotions
