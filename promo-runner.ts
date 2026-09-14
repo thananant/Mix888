@@ -7,11 +7,12 @@
 //  • โปรหลายสินค้า (แถวที่ batch_id เดียวกัน) → ร้านละ 1 ข้อความ รวมทุกสินค้าที่ร้านนั้นได้โปร
 //  • แนบรูป/วิดีโอถ้าโปรมี (media_url / media_type / media_preview_url)
 //  • แต่ละร้านเห็นราคาปกติของตัวเอง เทียบราคาโปร · สรุปผลเข้ากลุ่มไลน์กลาง
-//  • ⛔ ไม่แตะราคาใด ๆ ทั้งสิ้น — แจ้งข่าวอย่างเดียว
+//  • ข้อความเปิด/ปิดใช้ที่พนักงานพิมพ์ไว้ตอนตั้งโปร (head_text / note) — ว่างใช้ค่าเริ่มต้น
+//  • ⛔ ฟังก์ชันนี้ไม่แตะราคาใด ๆ — ราคาโปรมีผลตอนลูกค้าสั่งผ่าน place_order_v2 (ตั้งโดย mix888-promotions.sql)
 //
 //  วิธีติดตั้ง:
 //  1. Edge Functions → promo-runner → วางโค้ดไฟล์นี้ทั้งไฟล์ทับของเดิม → ปิด "Verify JWT" → Deploy
-//  2. รันไฟล์ mix888-promotions.sql เวอร์ชันล่าสุดใน SQL Editor (เพิ่มคอลัมน์ batch_id / media_*)
+//  2. รันไฟล์ mix888-promotions.sql เวอร์ชันล่าสุดใน SQL Editor (เพิ่มคอลัมน์ batch_id / media_* / head_text + ราคาโปรตอนสั่ง)
 //
 //  ทดสอบ (เปิดใน browser):
 //    GET  <URL ฟังก์ชัน>          → ดูว่ามีโปรรอส่งไหม (ไม่ส่งจริง)
@@ -52,15 +53,15 @@ async function linePush(to: string, messages: any[]) {
   if (!r.ok) throw new Error('LINE ' + r.status + ': ' + (await r.text()).slice(0, 200));
 }
 const fmtB = (n: number) => '฿' + Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+// ตัวเลขในข้อความลูกค้า: จำนวนเต็มไม่ใส่ทศนิยม (480) มีเศษใส่ 2 ตำแหน่ง (12.50) — ให้ตรงกับหน้าเว็บ
+const numB = (n: number) => { const v = Number(n) || 0; return v % 1 === 0 ? v.toLocaleString('en-US') : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+const HEAD_DEFAULT = '🔥 จัดสินค้าราคาพิเศษเฉพาะคุณ';
 
 type Line = { name: string; normal: number; promo: number };
-/** ข้อความของร้าน: เห็นเฉพาะสินค้าที่ตัวเองได้โปร ราคาปกติของตัวเอง */
-function buildMsg(tag: string, lines: Line[], win: string, note: string): string {
-  const multi = lines.length > 1;
-  const body = lines.map((l) => (multi ? '• ' : '') + l.name + '\n' + (multi ? '   ' : '')
-    + 'จากราคาปกติ ' + fmtB(l.normal) + ' → เหลือ ' + fmtB(l.promo) + ' (ลด ' + fmtB(l.normal - l.promo) + ')').join('\n');
-  return (tag || '') + '🔥 โปรพิเศษเฉพาะร้านคุณ' + (multi ? ' ' + lines.length + ' รายการ' : '') + '\n' + body
-    + '\n⏰ ' + (win || '') + (note ? '\n' + note : '');
+/** ข้อความของร้าน (รูปแบบเดียวกับหน้าเว็บ): เปิด → ⏰ ช่วงเวลา → รายการ 1. 2. (เฉพาะสินค้าที่ร้านนี้ได้โปร ราคาปกติของตัวเอง) → ปิด */
+function buildMsg(tag: string, lines: Line[], win: string, head: string, foot: string): string {
+  const body = lines.map((l, i) => (i + 1) + '. ' + l.name + ' จากราคา ' + numB(l.normal) + ' บาท เหลือ ' + numB(l.promo) + ' บาท').join('\n');
+  return (tag || '') + (head || HEAD_DEFAULT) + '\n⏰ ช่วงเวลา ' + (win || '') + '\nโดยมีสินค้าลดราคาพิเศษคือ\n' + body + (foot ? '\n' + foot : '');
 }
 function mediaMsg(p: any): any | null {
   if (!p || !p.media_url) return null;
@@ -117,7 +118,7 @@ Deno.serve(async (req) => {
       let ok = 0, fail = 0;
       for (const s of Object.values(shops)) {
         if (s.sent === true || !s.lines.length) continue;
-        const messages: any[] = [{ type: 'text', text: buildMsg(s.tag, s.lines, first.win_label || '', first.note || '').slice(0, 4900) }];
+        const messages: any[] = [{ type: 'text', text: buildMsg(s.tag, s.lines, first.win_label || '', first.head_text || '', first.note || '').slice(0, 4900) }];
         if (media) messages.push(media);
         let sentOk = false, err = '';
         try { await linePush(s.gid, messages); sentOk = true; ok++; }
