@@ -1422,6 +1422,41 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div id="sd-body" style="overflow-x:auto;max-height:60vh;overflow-y:auto"></div>
   </div>
 </div>
+<!-- 🧺 จัดสินค้าให้หลายร้านพร้อมกัน (เด้งหลังเพิ่มสินค้าใหม่ / ปุ่ม 🧺 ในตารางสินค้า) -->
+<div id="np-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)npClose()">
+  <div style="background:#fff;border-radius:14px;max-width:960px;width:100%;padding:18px;margin:14px auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h3 id="np-title" style="margin:0;font-size:16px">🧺 จัดสินค้าให้ลูกค้า</h3>
+      <button class="btn-g mini" onclick="npClose()">ปิด — ยังไม่จัดตอนนี้</button>
+    </div>
+    <div style="font-size:12.5px;color:var(--muted);margin:6px 0 10px">ติ๊กร้านที่จะได้เห็น/สั่งสินค้านี้ · เครื่องมือนี้<b>เพิ่มอย่างเดียว</b> — ร้านที่มีสินค้านี้อยู่แล้ว (✓) ไม่ถูกแตะราคา (แก้รายร้านได้ที่หน้า "จัดสินค้าให้ลูกค้า")</div>
+    <div style="background:#f7f3ee;border:1px solid var(--line,#e5ddd2);border-radius:10px;padding:10px 12px">
+      <b style="font-size:13px">ราคาเฉพาะตามพื้นที่ (ไม่บังคับ)</b>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;align-items:flex-end">
+        <div><label>🏙 กทม</label><input id="np-bkk" type="number" step="0.01" class="num" style="width:110px" placeholder="เว้นว่างได้" oninput="npRenderRows()"></div>
+        <div><label>🌆 ปริมณฑล</label><input id="np-metro" type="number" step="0.01" class="num" style="width:110px" placeholder="เว้นว่างได้" oninput="npRenderRows()"></div>
+        <div><label>🚚 ต่างจังหวัด</label><input id="np-up" type="number" step="0.01" class="num" style="width:110px" placeholder="เว้นว่างได้" oninput="npRenderRows()"></div>
+        <span style="font-size:12px;color:var(--muted);flex:1;min-width:240px">เว้นว่าง = ร้านใช้ราคาตามกลุ่มของตัวเอง (กลาง / เรท20 / เรท50 / รวมส่งตจว) · ใส่ราคา = ร้านที่ติ๊กในพื้นที่นั้นได้ราคานี้เป็น "ราคาเฉพาะร้าน" · พื้นที่ดูจากจังหวัดจัดส่งของร้าน</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:10px">
+      <input id="np-q" placeholder="🔎 ค้นหาชื่อร้าน / รหัส…" style="flex:1;min-width:160px" oninput="npRenderRows()">
+      <select id="np-sale-f" onchange="npRenderRows()"></select>
+      <select id="np-ship-f" onchange="npRenderRows()"></select>
+      <select id="np-prov-f" onchange="npRenderRows()"></select>
+      <select id="np-reg-f" onchange="npRenderRows()"><option value="">พื้นที่: ทั้งหมด</option><option>กทม</option><option>ปริมณฑล</option><option>ต่างจังหวัด</option><option>ไม่ระบุ</option></select>
+      <button class="btn-g mini" onclick="npCheckAll(true)">☑ เลือกเฉพาะที่แสดงอยู่</button>
+      <button class="btn-g mini" onclick="npCheckAll(false)">☐ เอาที่แสดงอยู่ออก</button>
+      <span id="np-count" style="font-size:12.5px;color:var(--muted)"></span>
+    </div>
+    <div id="np-list" style="margin-top:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn-p" id="np-save" onclick="npSave(this)">💾 จัดให้ร้านที่เลือก</button>
+      <span id="np-status" style="font-size:13px"></span>
+    </div>
+  </div>
+</div>
+
 <!-- 📈 ปรับราคาทุกร้านเท่ากัน (เปิดจากหน้าจัดสินค้า) -->
 <div id="bulkprice-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)closeBulkPrice()">
   <div style="background:#fff;border-radius:14px;max-width:900px;width:100%;padding:18px;margin:14px auto">
@@ -2579,6 +2614,7 @@ function renderProducts(){
       ? `<button class="btn-ok mini" onclick="restoreProduct(${p.id})">♻️ กู้คืน</button>
          <button class="btn-d mini" onclick="hardDelProduct(${p.id})">ลบถาวร</button>`
       : `<button class="btn-s mini" onclick="editProduct(${p.id})">แก้ไข</button>
+         <button class="btn-g mini" onclick="npOpenById(${p.id})" title="เลือกหลายร้านพร้อมกันว่าใครได้เห็นสินค้านี้ + ตั้งราคาแยกพื้นที่ กทม/ปริมณฑล/ตจว">🧺 จัดให้ลูกค้า</button>
          <button class="btn-g mini" onclick="openAdjust(${p.id})" title="ปรับยอดสต๊อก (ต้องใส่เหตุผล)">🔧 สต๊อก</button>
          <button class="btn-g mini" onclick="openConvert(${p.id})" title="แปลงสินค้า เช่น ยกลัง→ปลีก">🔁 แปลง</button>
          <button class="btn-g mini" onclick="wasteProduct(${p.id})">ตีเสีย</button>
@@ -2596,6 +2632,122 @@ function renderProducts(){
       <td style="white-space:nowrap">${actions}</td></tr>`;
   }).join('');
 }
+/* ==================== 🧺 จัดสินค้าให้หลายร้านพร้อมกัน + ราคาแยกพื้นที่ (กทม/ปริมณฑล/ตจว) ==================== */
+let npProd=null, npRows=[], npBusy=false;
+const NP_METRO=['นนทบุรี','ปทุมธานี','สมุทรปราการ','สมุทรสาคร','นครปฐม','สมุทรสงคราม'];
+/** พื้นที่ของร้าน ดูจากจังหวัดจัดส่ง (ไม่มีใช้จังหวัดในบิล) */
+function npRegionOf(c){
+  const pv=String((c&&(c.ship_province||c.bill_province))||'').trim();
+  if(!pv)return 'ไม่ระบุ';
+  if(pv.includes('กรุงเทพ')||pv.replace(/\./g,'').startsWith('กทม'))return 'กทม';
+  if(NP_METRO.some(m=>pv.includes(m)))return 'ปริมณฑล';
+  return 'ต่างจังหวัด';
+}
+function npRegionPrice(reg){
+  const v=id=>{const x=(document.getElementById(id)||{}).value;const n=parseFloat(x);return (x!==''&&x!=null&&!isNaN(n)&&n>0)?n:null;};
+  return reg==='กทม'?v('np-bkk'):reg==='ปริมณฑล'?v('np-metro'):reg==='ต่างจังหวัด'?v('np-up'):null;
+}
+async function npOpen(p){
+  if(!p||!p.id)return;
+  npProd=p; npBusy=false;
+  document.getElementById('np-title').textContent='🧺 จัดสินค้า "'+p.name+'" ให้ลูกค้า';
+  ['np-bkk','np-metro','np-up','np-q'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('np-status').textContent='';
+  document.getElementById('np-list').innerHTML='<div class="empty">กำลังโหลดรายชื่อร้าน…</div>';
+  document.getElementById('np-modal').style.display='flex';
+  // ร้านที่มีสินค้านี้อยู่แล้ว — โชว์ ✓ และไม่แตะของเดิม (เครื่องมือนี้เพิ่มอย่างเดียว)
+  const existing={};
+  try{
+    const rows=await fetchAllPages(()=>db.from('customer_prices').select('customer_id,price').eq('product_id',p.id));
+    (rows||[]).forEach(r=>{existing[r.customer_id]={price:r.price};});
+  }catch(e){toast('โหลดรายการเดิมไม่สำเร็จ: '+(e.message||e));}
+  const th=(a,b)=>String(a).localeCompare(String(b),'th');
+  npRows=customers.filter(c=>c.active!==false).map(c=>({c,sel:false,ex:existing[c.id]||null}))
+    .sort((a,b)=>(a.ex?1:0)-(b.ex?1:0)||th(a.c.name,b.c.name));
+  document.getElementById('np-sale-f').innerHTML='<option value="">เซลล์: ทั้งหมด</option>'
+    +[...new Set(npRows.map(r=>r.c.sale_name||'-'))].sort(th).map(s=>'<option>'+esc(s)+'</option>').join('');
+  document.getElementById('np-ship-f').innerHTML='<option value="">ขนส่ง: ทั้งหมด</option>'
+    +[...new Set(npRows.map(r=>bqShipOf(r.c)))].sort(th).map(s=>'<option>'+esc(s)+'</option>').join('');
+  document.getElementById('np-prov-f').innerHTML='<option value="">จังหวัด: ทั้งหมด</option>'
+    +[...new Set(npRows.map(r=>bqProvOf(r.c)))].sort(th).map(s=>'<option>'+esc(s)+'</option>').join('');
+  document.getElementById('np-reg-f').value='';
+  npRenderRows();
+}
+function npOpenById(id){const p=products.find(x=>x.id===id);if(p)npOpen(p);}
+function npClose(){document.getElementById('np-modal').style.display='none';npProd=null;npRows=[];}
+function npVisible(){
+  const q=(document.getElementById('np-q').value||'').trim().toLowerCase();
+  const sf=document.getElementById('np-sale-f').value||'';
+  const shf=document.getElementById('np-ship-f').value||'';
+  const pvf=document.getElementById('np-prov-f').value||'';
+  const rf=document.getElementById('np-reg-f').value||'';
+  const out=[];
+  npRows.forEach((r,i)=>{
+    if(sf&&(r.c.sale_name||'-')!==sf)return;
+    if(shf&&bqShipOf(r.c)!==shf)return;
+    if(pvf&&bqProvOf(r.c)!==pvf)return;
+    if(rf&&npRegionOf(r.c)!==rf)return;
+    if(q&&!(String(r.c.code||'').toLowerCase().includes(q)||String(r.c.name||'').toLowerCase().includes(q)||String(r.c.branch_name||'').toLowerCase().includes(q)))return;
+    out.push(i);
+  });
+  return out;
+}
+function npCheckAll(on){npVisible().forEach(i=>{if(!npRows[i].ex)npRows[i].sel=on;});npRenderRows();}
+function npRenderRows(){
+  if(!npProd)return;
+  const vis=npVisible();
+  const gLabel={base:'กลาง',r20:'เรท20',r50:'เรท50',upc:'รวมส่งตจว'};
+  document.getElementById('np-list').innerHTML=vis.length?
+    '<div style="overflow-x:auto;max-height:380px;overflow-y:auto"><table><thead><tr><th></th><th>ร้าน</th><th>เซลล์</th><th>ขนส่ง · จังหวัด</th><th>พื้นที่</th><th>กลุ่มราคา</th><th class="num">ราคาที่จะได้</th></tr></thead><tbody>'
+    +vis.map(i=>{const r=npRows[i];const reg=npRegionOf(r.c);const rp=npRegionPrice(reg);
+      const price=r.ex?(r.ex.price!=null?'฿'+fmt(r.ex.price):'ตามกลุ่ม (฿'+fmt(effPrice(npProd,r.c.price_group))+')')
+        :(rp!=null?'<b>฿'+fmt(rp)+'</b> <span style="color:#0f6e56;font-size:11.5px">(ราคาพื้นที่)</span>'
+                  :'฿'+fmt(effPrice(npProd,r.c.price_group))+' <span style="color:var(--muted);font-size:11.5px">(ตามกลุ่ม)</span>');
+      return '<tr'+(r.ex?' style="opacity:.55;background:#f6f3ef"':'')+'>'
+        +'<td>'+(r.ex?'<span title="มีสินค้านี้อยู่แล้ว — เครื่องมือนี้ไม่แก้ของเดิม">✓</span>'
+                     :'<input type="checkbox" '+(r.sel?'checked':'')+' onchange="npRows['+i+'].sel=this.checked;npCount()">')+'</td>'
+        +'<td><b>'+esc(r.c.code)+'</b> '+esc(r.c.name)+(r.c.branch_name?' <span style="color:var(--muted)">• '+esc(r.c.branch_name)+'</span>':'')+'</td>'
+        +'<td>'+esc(r.c.sale_name||'-')+'</td>'
+        +'<td style="font-size:12.5px">'+esc(bqShipOf(r.c))+' <span style="color:var(--muted)">· '+esc(bqProvOf(r.c))+'</span></td>'
+        +'<td>'+esc(reg)+'</td><td>'+esc(gLabel[r.c.price_group]||r.c.price_group||'กลาง')+'</td>'
+        +'<td class="num">'+price+'</td></tr>';}).join('')
+    +'</tbody></table></div>'
+    :'<div class="empty">ไม่พบร้านตามที่กรองไว้</div>';
+  npCount();
+}
+function npCount(){
+  const n=npRows.filter(r=>r.sel).length, ex=npRows.filter(r=>r.ex).length;
+  document.getElementById('np-count').textContent=npRows.length?('แสดง '+npVisible().length+'/'+npRows.length+' ร้าน · เลือกไว้ '+n+(ex?' · มีอยู่แล้ว '+ex:'')):'';
+  const b=document.getElementById('np-save');if(b)b.textContent='💾 จัดให้ร้านที่เลือก ('+n+')';
+}
+async function npSave(btn){
+  if(npBusy||!npProd)return;
+  const sel=npRows.filter(r=>r.sel&&!r.ex);
+  if(!sel.length){toast('ติ๊กเลือกร้านก่อน');return;}
+  const byReg={};
+  sel.forEach(r=>{const g=npRegionOf(r.c);(byReg[g]=byReg[g]||[]).push(r);});
+  const lines=Object.entries(byReg).map(([g,rs])=>{const rp=npRegionPrice(g);
+    return '• '+g+' '+rs.length+' ร้าน — '+(rp!=null?'ราคาเฉพาะ ฿'+fmt(rp):'ราคาตามกลุ่มของแต่ละร้าน');}).join('\n');
+  if(!confirm('จัด "'+npProd.name+'" ให้ '+sel.length+' ร้าน?\n'+lines+'\n\nร้านที่เลือกจะเห็นและสั่งสินค้านี้ได้ทันที'))return;
+  npBusy=true;btn.disabled=true;
+  const st=document.getElementById('np-status');
+  try{
+    const ups=sel.map(r=>({customer_id:r.c.id,product_id:npProd.id,price:npRegionPrice(npRegionOf(r.c))}));
+    for(let i=0;i<ups.length;i+=200){
+      st.textContent='กำลังบันทึก… '+Math.min(i+200,ups.length)+'/'+ups.length;
+      const chunk=ups.slice(i,i+200);
+      const {data,error}=await db.from('customer_prices').upsert(chunk,{onConflict:'customer_id,product_id'}).select('customer_id');
+      if(error)throw new Error(error.message);
+      if(!data||data.length!==chunk.length)throw new Error('บันทึกไม่ครบ ('+(data?data.length:0)+'/'+chunk.length+') — เช็คสิทธิ์แล้วลองใหม่');
+    }
+    st.textContent='';
+    toast('✅ จัด "'+npProd.name+'" ให้ '+sel.length+' ร้านแล้ว');
+    npClose(); loadCustomers();
+  }catch(e){st.textContent='';toast('บันทึกไม่สำเร็จ: '+(e.message||e));}
+  npBusy=false;btn.disabled=false;
+  if(npProd)npCount();
+}
+
 function editProduct(id){
   const p=products.find(x=>x.id===id); if(!p)return;
   editProductId=id;
@@ -2706,6 +2858,9 @@ async function saveProduct(){
       await db.rpc('stock_add',{p_product:ins.id,p_wh:selWh,p_qty:initStock});
     }
     toast('เพิ่มสินค้าแล้ว');
+    resetProductForm(); loadProducts();
+    if(ins?.id)npOpen({...rec,id:ins.id});   // ต่อทันที: เลือกร้านที่จะจัดสินค้าใหม่ให้ + ราคาแยกพื้นที่
+    return;
   }
   resetProductForm(); loadProducts();
 }
