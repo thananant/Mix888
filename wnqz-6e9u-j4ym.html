@@ -388,6 +388,8 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <div id="bp-filter" style="display:none;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
           <input id="bp-shop-q" placeholder="🔎 ค้นหาชื่อร้าน / รหัส…" style="flex:1;min-width:170px" autocomplete="off" oninput="bpRender()">
           <select id="bp-sale-f" onchange="bpRender()"><option value="">เซลล์: ทั้งหมด</option></select>
+          <select id="bp-ship-f" onchange="bpRender()" title="กรองตามวิธีขนส่ง — กทม/ต่างจังหวัดค่าส่งไม่เท่ากัน"><option value="">ขนส่ง: ทั้งหมด</option></select>
+          <select id="bp-prov-f" onchange="bpRender()"><option value="">จังหวัด: ทั้งหมด</option></select>
           <button class="btn-s" onclick="bpCheckAll(true)">☑ เลือกทั้งหมดที่แสดง</button>
           <button class="btn-s" onclick="bpCheckAll(false)">⬜ ไม่เลือกที่แสดง</button>
           <span class="count" id="bp-filter-info"></span>
@@ -3103,8 +3105,13 @@ async function bpScan(btn){
     bpRows.forEach(r=>{r.prods.sort((a,b)=>(b.normal-b.promo)-(a.normal-a.promo));r.save=r.prods.reduce((s,x)=>s+(x.normal-x.promo),0);});
     bpRows.sort((a,b)=>b.prods.length-a.prods.length||b.save-a.save);
     document.getElementById('bp-sum').textContent='เข้าเกณฑ์ '+bpRows.length+' ร้าน ('+bpItems.length+' สินค้า) · รายการที่ได้ราคาดีอยู่แล้วไม่ส่ง '+cheaper+' · ไม่ผูกกลุ่มไลน์ '+noline+(noline?' (ได้ราคาโปร แต่ไม่ได้รับข้อความ)':'')+(inactive?' · ปิดใช้งาน '+inactive:'');
-    const saleNames=[...new Set(bpRows.map(r=>r.c.sale_name||'-'))].sort((a,b)=>String(a).localeCompare(String(b),'th'));
+    const thSort=(a,b)=>String(a).localeCompare(String(b),'th');
+    const saleNames=[...new Set(bpRows.map(r=>r.c.sale_name||'-'))].sort(thSort);
     document.getElementById('bp-sale-f').innerHTML='<option value="">เซลล์: ทั้งหมด</option>'+saleNames.map(s=>'<option>'+esc(s)+'</option>').join('');
+    const shipNames=[...new Set(bpRows.map(r=>bqShipOf(r.c)))].sort(thSort);
+    document.getElementById('bp-ship-f').innerHTML='<option value="">ขนส่ง: ทั้งหมด</option>'+shipNames.map(s=>'<option>'+esc(s)+'</option>').join('');
+    const provNames=[...new Set(bpRows.map(r=>bqProvOf(r.c)))].sort(thSort);
+    document.getElementById('bp-prov-f').innerHTML='<option value="">จังหวัด: ทั้งหมด</option>'+provNames.map(s=>'<option>'+esc(s)+'</option>').join('');
     document.getElementById('bp-shop-q').value='';
     bpRender();
     document.getElementById('bp-send').style.display=bpRows.length?'inline-block':'none';
@@ -3113,12 +3120,16 @@ async function bpScan(btn){
   btn.disabled=false;
 }
 function bpVisible(){
-  // ดัชนีของแถวที่ผ่านตัวกรองเซลล์ + คำค้นชื่อร้าน (อิงดัชนีจริงใน bpRows)
+  // ดัชนีของแถวที่ผ่านตัวกรอง เซลล์/ขนส่ง/จังหวัด + คำค้นชื่อร้าน (อิงดัชนีจริงใน bpRows)
   const q=((document.getElementById('bp-shop-q')||{}).value||'').trim().toLowerCase();
   const sf=(document.getElementById('bp-sale-f')||{}).value||'';
+  const shf=(document.getElementById('bp-ship-f')||{}).value||'';
+  const pvf=(document.getElementById('bp-prov-f')||{}).value||'';
   const out=[];
   bpRows.forEach((r,i)=>{
     if(sf&&(r.c.sale_name||'-')!==sf)return;
+    if(shf&&bqShipOf(r.c)!==shf)return;
+    if(pvf&&bqProvOf(r.c)!==pvf)return;
     if(q&&!(String(r.c.code||'').toLowerCase().includes(q)||String(r.c.name||'').toLowerCase().includes(q)||String(r.c.branch_name||'').toLowerCase().includes(q)))return;
     out.push(i);
   });
@@ -3131,12 +3142,13 @@ function bpRender(){
   const multi=bpItems.length>1;
   document.getElementById('bp-list').innerHTML=bpRows.length?
     (vis.length?
-    '<div style="overflow-x:auto;max-height:360px;overflow-y:auto"><table><thead><tr><th></th><th>ร้าน</th><th>เซลล์</th>'
+    '<div style="overflow-x:auto;max-height:360px;overflow-y:auto"><table><thead><tr><th></th><th>ร้าน</th><th>เซลล์</th><th>ขนส่ง · จังหวัด</th>'
     +'<th>สินค้าที่ได้โปร'+(multi?' (ของร้านนี้)':'')+'</th><th class="num">ลดรวม</th><th></th></tr></thead><tbody>'
     +vis.map(i=>{const r=bpRows[i];return '<tr'+(r.sent===true?' style="background:#e8f6f0"':r.sent===false?' style="background:#fdeeee"':'')+'>'
       +'<td><input type="checkbox" '+(r.sel?'checked':'')+' onchange="bpRows['+i+'].sel=this.checked;bpCount()"></td>'
       +'<td><b>'+esc(r.c.code)+'</b> '+esc(r.c.name)+(r.c.branch_name?' <span style="color:var(--muted)">• '+esc(r.c.branch_name)+'</span>':'')+'</td>'
       +'<td>'+esc(r.c.sale_name||'-')+'</td>'
+      +'<td style="font-size:12.5px">'+esc(bqShipOf(r.c))+' <span style="color:var(--muted)">· '+esc(bqProvOf(r.c))+'</span></td>'
       +'<td style="font-size:12.5px">'+(multi?'<b>'+r.prods.length+'/'+bpItems.length+' รายการ</b><br>':'')
         +r.prods.map(x=>esc(x.p.name)+' <span style="color:var(--muted)">฿'+fmt(x.normal)+'</span> → <b>฿'+fmt(x.promo)+'</b> <span style="color:#0f6e56">(−'+Math.round((x.normal-x.promo)/x.normal*100)+'%)</span>').join('<br>')+'</td>'
       +'<td class="num" style="color:#0f6e56"><b>฿'+fmt(r.save)+'</b></td>'
