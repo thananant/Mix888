@@ -24,20 +24,36 @@ const json = (obj: unknown) =>
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   try {
-    const { data, amount } = await req.json(); // data = ข้อความ QR ที่อ่านได้จากสลิป
+    // data = ข้อความ QR ที่อ่านได้จากสลิป · imageBase64 = รูปสลิปทั้งใบ (แผนสอง —
+    // เมื่อฝั่งเครื่องอ่าน QR ไม่ได้ ให้ SlipOK อ่านจากรูปฝั่งเซิร์ฟเวอร์แทน)
+    const { data, amount, imageBase64 } = await req.json();
     const branch = Deno.env.get("SLIPOK_BRANCH_ID");
     const key = Deno.env.get("SLIPOK_API_KEY");
     if (!branch || !key) return json({ ok: false, error: "ยังไม่ได้ตั้งค่า SLIPOK_BRANCH_ID / SLIPOK_API_KEY ใน Secrets" });
-    if (!data) return json({ ok: false, error: "ไม่มีข้อมูล QR จากสลิป" });
+    if (!data && !imageBase64) return json({ ok: false, error: "ไม่มีข้อมูล QR หรือรูปสลิป" });
 
-    const body: Record<string, unknown> = { data, log: true };
-    if (amount) body.amount = amount;
-
-    const r = await fetch("https://api.slipok.com/api/line/apikey/" + branch, {
-      method: "POST",
-      headers: { "x-authorization": key, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    let r: Response;
+    if (data) {
+      const body: Record<string, unknown> = { data, log: true };
+      if (amount) body.amount = amount;
+      r = await fetch("https://api.slipok.com/api/line/apikey/" + branch, {
+        method: "POST",
+        headers: { "x-authorization": key, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } else {
+      const b64 = String(imageBase64).split(",").pop() || "";
+      const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const fd = new FormData();
+      fd.append("files", new Blob([bin], { type: "image/jpeg" }), "slip.jpg");
+      fd.append("log", "true");
+      if (amount) fd.append("amount", String(amount));
+      r = await fetch("https://api.slipok.com/api/line/apikey/" + branch, {
+        method: "POST",
+        headers: { "x-authorization": key },
+        body: fd,
+      });
+    }
     const j = await r.json().catch(() => null);
 
     if (!r.ok || !j || !j.success) {
