@@ -28,15 +28,32 @@ language plpgsql security definer set search_path = public, pg_temp
 as $$
 declare v numeric;
 begin
+  -- ล็อกแถวสินค้าก่อน แล้วค่อยคิดผลรวม — กันสองเครื่องทำรายการสินค้าเดียวกันพร้อมกันแล้วได้เลขค้าง
+  perform 1 from products where id = p_product for update;
   if not exists (select 1 from stock where product_id = p_product) then
     select coalesce(stock_qty,0) into v from products where id = p_product;
     return v;
   end if;
   select coalesce(sum(qty),0) into v from stock where product_id = p_product;
-  update products set stock_qty = v where id = p_product;
+  update products set stock_qty = v where id = p_product and stock_qty is distinct from v;
   return v;
 end $$;
 revoke execute on function stock_recount(bigint) from public, anon, authenticated;
+
+-- 1.5) รายโกดังต้องมีสินค้าละ 1 แถวต่อโกดัง: รวมแถวซ้ำที่ค้างอยู่ (ถ้ามี) แล้วกันซ้ำถาวร
+do $$
+declare r record; n int := 0;
+begin
+  for r in select product_id, warehouse_id, sum(qty) as q, count(*) as c
+             from stock group by product_id, warehouse_id having count(*) > 1
+  loop
+    delete from stock where product_id = r.product_id and warehouse_id = r.warehouse_id;
+    insert into stock(product_id, warehouse_id, qty) values (r.product_id, r.warehouse_id, r.q);
+    n := n + 1;
+  end loop;
+  if n > 0 then raise notice 'รวมแถวรายโกดังซ้ำแล้ว % จุด (ยอดรวมเท่าเดิม)', n; end if;
+end $$;
+create unique index if not exists stock_prod_wh_uidx on stock(product_id, warehouse_id);
 
 -- 2) กฎที่ 1: สต๊อกรายโกดังเปลี่ยน → ยอดรวมของสินค้านั้นคิดใหม่ทันที
 create or replace function stock_guard_rows() returns trigger
@@ -44,12 +61,16 @@ language plpgsql security definer set search_path = public, pg_temp
 as $$
 declare v numeric;
 begin
+  -- ล็อกแถวสินค้าก่อน แล้วค่อยคิดผลรวม (คิวรีหลังล็อกเห็นข้อมูลล่าสุดของเครื่องอื่นที่เพิ่งบันทึก)
+  -- — กันเคสสองเครื่องแตะสินค้าเดียวกันคนละโกดังพร้อมกัน แล้วยอดรวมค้างเป็นเลขเก่า
   if tg_op in ('INSERT','UPDATE') and new.product_id is not null then
+    perform 1 from products p where p.id = new.product_id for update;
     select coalesce(sum(s.qty),0) into v from stock s where s.product_id = new.product_id;
     update products p set stock_qty = v where p.id = new.product_id and p.stock_qty is distinct from v;
   end if;
   if tg_op in ('DELETE','UPDATE') and old.product_id is not null
      and (tg_op = 'DELETE' or old.product_id is distinct from new.product_id) then
+    perform 1 from products p where p.id = old.product_id for update;
     select coalesce(sum(s.qty),0) into v from stock s where s.product_id = old.product_id;
     update products p set stock_qty = v where p.id = old.product_id and p.stock_qty is distinct from v;
   end if;
@@ -89,7 +110,8 @@ begin
   select id into wh from warehouses where coalesce(is_default,false) order by id limit 1;
   if wh is null then select id into wh from warehouses order by id limit 1; end if;
   if wh is null then return null; end if;   -- ยังไม่ตั้งค่าโกดัง — ปล่อยตามเดิม
-  insert into stock(product_id, warehouse_id, qty) values (new.id, wh, new.stock_qty);
+  insert into stock(product_id, warehouse_id, qty) values (new.id, wh, new.stock_qty)
+  on conflict (product_id, warehouse_id) do update set qty = stock.qty + excluded.qty;   -- ชนกับการลงพร้อมกัน → รวมยอด ไม่สร้างแถวซ้ำ
   begin
     insert into stock_movements(product_id, type, qty, note, warehouse_id, created_by)
     values (new.id, 'adjust', new.stock_qty,
@@ -103,6 +125,14 @@ create trigger stock_guard_seed_t
 after insert or update of stock_qty on products
 for each row execute function stock_guard_seed();
 
+-- 4.5) ตัดการเขียนซ้ำค่าเดิมทิ้ง (ของแถม PostgreSQL) — ฟังก์ชันเก่าที่เขียนยอดรวมมา แล้วถูกกฎที่ 2
+--      แก้เป็นเลขเดิมอยู่แล้ว จะไม่ถูกบันทึกซ้ำ → หน้าลูกค้าไม่โดน event รัวโดยไม่จำเป็น
+--      (ชื่อ zz_ เพื่อให้ทำงานหลังกฎที่ 2 — trigger เรียงตามตัวอักษร)
+drop trigger if exists zz_stock_guard_noop_t on products;
+create trigger zz_stock_guard_noop_t
+before update on products
+for each row execute function suppress_redundant_updates_trigger();
+
 -- 5) ย้ายของเก่า: สินค้าที่มียอดรวมแต่ไม่มีรายโกดังอยู่แล้วตอนนี้ → ลงให้ที่โกดังหลัก (ครั้งเดียว)
 do $$
 declare r record; wh bigint; n int := 0;
@@ -111,8 +141,9 @@ begin
   if wh is null then select id into wh from warehouses order by id limit 1; end if;
   if wh is null then raise notice 'ยังไม่มีโกดังในระบบ — ข้ามขั้นย้ายของเก่า'; return; end if;
   for r in
+    -- รวมสินค้าที่ปิดขายด้วย — ถ้าวันหน้ากู้กลับมาขาย ยอดเดิมต้องไม่หาย
     select p.id, p.sku, coalesce(p.stock_qty,0) as q from products p
-     where coalesce(p.active,true) and coalesce(p.stock_qty,0) <> 0
+     where coalesce(p.stock_qty,0) <> 0
        and not exists (select 1 from stock s where s.product_id = p.id)
   loop
     insert into stock(product_id, warehouse_id, qty) values (r.id, wh, r.q);
@@ -155,5 +186,5 @@ select tgname as "เกราะ", 'ติดตั้งแล้ว ✅' as "
 select
   (select count(*) from products p join (select product_id, sum(qty) sq from stock group by product_id) s on s.product_id = p.id
     where coalesce(p.stock_qty,0) <> coalesce(s.sq,0)) as "ยอดไม่ตรง(ต้อง 0)",
-  (select count(*) from products p where coalesce(p.active,true) and coalesce(p.stock_qty,0) <> 0
+  (select count(*) from products p where coalesce(p.stock_qty,0) <> 0
     and not exists (select 1 from stock s where s.product_id = p.id)) as "ไม่มีรายโกดัง(ต้อง 0)";
