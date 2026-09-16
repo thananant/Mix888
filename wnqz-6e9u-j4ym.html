@@ -1700,7 +1700,8 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 </div>
 <div id="adjust-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)this.style.display='none'">
   <div class="card" style="max-width:420px;width:100%">
-    <h3 style="margin:0 0 4px">🔧 ปรับสต๊อก</h3>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h3 style="margin:0 0 4px">🔧 ปรับสต๊อก</h3>
+      <button class="btn-g mini" onclick="document.getElementById('adjust-modal').style.display='none';showPage('stockops');soTab('adj')" title="ดูว่าใครปรับอะไร เมื่อไร เหตุผลอะไร">🕘 ประวัติปรับสต๊อก</button></div>
     <div id="aj-name" style="color:var(--muted);font-size:13.5px;margin-bottom:10px"></div>
     <label>โกดัง</label><select id="aj-wh" style="width:100%" onchange="ajShowCur()"></select>
     <div style="margin:8px 0;font-size:14px">ยอดปัจจุบัน: <b id="aj-cur">0</b></div>
@@ -1721,7 +1722,8 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 <!-- ===== แปลงสินค้า ===== -->
 <div id="convert-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)this.style.display='none'">
   <div class="card" style="max-width:480px;width:100%">
-    <h3 style="margin:0 0 4px">🔁 แปลงสินค้า</h3>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h3 style="margin:0 0 4px">🔁 แปลงสินค้า</h3>
+      <button class="btn-g mini" onclick="document.getElementById('convert-modal').style.display='none';showPage('stockops');soTab('cv')" title="ดูว่าใครแปลงอะไร เมื่อไร กี่ชิ้น">🕘 ประวัติการแปลง</button></div>
     <div id="cvt-from-name" style="font-size:14px;margin-bottom:8px"></div>
     <div class="row" style="align-items:flex-end">
       <div><label>จำนวนต้นทางที่ใช้</label><input id="cvt-from-qty" type="number" min="0.01" step="0.01" value="1" class="num" style="width:110px"></div>
