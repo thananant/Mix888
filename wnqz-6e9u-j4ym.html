@@ -31,6 +31,11 @@ body{font-family:'IBM Plex Sans Thai',sans-serif;background:var(--bg);color:var(
 /* ---------- Sidebar ---------- */
 #side{position:fixed;top:0;left:0;bottom:0;width:224px;background:#9e1414;color:#fff;display:flex;flex-direction:column;z-index:30}
 #side .logo{font-size:19px;font-weight:700;padding:18px 16px 14px;letter-spacing:.2px;font-family:var(--display)}
+/* แถบบนสำหรับมือถือ (ปุ่ม ☰ + ชื่อหน้าที่เปิดอยู่) — ซ่อนบนจอคอม */
+.mtop{display:none;align-items:center;gap:10px;padding:8px 12px;background:#9e1414;flex:none}
+.mtop button{background:rgba(255,255,255,.16);color:#fff;border:none;border-radius:10px;width:42px;height:38px;font-size:18px;line-height:1;cursor:pointer;flex:none}
+.mtop .mtitle{font-weight:700;font-family:var(--display);font-size:16px;white-space:nowrap}
+.mtop .mnow{margin-left:auto;font-size:12.5px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #side .logo small{display:block;font-size:11.5px;font-weight:500;color:rgba(255,255,255,.65);margin-top:2px}
 .menu{flex:1;overflow-y:auto;padding:8px 10px}
 .mi{display:flex;align-items:center;gap:11px;padding:11px 15px;color:rgba(255,255,255,.9);cursor:pointer;font-weight:500;border-radius:12px;margin:2px 0;font-size:14.5px;user-select:none;transition:background .15s}
@@ -130,17 +135,19 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 #login-err{color:var(--accent);font-size:13.5px;margin-bottom:10px;display:none}
 /* ---------- Mobile ---------- */
 @media(max-width:920px){
-  #side{position:sticky;top:0;bottom:auto;width:100%;flex-direction:row;align-items:center;overflow-x:auto;padding:0 8px}
-  #side .logo{padding:12px 10px;font-size:16px;white-space:nowrap}
-  #side .logo small{display:none}
-  .menu{display:flex;flex:1;padding:0;overflow-y:visible}
-  .mi{padding:13px 12px;border-left:none;border-bottom:3px solid transparent;white-space:nowrap}
-  .mi.active{border-left:none;border-bottom-color:#ffb9b9}
-  .mi .ic{width:auto}
-  #side .foot{border-top:none;padding:8px;display:flex;align-items:center;gap:8px}
-  #side .foot .nm{margin:0;font-size:12px;white-space:nowrap}
-  #content{margin-left:0;padding:16px 12px 60px}
+  /* มือถือ: แถบบนเตี้ย ๆ + กดปุ่ม ☰ ค่อยเปิดเมนู (เมนูเรียงลงล่างเหมือนจอคอม ไม่ล้นจอ) */
+  #side{position:fixed;top:0;left:0;right:0;bottom:auto;width:100%;max-height:100vh;
+        flex-direction:column;overflow:hidden;padding:0;box-shadow:0 2px 12px rgba(0,0,0,.22)}
+  .mtop{display:flex}
+  #side .logo{display:none}
+  .menu{display:none;flex:none;padding:6px 10px 10px;overflow-y:auto;max-height:calc(100vh - 118px);-webkit-overflow-scrolling:touch}
+  #side.open .menu{display:block}
+  #side .foot{display:none;padding:10px 14px}
+  #side.open .foot{display:block}
+  #content{margin-left:0;padding:70px 12px 60px}
   .charts{grid-template-columns:1fr}
+  /* การ์ดในกริด/แถวยืดหยุ่น ต้องยอมหดตามจอ ไม่งั้นดันหน้าจนเลื่อนซ้าย-ขวาได้ */
+  .charts>*,.cards>*,#content .card{min-width:0}
 }
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -150,6 +157,11 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ Sidebar ============ -->
 <nav id="side">
+  <div class="mtop">
+    <button id="mburger" onclick="toggleMenu()" aria-label="เมนู">☰</button>
+    <span class="mtitle">Mix Fresh 168</span>
+    <span class="mnow" id="mnow"></span>
+  </div>
   <div class="logo"><img src="logo.png" alt="Mix Fresh 168" style="width:100%;max-width:150px;display:block;margin:0 auto;border-radius:10px"><small style="text-align:center;margin-top:6px">ระบบสั่งสินค้า B2B<div style="font-size:10px;opacity:.55;margin-top:2px">build 27/07-S</div></small></div>
   <div class="menu">
     <div class="mi active" data-page="dashboard" onclick="showPage('dashboard')"><span class="ic">📊</span>ภาพรวม</div>
@@ -1912,6 +1924,29 @@ function toggleGroup(g){
   el.classList.toggle('open');
   try{localStorage.setItem('mf_mgrp_'+g,el.classList.contains('open')?'1':'0');}catch(e){}
 }
+/* ---- เมนูบนมือถือ: ปุ่ม ☰ เปิด/ปิด · เลือกหน้าแล้วปิดให้เอง ---- */
+function toggleMenu(){
+  const s=document.getElementById('side');if(!s)return;
+  const open=s.classList.toggle('open');
+  const b=document.getElementById('mburger');if(b)b.textContent=open?'✕':'☰';
+}
+function closeMenu(){
+  const s=document.getElementById('side');if(!s||!s.classList.contains('open'))return;
+  s.classList.remove('open');
+  const b=document.getElementById('mburger');if(b)b.textContent='☰';
+}
+/** ชื่อเมนูที่เปิดอยู่ (ตัดตัวเลขแจ้งเตือน/ลูกศรออก) ไว้โชว์บนแถบมือถือ */
+function menuLabelOf(el){
+  if(!el)return '';
+  const c=el.cloneNode(true);
+  c.querySelectorAll('.badge,.chev').forEach(x=>x.remove());
+  return (c.textContent||'').replace(/\s+/g,' ').trim();
+}
+// แตะนอกเมนูแล้วปิด (เฉพาะตอนเปิดอยู่บนมือถือ)
+document.addEventListener('click',e=>{
+  const s=document.getElementById('side');
+  if(s&&s.classList.contains('open')&&!e.target.closest('#side'))closeMenu();
+});
 function openActiveGroup(){
   const act=document.querySelector('.mi.active');
   const grp=act&&act.closest('.mgroup');
@@ -1935,6 +1970,9 @@ function showPage(p){
   document.querySelectorAll('.mhead[data-page]').forEach(e=>e.classList.toggle('active',e.dataset.page===p));   // เมนูหลักแบบไม่มีเมนูย่อย
   openActiveGroup();
   document.getElementById('page-'+p).classList.add('active');
+  const mn=document.getElementById('mnow');
+  if(mn)mn.textContent=menuLabelOf(document.querySelector('.mi.active,.mhead.active'));
+  closeMenu();   // มือถือ: เลือกหน้าแล้วปิดเมนูให้เอง
   if(p==='dashboard') loadDashboard();
   if(p==='bcast') initBroadcastPage();
   if(p==='promodetail') initPromoDetailPage();
