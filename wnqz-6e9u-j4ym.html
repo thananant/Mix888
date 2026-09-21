@@ -188,6 +188,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <div class="mi" data-page="products" onclick="showPage('products')"><span class="ic">📦</span>สินค้า</div>
         <div class="mi" data-page="moves" onclick="showPage('moves')"><span class="ic">📊</span>เดินรายการสินค้า</div>
         <div class="mi" data-page="transfer" onclick="showPage('transfer')"><span class="ic">🚛</span>โอนโกดัง<span class="badge" id="tf-badge" style="display:none">0</span></div>
+        <div class="mi" data-page="salecmp" onclick="showPage('salecmp')"><span class="ic">📈</span>เทียบยอดขาย/แพลนโอน</div>
         <div class="mi" data-page="receive" onclick="showPage('receive')"><span class="ic">📥</span>รับสินค้า<span class="badge" id="rc-badge" style="display:none">0</span></div>
         <div class="mi" data-page="warehouse" onclick="showPage('warehouse')"><span class="ic">🏭</span>คลังสินค้า</div>
         <div class="mi" data-page="stockops" onclick="showPage('stockops')"><span class="ic">📋</span>นับ/ปรับสต๊อก</div>
@@ -996,6 +997,61 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="card">
     <h3 class="ct">📦 ใบสั่งซื้อที่ยังไม่ครบ (ของกำลังมา)</h3>
     <div id="pl-po"><div class="empty">—</div></div>
+  </div>
+</div>
+
+<!-- ============ 📈 เทียบยอดขาย 2 เดือน + แพลนรอบโอนโกดัง ============ -->
+<div class="page" id="page-salecmp">
+  <div class="pagehead"><h2>📈 เทียบยอดขาย + แพลนรอบโอน</h2>
+    <span class="date">ดูว่าตัวไหนขายดีขึ้น/ลดลง แล้วโอนทีเดียวให้พอหลายวัน — ลดรอบรถ</span></div>
+  <div class="card">
+    <div class="row" style="align-items:flex-end;flex-wrap:wrap;gap:10px">
+      <div><label>เทียบเดือน</label><select id="mc-ma" onchange="mcCalc()" style="min-width:120px"></select></div>
+      <div><label>กับเดือน</label><select id="mc-mb" onchange="mcCalc()" style="min-width:120px"></select></div>
+      <button class="btn-p" onclick="mcCalc()">🧮 ดึงข้อมูล</button>
+      <div style="flex:1"></div>
+      <div><label>โอนจากโกดัง</label><select id="mc-from" onchange="mcRender()" style="min-width:150px"></select></div>
+      <div><label>ไปโกดัง</label><select id="mc-to" onchange="mcRender()" style="min-width:150px"></select></div>
+      <div><label title="โอน 1 รอบ ให้มีของพอขายกี่วัน — ยิ่งมาก ยิ่งวิ่งรถน้อยรอบ">โอนให้พอกี่วัน</label>
+        <input id="mc-days" type="number" class="num" value="14" min="1" max="120" style="width:90px" onchange="mcRender()"></div>
+      <div><label>คิดจากยอด</label><select id="mc-base" onchange="mcRender()" style="min-width:170px">
+        <option value="max" selected>เดือนที่ขายดีกว่า (กันขาด)</option>
+        <option value="b">เดือนล่าสุด</option>
+        <option value="avg">เฉลี่ย 2 เดือน</option></select></div>
+    </div>
+    <div id="mc-sum" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px"></div>
+    <div class="row" style="margin-top:10px;align-items:center;gap:8px;flex-wrap:wrap">
+      <input id="mc-q" placeholder="🔎 ค้นหาสินค้า / SKU…" style="flex:1;min-width:170px" autocomplete="off" oninput="mcRender()">
+      <select id="mc-sort" onchange="mcRender()">
+        <option value="chg">เรียง: เปลี่ยนแปลงมากสุด</option>
+        <option value="qtyb">เรียง: ขายดีสุดเดือนล่าสุด</option>
+        <option value="need">เรียง: ต้องโอนมากสุด</option>
+        <option value="name">เรียง: ชื่อสินค้า</option>
+      </select>
+      <label style="font-size:13px"><input type="checkbox" id="mc-only" onchange="mcRender()"> เฉพาะที่ต้องโอน</label>
+      <label style="font-size:13px"><input type="checkbox" id="mc-retail" onchange="mcRender()" title="สินค้าปลีก (SKU ลงท้าย S) ปกติไม่โอนข้ามโกดัง"> รวมสินค้าปลีก (S)</label>
+      <button class="btn-s mini" onclick="mcToTransfer()">🚛 ส่งเข้าใบโอน</button>
+      <button class="btn-g mini" onclick="mcCSV()">📤 CSV</button>
+      <span class="count" id="mc-count"></span>
+    </div>
+    <div style="overflow-x:auto;margin-top:8px;max-height:62vh;overflow-y:auto"><table>
+      <thead><tr>
+        <th>SKU</th><th>สินค้า</th>
+        <th class="num" id="mc-th-a">เดือนที่แล้ว</th>
+        <th class="num" id="mc-th-b">เดือนนี้</th>
+        <th class="num">เทียบ</th>
+        <th class="num" title="ยอดขายเฉลี่ยต่อวัน ที่ใช้คิดจำนวนโอน">ขาย/วัน</th>
+        <th class="num">คงเหลือปลายทาง</th>
+        <th class="num">คงเหลือต้นทาง</th>
+        <th class="num">ควรโอน</th>
+      </tr></thead>
+      <tbody id="mc-body"><tr><td colspan="9" class="empty">กด "ดึงข้อมูล"</td></tr></tbody>
+    </table></div>
+    <p class="hint" style="margin-top:8px">
+      เทียบกันด้วย <b>ยอดขายเฉลี่ยต่อวัน</b> เดือนที่ยังไม่จบจึงเทียบได้ตรง ๆ · ตัวเลขในวงเล็บคือยอดเงิน ·
+      ควรโอน = (ขาย/วัน × จำนวนวันที่ตั้งไว้) − คงเหลือปลายทางหลังหักจองรอส่ง ปัดขึ้น 5 · แถวแดง = ต้นทางมีไม่พอ (ส่วนที่ขาดต้องสั่งซื้อ) ·
+      แสดงเฉพาะสินค้าที่มียอดขายในช่วงที่เทียบ
+    </p>
   </div>
 </div>
 
@@ -1888,6 +1944,7 @@ function showPage(p){
   if(p==='orders') loadOrders();
   if(p==='account') loadBills();
   if(p==='receive') loadProducts();
+  if(p==='salecmp') mcInitPage();
   if(p==='warehouse') loadWarehouse();
   if(p==='moves'){mvInit();loadMoves();}
   if(p==='purchase'){pcInit();pcCalc();}
@@ -10037,6 +10094,7 @@ async function loadWhList(){
   if(error){console.warn('loadWhList',error);return;}
   whList=(data||[]).filter(w=>w.active!==false);
   scFillWh();
+  mcFillWh();
   const tfF=document.getElementById('tf-from'),tfT=document.getElementById('tf-to');
   if(tfF&&tfT){
     const opts=whList.map(w=>`<option value="${w.id}">${esc(w.name)}</option>`).join('');
@@ -10261,6 +10319,207 @@ window.addEventListener('error',e=>{
   alertOps('โค้ดหน้าจอผิดพลาด',masked?'Script error. (จากสคริปต์ภายนอก/ส่วนขยายเบราว์เซอร์ — ถ้าระบบยังใช้ได้ปกติ ไม่ต้องทำอะไร)':(e.message||'')+' @'+String(e.filename||'').split('/').pop()+':'+e.lineno);
 });
 window.addEventListener('unhandledrejection',e=>{const r=e.reason;alertOps('งานเบื้องหลังล้มเหลว',(r&&(r.message||r.error_description))||String(r||''));});
+
+/* ==================== 📈 เทียบยอดขาย 2 เดือน + แพลนรอบโอนโกดัง ====================
+   โจทย์: โอนของข้ามโกดังทุกวัน = เสียค่ารถบ่อย → ดูยอดขายจริงของแต่ละตัว
+   แล้วโอนทีเดียวให้พอหลายวัน (ตั้งเองว่ากี่วัน) จะได้วิ่งรถน้อยรอบลง
+   ⛔ อ่านข้อมูลอย่างเดียว ไม่แก้สต๊อก/ราคาใด ๆ — จำนวนที่แนะนำต้องกดส่งเข้าใบโอนเอง         */
+let mcRows=[], mcView=[], mcInfo=null, mcBusy=false;
+const mcMonthKey=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+function mcMonthLabel(key){const [y,m]=String(key).split('-').map(Number);return (TH_MONTHS[(m||1)-1]||'')+' '+String((y||0)+543).slice(2);}
+/** ช่วงเวลาของเดือนนั้น + จำนวนวันที่ผ่านไปจริง (เดือนปัจจุบันนับถึงตอนนี้ ไม่นับวันที่ยังมาไม่ถึง) */
+function mcRange(key){
+  const [y,m]=String(key).split('-').map(Number);
+  const from=new Date(y,m-1,1,0,0,0,0);
+  const last=new Date(y,m,0,23,59,59,999);
+  const now=new Date();
+  const partial=last>now;
+  const to=partial?now:last;
+  return {key,from,to,dim:new Date(y,m,0).getDate(),partial,days:Math.max(1,(to-from)/86400000)};
+}
+function mcFillWh(){
+  const f=document.getElementById('mc-from'), t=document.getElementById('mc-to');
+  if(!f||!t||!whList.length)return;
+  const opts=whList.map(w=>`<option value="${w.id}">${esc(w.name)}</option>`).join('');
+  const cf=f.value, ct=t.value;
+  f.innerHTML=opts; t.innerHTML=opts;
+  // ค่าเริ่มต้นเดียวกับหน้าโอนโกดัง: กัลปพฤกษ์ (ต้นทาง) → วังหิน (ปลายทาง)
+  const wKlp=whList.find(w=>String(w.name).includes('กัลป'));
+  const wWh=whList.find(w=>String(w.name).includes('วังหิน'));
+  f.value=cf||String((wKlp||whList.find(w=>!w.is_default)||whList[0]).id);
+  t.value=ct||String((wWh||whList.find(w=>w.is_default)||whList[whList.length-1]).id);
+}
+function mcInitPage(){
+  const a=document.getElementById('mc-ma'), b=document.getElementById('mc-mb');
+  if(a&&b&&!a.options.length){
+    const now=new Date(), keys=[];
+    for(let i=0;i<13;i++)keys.push(mcMonthKey(new Date(now.getFullYear(),now.getMonth()-i,1)));
+    const opts=keys.map(k=>`<option value="${k}">${esc(mcMonthLabel(k))}</option>`).join('');
+    a.innerHTML=opts; b.innerHTML=opts;
+    a.value=keys[1]||keys[0];   // เดือนที่แล้ว
+    b.value=keys[0];            // เดือนนี้
+  }
+  mcFillWh();
+  if(!mcInfo)mcCalc();
+}
+async function mcCalc(){
+  const body=document.getElementById('mc-body'); if(!body||mcBusy)return;
+  const ka=(document.getElementById('mc-ma')||{}).value, kb=(document.getElementById('mc-mb')||{}).value;
+  if(!ka||!kb)return;
+  mcBusy=true;
+  body.innerHTML='<tr><td colspan="9" class="empty">กำลังดึงข้อมูล…</td></tr>';
+  document.getElementById('mc-sum').innerHTML='';
+  try{
+    const ra=mcRange(ka), rb=mcRange(kb);
+    // ยอดขาย = รายการในออเดอร์ที่ไม่ถูกยกเลิก (เกณฑ์เดียวกับหน้าภาพรวม)
+    const pull=r=>fetchAllPages(()=>db.from('order_items')
+      .select('product_id,qty,amount,orders!inner(created_at,status)')
+      .gte('orders.created_at',r.from.toISOString())
+      .lte('orders.created_at',r.to.toISOString())
+      .neq('orders.status','cancelled'));
+    const [ia,ib]=await Promise.all([pull(ra),pull(rb)]);
+    const agg=rows=>{const m={};(rows||[]).forEach(x=>{const k=Number(x.product_id);if(!k)return;
+      const o=(m[k]=m[k]||{qty:0,amt:0});o.qty+=Number(x.qty)||0;o.amt+=Number(x.amount)||0;});return m;};
+    const A=agg(ia), B=agg(ib);
+    const byId={};products.forEach(p=>{byId[p.id]=p;});
+    mcInfo={ra,rb};
+    mcRows=[...new Set([...Object.keys(A),...Object.keys(B)].map(Number))].map(id=>{
+      const p=byId[id]||{id,name:'(สินค้าถูกลบแล้ว #'+id+')',sku:'',unit:'',reserved_qty:0};
+      const a=A[id]||{qty:0,amt:0}, b=B[id]||{qty:0,amt:0};
+      return {p,qtyA:a.qty,amtA:a.amt,qtyB:b.qty,amtB:b.amt,aduA:a.qty/ra.days,aduB:b.qty/rb.days};
+    });
+    mcRender();
+  }catch(e){
+    body.innerHTML='<tr><td colspan="9" class="empty">ดึงข้อมูลไม่สำเร็จ: '+esc(e.message||e)+'</td></tr>';
+  }
+  mcBusy=false;
+}
+function mcRender(){
+  const body=document.getElementById('mc-body'); if(!body)return;
+  if(!mcInfo){body.innerHTML='<tr><td colspan="9" class="empty">กด "ดึงข้อมูล"</td></tr>';return;}
+  const {ra,rb}=mcInfo;
+  const hdr=(r)=>esc(mcMonthLabel(r.key))+(r.partial?'<div style="font-size:11px;color:var(--muted);font-weight:400">'+Math.round(r.days)+' วันแรก</div>':'');
+  document.getElementById('mc-th-a').innerHTML=hdr(ra);
+  document.getElementById('mc-th-b').innerHTML=hdr(rb);
+  const cover=Math.max(1,Number(document.getElementById('mc-days').value)||14);
+  const fromW=Number(document.getElementById('mc-from').value);
+  const toW=Number(document.getElementById('mc-to').value);
+  const base=document.getElementById('mc-base').value;
+  const withRetail=document.getElementById('mc-retail').checked;
+  const sameWh=fromW===toW;
+  // คิดตัวเลขทุกแถวก่อน แล้วค่อยกรอง/เรียง — สรุปด้านบนกับตารางจะได้ตรงกันเสมอ
+  mcRows.forEach(r=>{
+    const adu=base==='b'?r.aduB:base==='avg'?(r.aduA+r.aduB)/2:Math.max(r.aduA,r.aduB);
+    r.adu=adu;
+    r.retail=/S$/.test(String(r.p.sku||''));
+    r.stockTo=tfStockOf(r.p.id,toW);
+    r.stockFrom=Math.max(0,tfStockOf(r.p.id,fromW));
+    r.reserved=Number(r.p.reserved_qty)||0;
+    r.target=Math.ceil(adu*cover);
+    r.need=(sameWh||(r.retail&&!withRetail))?0:roundUp5(r.target-(r.stockTo-r.reserved));
+    r.send=Math.min(r.need,r.stockFrom);
+    r.short=Math.max(0,r.need-r.send);
+    // เทียบด้วยยอดต่อวัน (เดือนที่ยังไม่จบจึงเทียบได้ตรง) · null = เดือนก่อนไม่มียอดเลย
+    r.chg=r.aduA>0?((r.aduB-r.aduA)/r.aduA*100):(r.aduB>0?null:0);
+  });
+  // สรุปบนสุด
+  const tot=(k)=>mcRows.reduce((s,r)=>s+Number(r[k]||0),0);
+  const amtA=tot('amtA'), amtB=tot('amtB');
+  const perDayA=amtA/ra.days, perDayB=amtB/rb.days;
+  const chgAll=perDayA>0?(perDayB-perDayA)/perDayA*100:null;
+  const projB=perDayB*rb.dim;
+  const needRows=mcRows.filter(r=>r.need>0);
+  const shortRows=needRows.filter(r=>r.short>0);
+  const card=(t,v,c,sub)=>'<div style="flex:1;min-width:150px;border:1px solid var(--line,#eee);border-left:4px solid '+c+';border-radius:10px;padding:8px 12px">'
+    +'<div style="font-size:11.5px;color:var(--muted)">'+t+'</div><div style="font-size:18px;font-weight:700;color:'+c+'">'+v+'</div>'
+    +(sub?'<div style="font-size:11.5px;color:var(--muted)">'+sub+'</div>':'')+'</div>';
+  const arrow=chgAll==null?'':(chgAll>=0?'▲ +':'▼ ')+fmt0(Math.abs(chgAll))+'%';
+  document.getElementById('mc-sum').innerHTML=
+     card(esc(mcMonthLabel(ra.key)),'฿'+fmt0(amtA),'#7a7a7a','฿'+fmt0(perDayA)+'/วัน'+(ra.partial?' · '+Math.round(ra.days)+' วัน':''))
+    +card(esc(mcMonthLabel(rb.key)),'฿'+fmt0(amtB),'#b91c1c','฿'+fmt0(perDayB)+'/วัน'+(rb.partial?' · คาดทั้งเดือน ฿'+fmt0(projB):''))
+    +card('เทียบต่อวัน',chgAll==null?'—':arrow,chgAll==null?'#7a7a7a':chgAll>=0?'#159b78':'#b52020',chgAll==null?'ไม่มียอดเดือนก่อน':'เทียบ '+esc(mcMonthLabel(ra.key)))
+    +card('ควรโอนรอบนี้',needRows.length+' รายการ','#a04a00',sameWh?'เลือกโกดังต้นทาง/ปลายทางให้ต่างกัน':'ให้พอขาย '+cover+' วัน')
+    +card('ลดรอบรถเหลือ','~'+Math.max(1,Math.round(30/cover))+' รอบ/เดือน','#159b78',shortRows.length?('⚠️ ต้นทางไม่พอ '+shortRows.length+' รายการ'):'ต้นทางมีของพอทุกตัว');
+  // กรอง + เรียง
+  const q=((document.getElementById('mc-q')||{}).value||'').trim().toLowerCase();
+  const sort=document.getElementById('mc-sort').value;
+  const onlyNeed=document.getElementById('mc-only').checked;
+  mcView=mcRows.filter(r=>{
+    if(onlyNeed&&!(r.need>0))return false;
+    if(!withRetail&&r.retail&&onlyNeed)return false;
+    if(q&&!((String(r.p.sku||'')+' '+String(r.p.name||'')).toLowerCase().includes(q)))return false;
+    return true;
+  });
+  const chgVal=r=>r.chg==null?Infinity:r.chg;
+  mcView.sort((x,y)=>
+    sort==='qtyb'?y.qtyB-x.qtyB
+    :sort==='need'?(y.need-x.need)||(y.qtyB-x.qtyB)
+    :sort==='name'?String(x.p.name||'').localeCompare(String(y.p.name||''),'th')
+    :Math.abs(chgVal(y))-Math.abs(chgVal(x)));   // เปลี่ยนแปลงมากสุด (ขึ้นหรือลงก็ตาม)
+  document.getElementById('mc-count').textContent='แสดง '+mcView.length+'/'+mcRows.length+' รายการ';
+  if(!mcView.length){body.innerHTML='<tr><td colspan="9" class="empty">'+(mcRows.length?'ไม่พบรายการตามที่กรองไว้':'ไม่มียอดขายในช่วงที่เลือก')+'</td></tr>';return;}
+  const nq=n=>Number(n||0).toLocaleString('th-TH',{maximumFractionDigits:2});
+  body.innerHTML=mcView.map(r=>{
+    const c=r.chg==null?'#0f6e56':r.chg>=5?'#159b78':r.chg<=-5?'#b52020':'var(--muted)';
+    const chgTxt=r.chg==null?'ใหม่':(r.chg>=0?'▲ +':'▼ ')+fmt0(Math.abs(r.chg))+'%';
+    const over=r.need>0&&r.send<r.need;
+    return `<tr${over?' style="background:#fdeaea"':''}>
+      <td><b>${esc(r.p.sku||'')}</b></td>
+      <td>${esc(r.p.name||'')}${r.retail?' <span class="tag" style="font-size:10.5px">ปลีก</span>':''}</td>
+      <td class="num">${nq(r.qtyA)} <span style="color:var(--muted);font-size:11.5px">${esc(r.p.unit||'')}</span>
+        <div style="font-size:11.5px;color:var(--muted)">฿${fmt0(r.amtA)}</div></td>
+      <td class="num"><b>${nq(r.qtyB)}</b> <span style="color:var(--muted);font-size:11.5px">${esc(r.p.unit||'')}</span>
+        <div style="font-size:11.5px;color:var(--muted)">฿${fmt0(r.amtB)}</div></td>
+      <td class="num" style="color:${c};font-weight:600">${chgTxt}</td>
+      <td class="num" style="color:var(--muted)">${nq(Math.round(r.adu*10)/10)}</td>
+      <td class="num">${nq(r.stockTo)}${r.reserved?'<div style="font-size:11.5px;color:var(--warn,#a04a00)">จอง '+nq(r.reserved)+'</div>':''}</td>
+      <td class="num" style="${over?'color:var(--danger,#b52020);font-weight:700':'color:var(--muted)'}">${nq(r.stockFrom)}${over?' ⚠️':''}</td>
+      <td class="num">${r.need>0?'<b>'+nq(r.send)+'</b>'+(over?'<div style="font-size:11.5px;color:var(--danger,#b52020)">ขาด '+nq(r.short)+'</div>':''):'<span style="color:var(--muted)">—</span>'}</td>
+    </tr>`;
+  }).join('');
+}
+/** ส่งรายการที่ควรโอนเข้าหน้า "โอนโกดัง" ให้พนักงานตรวจแล้วกดบันทึกเอง (ไม่บันทึกให้อัตโนมัติ) */
+function mcToTransfer(){
+  const fromW=Number(document.getElementById('mc-from').value);
+  const toW=Number(document.getElementById('mc-to').value);
+  if(fromW===toW){toast('ต้นทางกับปลายทางต้องคนละโกดัง');return;}
+  const list=(mcView||[]).filter(r=>r.send>0);
+  if(!list.length){toast('ไม่มีรายการที่ต้องโอน (ลองเพิ่มจำนวนวัน หรือเอาตัวกรองออก)');return;}
+  const cover=Math.max(1,Number(document.getElementById('mc-days').value)||14);
+  const wn=id=>(whList.find(w=>w.id===id)||{}).name||'';
+  const shortN=list.filter(r=>r.short>0).length;
+  if(!confirm('ใส่ '+list.length+' รายการลงใบโอน '+wn(fromW)+' → '+wn(toW)+' ?\n'
+    +'• จำนวนคิดให้พอขาย '+cover+' วัน\n'
+    +(shortN?'• '+shortN+' รายการต้นทางมีไม่พอ จะใส่เท่าที่มี (ส่วนที่ขาดต้องสั่งซื้อ)\n':'')
+    +'• ยังไม่บันทึกใบโอน — ไปตรวจแล้วกดบันทึกที่หน้าโอนโกดังอีกที'))return;
+  const tfF=document.getElementById('tf-from'), tfT=document.getElementById('tf-to');
+  if(tfF)tfF.value=String(fromW);
+  if(tfT)tfT.value=String(toW);
+  tfItems=list.map(r=>({product_id:r.p.id,name:r.p.name,sku:r.p.sku,unit:r.p.unit||'',
+    reserved:r.reserved,stockTo:r.stockTo,stockFrom:r.stockFrom,
+    safety:Number(r.p.safety_stock)||0,max:Number(r.p.max_stock)||0,qty:r.send,shortBy:r.short}));
+  showPage('transfer');
+  tfRender();
+  toast('ใส่ '+list.length+' รายการในใบโอนแล้ว — ตรวจจำนวนแล้วกดบันทึก');
+}
+function mcCSV(){
+  if(!mcView.length){toast('ยังไม่มีข้อมูล');return;}
+  const {ra,rb}=mcInfo;
+  const cell=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+  const head=['SKU','สินค้า','หน่วย',
+    'จำนวน '+mcMonthLabel(ra.key),'ยอดเงิน '+mcMonthLabel(ra.key),
+    'จำนวน '+mcMonthLabel(rb.key),'ยอดเงิน '+mcMonthLabel(rb.key),
+    'เทียบต่อวัน %','ขาย/วัน','คงเหลือปลายทาง','จองรอส่ง','คงเหลือต้นทาง','ควรโอน','ขาด'];
+  const lines=[head.map(cell).join(',')].concat(mcView.map(r=>[
+    r.p.sku||'',r.p.name||'',r.p.unit||'',
+    r.qtyA,Math.round(r.amtA),r.qtyB,Math.round(r.amtB),
+    r.chg==null?'ใหม่':Math.round(r.chg),Math.round(r.adu*100)/100,
+    r.stockTo,r.reserved,r.stockFrom,r.send,r.short].map(cell).join(',')));
+  const url=URL.createObjectURL(new Blob(['﻿'+lines.join('\n')],{type:'text/csv;charset=utf-8'}));
+  const a=document.createElement('a');
+  a.href=url;a.download='เทียบยอดขาย-'+ra.key+'_vs_'+rb.key+'.csv';a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),4000);
+}
 
 /* ==================== แพลนการสั่งซื้อ ==================== */
 let plRows=[], plVel={};
