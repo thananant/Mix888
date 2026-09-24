@@ -2176,7 +2176,12 @@ function cmParseMapLink(ml){ // ดึงพิกัดจากลิงก์
 function cmAddrText(c,level){ // 0=ระดับถนน/ตำบล · 1=หยาบ อำเภอ+จังหวัด
   const g=k=>String(c['ship_'+k]||c['bill_'+k]||'').trim();
   if(level===0)return [g('road'),g('subdistrict'),g('district'),g('province'),g('postcode')].filter(Boolean).join(' ');
-  return [g('district'),g('province')].filter(Boolean).join(' ');
+  // หยาบ: อำเภอ+จังหวัด · ไม่มีอำเภอ → ใช้ "อำเภอเมือง" ของจังหวัดนั้น (จุดกึ่งกลางจังหวัดอาจตกทะเล/เกาะ เช่น สุราษฎร์ฯ ไปโผล่เกาะพะงัน)
+  const prov=g('province').replace(/^จ(ังหวัด|\.)\s*/,''), dist=g('district');
+  if(dist)return [dist,prov].filter(Boolean).join(' ');
+  if(!prov)return '';
+  if(/กรุงเทพ/.test(prov))return 'กรุงเทพมหานคร';
+  return 'อำเภอเมือง'+prov+' '+prov;
 }
 function cmAggRevenue(rows){ // รวมยอดขายต่อลูกค้า (ตัดบิลยกเลิก)
   const out={};
@@ -2248,7 +2253,31 @@ function cmPopupHtml(x){
     +'<br>ยอดขายช่วงนี้: <b>'+fmt(x.rev.sum)+'</b> ('+x.rev.count+' บิล)'
     +(x.c.sale_name?'<br>เซลล์: '+esc(x.c.sale_name):'')
     +'<br><span style="color:#888;font-size:11px">พิกัดจาก: '+(x.c.geo_src==='maplink'?'ลิงก์แผนที่ (แม่นสุด)':x.c.geo_src==='district'?'ระดับอำเภอ (คร่าว)':'ที่อยู่')+'</span>'
-    +' <a href="https://www.google.com/maps?q='+lat+','+lng+'" target="_blank" rel="noopener" style="font-size:11px">เปิดใน Google Maps ↗</a>';
+    +' <a href="https://www.google.com/maps?q='+lat+','+lng+'" target="_blank" rel="noopener" style="font-size:11px">เปิดใน Google Maps ↗</a>'
+    +' · <a href="javascript:void(0)" onclick="cmGeocodeOne('+Number(x.c.id)+')" style="font-size:11px" title="ลิงก์แผนที่ก่อน ไม่มีก็หาจากที่อยู่อีกครั้ง">🎯 หาพิกัดใหม่</a>'
+    +'<div style="color:#888;font-size:11px">ที่อยู่ที่ใช้หา: '+esc(cmAddrText(x.c,0)||(cmAddrText(x.c,1)?'(ไม่มีที่อยู่ — ใช้ '+cmAddrText(x.c,1)+')':'(ไม่มีที่อยู่)'))+'</div>';
+}
+/** หาพิกัดใหม่เฉพาะร้านนี้ (จากป๊อปอัปหมุด) — ลิงก์แผนที่ก่อน ไม่มีก็หาจากที่อยู่ · หมุดผิดที่แก้ได้ทีละร้านโดยไม่ต้องรันทั้งชุด */
+async function cmGeocodeOne(id){
+  const c=customers.find(x=>x.id===Number(id));if(!c)return;
+  if(cmGeoBusy){toast('รอให้รอบหาพิกัดปัจจุบันจบก่อน');return;}
+  const useG=cmEngine==='google'&&!cmGeoDenied&&!!(window.google&&google.maps&&google.maps.Geocoder);
+  let g=cmParseMapLink(c.map_link);
+  try{
+    if(!g&&useG){
+      const r0=await cmGeocodeGoogle(cmAddrText(c,0));if(r0)g={lat:r0.lat,lng:r0.lng,src:r0.precise?'addr':'district'};
+      if(!g&&!cmGeoDenied){const r1=await cmGeocodeGoogle(cmAddrText(c,1));if(r1)g={lat:r1.lat,lng:r1.lng,src:'district'};}
+    }
+    if(!g&&(!useG||cmGeoDenied)){const r0=await cmNominatim(cmAddrText(c,0));if(r0)g={...r0,src:'addr'};}
+  }catch(e){}
+  if(!g){toast('หาไม่เจอจากที่อยู่ที่มี — วางลิงก์ Google Maps แบบเต็มในหน้าลูกค้า (ช่องลิงก์แผนที่) แล้วบันทึก หมุดจะย้ายทันที');return;}
+  const {data:upd,error}=await db.from('customers').update({lat:g.lat,lng:g.lng,geo_src:g.src}).eq('id',c.id).select('id');
+  if(error||!upd||!upd.length){toast('บันทึกพิกัดไม่สำเร็จ'+(error?': '+error.message:''));return;}
+  c.lat=g.lat;c.lng=g.lng;c.geo_src=g.src;
+  cmRender();
+  try{if(cmEngine==='google')cmMap.panTo({lat:g.lat,lng:g.lng});else cmMap.panTo([g.lat,g.lng]);}catch(e){}
+  toast(g.src==='maplink'?'📍 ย้ายหมุดตามลิงก์แผนที่แล้ว':g.src==='addr'?'📍 ได้พิกัดระดับที่อยู่แล้ว'
+    :'📍 ยังได้แค่ระดับอำเภอ/จังหวัด (คร่าว) — วางลิงก์ Google Maps แบบเต็มในหน้าลูกค้าจะแม่นสุด');
 }
 function cmRender(){
   if(!cmMap||!cmEngine)return;
@@ -4370,11 +4399,14 @@ async function saveCustomer(){
     }
   }
 
+  // ลิงก์ Google Maps แบบเต็ม = พิกัดที่แม่นสุด → ย้ายหมุดบนแผนที่ลูกค้าให้ทันที ไม่ต้องรอกดหาพิกัด
+  const ml=(typeof cmParseMapLink==='function')?cmParseMapLink(rec.map_link):null;
+  if(ml){rec.lat=ml.lat;rec.lng=ml.lng;rec.geo_src='maplink';}
   const q=editCustomerId?db.from('customers').update(rec).eq('id',editCustomerId)
                         :db.from('customers').insert(rec);
   const {error}=await q;
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
-  toast(editCustomerId?'อัพเดตลูกค้าแล้ว':'เพิ่มลูกค้า '+rec.code+' แล้ว');
+  toast((editCustomerId?'อัพเดตลูกค้าแล้ว':'เพิ่มลูกค้า '+rec.code+' แล้ว')+(ml?' · 📍 ปักหมุดตามลิงก์แผนที่แล้ว':''));
   resetCustomerForm(); loadCustomers();
 }
 async function deleteCustomer(id){
