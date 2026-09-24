@@ -2139,11 +2139,18 @@ window.gm_authFailure=function(){
   const pg=document.getElementById('page-custmap');
   if(pg&&pg.classList.contains('active'))loadCustMap();
 };
+/** เปิด Geocoding API ใน Google Cloud แล้ว → ให้ลองใช้ Google หาพิกัดใหม่โดยไม่ต้องรีเฟรช */
+function cmGeoRetry(){
+  if(cmGeoBusy){toast('รอให้รอบหาพิกัดปัจจุบันจบก่อน');return;}
+  cmGeoDenied=false;
+  cmRender();
+  toast('ลองใช้ Google Geocoding อีกครั้ง — กดปุ่ม 📍 หาพิกัดร้านที่ยังไม่มี ได้เลย (ถ้ายังไม่ได้ Google อาจใช้เวลา 1–5 นาทีหลังกด Enable)');
+}
 function cmNoticeHtml(){
   const el=document.getElementById('cm-notice');if(!el)return;
   const key=cmKey(), why=cmGBlocked(key);
   if(cmEngine==='google')el.innerHTML='<span style="color:var(--ok,#159b78)">● Google Maps</span> '
-    +(cmGeoDenied?'<span style="color:var(--danger,#b52020)">· ⚠️ key ยังไม่เปิดใช้ Geocoding API — หาพิกัดใช้ OpenStreetMap แทนไปก่อน (เปิด Geocoding API ใน Google Cloud แล้วรีเฟรช)</span>'
+    +(cmGeoDenied?'<span style="color:var(--danger,#b52020)">· ⚠️ key ยังไม่เปิดใช้ Geocoding API — หาพิกัดใช้ OpenStreetMap แทนไปก่อน (เปิด Geocoding API ใน Google Cloud + ติ๊กใน API restrictions ของ key แล้วกด <a href="javascript:void(0)" onclick="cmGeoRetry()" style="color:var(--accent);font-weight:600">🔄 ลองใหม่</a>)</span>'
                  :'<span style="color:var(--muted)">· หาพิกัดด้วย Google Geocoding (ที่อยู่ไทยแม่นกว่า) — ร้านที่ยังไม่มีพิกัด กดปุ่ม 📍 ให้ Google หาให้</span>');
   else if(key&&why==='auth')el.innerHTML='<span style="color:var(--danger,#b52020)">⚠️ Google Maps key ใช้ไม่ได้ — ตอนนี้ใช้ OpenStreetMap แทน</span> <span style="color:var(--muted)">· แก้ key ที่ ผู้ใช้ระบบ → ตั้งค่า (เปิด Maps JavaScript API + Geocoding API + Billing และจำกัดเว็บให้ถูก) แล้วรีเฟรช</span>';
   else if(key&&why==='reload')el.innerHTML='<span style="color:var(--warn,#a04a00)">🔄 เปลี่ยน key แล้ว — กดรีเฟรชหน้าเว็บ (F5) 1 ครั้ง แผนที่จะใช้ Google Maps ด้วย key ใหม่</span> <span style="color:var(--muted)">· ตอนนี้ใช้ OpenStreetMap ไปก่อน</span>';
