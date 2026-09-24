@@ -791,10 +791,19 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <label style="font-size:13px"><input type="checkbox" id="cm-hasrev" onchange="cmRender()"> เฉพาะร้านที่มียอด</label>
       <button class="btn-g" id="cm-geo-btn" onclick="cmGeocodeAll()">📍 หาพิกัดร้านที่ยังไม่มี</button>
       <button class="btn-g" id="cm-refine-btn" style="display:none" onclick="cmGeocodeAll(false,'refine')" title="ร้านที่เคยได้พิกัดแค่ระดับอำเภอ (คร่าว) ให้ Google หาที่อยู่จริงอีกที">🎯 ปรับพิกัดที่ยังคร่าว</button>
+      <button class="btn-g" id="cm-all-btn" style="display:none" onclick="cmGeocodeAll(false,'all')" title="ให้ Google หาพิกัดใหม่ให้ทุกร้าน (ค้นชื่อร้านก่อน → ที่อยู่) เปลี่ยนเฉพาะที่แม่นเท่าเดิมหรือดีกว่า">🔁 หาพิกัดใหม่ทั้งหมด</button>
       <span id="cm-geo-progress" style="font-size:12.5px;color:var(--muted,#999)"></span>
       <span id="cm-count" style="font-size:12.5px;color:var(--muted,#999);margin-left:auto"></span>
     </div>
     <div style="font-size:12px;color:var(--muted,#999);margin-top:6px">🔴 ยอดสูง (≥60% ของร้านท็อป) · 🟠 ปานกลาง (≥25%) · 🟢 มียอด · 🔵 ไม่มียอดในช่วงนี้ · ขนาดหมุด = ยอดขาย</div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center">
+      <input id="cm-q" placeholder="🔎 ค้นหาชื่อร้าน / รหัส / สาขา…" style="flex:1;min-width:180px" autocomplete="off" oninput="cmRender()">
+      <select id="cm-prov" onchange="cmFilterChanged('prov')" style="min-width:140px"><option value="">ทุกจังหวัด</option></select>
+      <select id="cm-dist" onchange="cmFilterChanged('dist')" style="min-width:140px"><option value="">ทุกเขต/อำเภอ</option></select>
+      <select id="cm-sub" onchange="cmRender()" style="min-width:140px"><option value="">ทุกแขวง/ตำบล</option></select>
+      <select id="cm-post" onchange="cmRender()" style="min-width:120px"><option value="">ทุกรหัสไปรษณีย์</option></select>
+      <button class="btn-g mini" onclick="cmFilterReset()">✕ ล้างตัวกรอง</button>
+    </div>
     <div id="cm-notice" style="font-size:12.5px;margin-top:6px"></div>
     <div id="cm-map" style="height:72vh;min-height:420px;border-radius:12px;margin-top:10px;border:1px solid var(--line,#eee);overflow:hidden"></div>
   </div>
@@ -2162,6 +2171,8 @@ function cmNoticeHtml(){
   }
   const rb=document.getElementById('cm-refine-btn');
   if(rb)rb.style.display=(cmEngine==='google'&&!cmGeoDenied&&customers.some(c=>c.lat&&c.lng&&c.geo_src==='district'))?'':'none';
+  const ab=document.getElementById('cm-all-btn');
+  if(ab)ab.style.display=(cmEngine==='google'&&!cmGeoDenied)?'':'none';
 }
 function cmParseMapLink(ml){ // ดึงพิกัดจากลิงก์ Google Maps แบบเต็ม (ลิงก์ย่อ goo.gl อ่านไม่ได้)
   ml=String(ml||'');
@@ -2233,6 +2244,7 @@ async function loadCustMap(){
       sel.innerHTML='<option value="">เซลล์ทุกคน</option>'+names.map(n=>'<option>'+esc(n)+'</option>').join('');
     }
   }
+  cmFillFilters();
   if(cmEngine==='leaflet')setTimeout(()=>{try{cmMap.invalidateSize();}catch(e){}},80);
   cmNoticeHtml();
   await cmLoadRevenue();
@@ -2280,12 +2292,72 @@ async function cmGeocodeOne(id){
   toast(g.src==='maplink'?'📍 ย้ายหมุดตามลิงก์แผนที่แล้ว':g.src==='place'?'📍 เจอร้านใน Google Maps แล้ว — ย้ายหมุดไปหน้าร้าน':g.src==='addr'?'📍 ได้พิกัดระดับที่อยู่แล้ว'
     :'📍 ยังได้แค่ระดับอำเภอ/จังหวัด (คร่าว) — วางลิงก์ Google Maps แบบเต็มในหน้าลูกค้าจะแม่นสุด');
 }
+function cmField(c,k){return String(c['ship_'+k]||c['bill_'+k]||'').trim();}
+/* ความแม่นของพิกัด: ลิงก์แผนที่ > ค้นชื่อร้าน > ที่อยู่ > อำเภอ — ใช้ตัดสินว่า "หาใหม่" แล้วควรเปลี่ยนหมุดไหม */
+const CM_RANK={maplink:4,place:3,addr:2,district:1};
+function cmRank(src){return CM_RANK[src]||0;}
+/* ---------- ตัวกรองพื้นที่ + ค้นหาชื่อร้าน: จังหวัด → เขต/อำเภอ → แขวง/ตำบล · รหัสไปรษณีย์ (ตัวเลือกมาจากข้อมูลลูกค้าที่มีจริง) ---------- */
+function cmFilterVals(){
+  const v=id=>(document.getElementById(id)||{}).value||'';
+  return {q:v('cm-q').trim().toLowerCase(),prov:v('cm-prov'),dist:v('cm-dist'),sub:v('cm-sub'),post:v('cm-post')};
+}
+function cmFillFilters(){
+  const f=cmFilterVals();
+  const fill=(id,label,vals,cur)=>{const el=document.getElementById(id);if(!el)return;
+    const list=[...new Set(vals.filter(Boolean))].sort((a,b)=>a.localeCompare(b,'th'));
+    el.innerHTML='<option value="">'+label+'</option>'+list.map(v=>'<option'+(v===cur?' selected':'')+'>'+esc(v)+'</option>').join('');
+    if(cur&&!list.includes(cur))el.value='';};
+  const inProv=customers.filter(c=>!f.prov||cmField(c,'province')===f.prov);
+  const inDist=inProv.filter(c=>!f.dist||cmField(c,'district')===f.dist);
+  fill('cm-prov','ทุกจังหวัด',customers.map(c=>cmField(c,'province')),f.prov);
+  fill('cm-dist','ทุกเขต/อำเภอ',inProv.map(c=>cmField(c,'district')),f.dist);
+  fill('cm-sub','ทุกแขวง/ตำบล',inDist.map(c=>cmField(c,'subdistrict')),f.sub);
+  fill('cm-post','ทุกรหัสไปรษณีย์',inDist.map(c=>cmField(c,'postcode')),f.post);
+}
+function cmFilterChanged(which){
+  const clear=ids=>ids.forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  if(which==='prov')clear(['cm-dist','cm-sub','cm-post']);
+  if(which==='dist')clear(['cm-sub','cm-post']);
+  cmFillFilters();cmRender();
+}
+function cmFilterReset(){
+  ['cm-q','cm-prov','cm-dist','cm-sub','cm-post'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  cmFillFilters();cmRender();
+}
+function cmMatch(c,f){
+  if(f.prov&&cmField(c,'province')!==f.prov)return false;
+  if(f.dist&&cmField(c,'district')!==f.dist)return false;
+  if(f.sub&&cmField(c,'subdistrict')!==f.sub)return false;
+  if(f.post&&cmField(c,'postcode')!==f.post)return false;
+  if(f.q&&!((c.code||'')+' '+(c.name||'')+' '+(c.branch_name||'')).toLowerCase().includes(f.q))return false;
+  return true;
+}
+function cmOpenInfo(m,x){
+  try{
+    if(cmEngine==='google'){cmGInfo.setContent('<div style="font-family:inherit;font-size:13px;line-height:1.55;color:#333">'+cmPopupHtml(x)+'</div>');cmGInfo.open({map:cmMap,anchor:m});}
+    else m.openPopup();
+  }catch(e){}
+}
+/** ซูมแผนที่ให้เห็นหมุดที่กรองไว้ทั้งหมด (ร้านเดียว → ซูมเข้าไปที่ร้าน) */
+function cmFitTo(pts){
+  try{
+    if(pts.length===1){
+      const p=pts[0];
+      if(cmEngine==='google'){cmMap.setCenter({lat:Number(p.c.lat),lng:Number(p.c.lng)});cmMap.setZoom(16);}
+      else cmMap.setView([p.c.lat,p.c.lng],16);
+      return;
+    }
+    if(cmEngine==='google'){const b=new google.maps.LatLngBounds();pts.forEach(p=>b.extend({lat:Number(p.c.lat),lng:Number(p.c.lng)}));cmMap.fitBounds(b,40);}
+    else cmMap.fitBounds(L.latLngBounds(pts.map(p=>[p.c.lat,p.c.lng])),{padding:[40,40],maxZoom:16});
+  }catch(e){}
+}
 function cmRender(){
   if(!cmMap||!cmEngine)return;
   const saleF=document.getElementById('cm-sale').value;
   const onlyRev=document.getElementById('cm-hasrev').checked;
-  const pts=customers.filter(c=>c.lat&&c.lng)
-    .filter(c=>!saleF||c.sale_name===saleF)
+  const f=cmFilterVals(), filtering=!!(f.q||f.prov||f.dist||f.sub||f.post);
+  const matched=customers.filter(c=>cmMatch(c,f)).filter(c=>!saleF||c.sale_name===saleF);
+  const pts=matched.filter(c=>c.lat&&c.lng)
     .map(c=>({c,rev:cmRevenue[c.id]||{sum:0,count:0}}))
     .filter(x=>!onlyRev||x.rev.sum>0);
   const max=Math.max(1,...pts.map(x=>x.rev.sum));
@@ -2298,11 +2370,8 @@ function cmRender(){
         title:x.c.code+' '+x.c.name,
         icon:{path:google.maps.SymbolPath.CIRCLE,scale:st.r,fillColor:st.c,fillOpacity:.72,strokeColor:st.c,strokeWeight:1},
         zIndex:1000-st.r});                                       // หมุดเล็กอยู่บนหมุดใหญ่ จะได้คลิกโดน
-      m.addListener('click',()=>{
-        cmGInfo.setContent('<div style="font-family:inherit;font-size:13px;line-height:1.55;color:#333">'+cmPopupHtml(x)+'</div>');
-        cmGInfo.open({map:cmMap,anchor:m});
-      });
-      cmGMarkers.push(m);
+      m.addListener('click',()=>cmOpenInfo(m,x));
+      x.m=m;cmGMarkers.push(m);
     });
   }else{
     cmLayer.clearLayers();
@@ -2310,11 +2379,15 @@ function cmRender(){
       const st=cmMarkerStyle(x.rev.sum,max);
       const m=L.circleMarker([x.c.lat,x.c.lng],{radius:st.r,color:st.c,fillColor:st.c,fillOpacity:.72,weight:1});
       m.bindPopup(cmPopupHtml(x));
-      cmLayer.addLayer(m);
+      x.m=m;cmLayer.addLayer(m);
     });
   }
   const noGeo=customers.filter(c=>!(c.lat&&c.lng)).length;
-  document.getElementById('cm-count').textContent=pts.length+' หมุด'+(noGeo?' · ยังไม่มีพิกัด '+noGeo+' ร้าน':'');
+  const noGeoF=matched.filter(c=>!(c.lat&&c.lng)).length;
+  document.getElementById('cm-count').textContent=pts.length+' หมุด'
+    +(filtering?' · ตรงตัวกรอง '+matched.length+' ร้าน'+(noGeoF?' (ยังไม่มีพิกัด '+noGeoF+')':''):'')
+    +(noGeo?' · ยังไม่มีพิกัดทั้งหมด '+noGeo+' ร้าน':'');
+  if(filtering&&pts.length){cmFitTo(pts);if(pts.length===1)cmOpenInfo(pts[0].m,pts[0]);}   // กรอง/ค้นแล้วซูมไปหาให้เลย
   cmNoticeHtml();
 }
 function cmSleep(ms){return new Promise(r=>setTimeout(r,ms));}
@@ -2391,13 +2464,18 @@ async function cmPlaceSearch(c){
   return null;
 }
 window.cmGeoStop=false;
-/** หาพิกัดร้าน · mode 'refine' = เอาเฉพาะร้านที่เคยได้แค่ระดับอำเภอ (คร่าว) มาให้ Google หาที่อยู่จริงอีกที */
+/** หาพิกัดร้าน · mode: (ว่าง) = เฉพาะร้านที่ยังไม่มีพิกัด · 'refine' = ร้านที่เคยได้แค่ระดับอำเภอ · 'all' = ทุกร้าน (หาใหม่หมด เปลี่ยนเฉพาะที่แม่นเท่าเดิมหรือดีกว่า)
+ *  ลำดับความพยายาม (มี Google): ลิงก์แผนที่ → ค้นชื่อร้านใน Google Maps → ที่อยู่ → อำเภอ/จังหวัด · ไม่มี Google: ลิงก์แผนที่ → OpenStreetMap */
 async function cmGeocodeAll(auto,mode){
   if(cmGeoBusy)return;
-  const refine=mode==='refine';
+  const refine=mode==='refine', all=mode==='all', strict=refine||all;
   const useG=cmEngine==='google'&&!cmGeoDenied&&!!(window.google&&google.maps&&google.maps.Geocoder);
-  if(refine&&!useG){toast(cmGeoDenied?'ปรับพิกัดต้องใช้ Google Geocoding — key ยังไม่เปิดใช้ Geocoding API (เปิดใน Google Cloud แล้วรีเฟรช)':'ปรับพิกัดต้องใช้ Google Maps (ใส่ key ที่ตั้งค่าระบบก่อน)');return;}
-  let list=refine?customers.filter(c=>c.lat&&c.lng&&c.geo_src==='district'):customers.filter(c=>!(c.lat&&c.lng));
+  if(strict&&!useG){
+    toast(cmGeoDenied?'ต้องใช้ Google Geocoding — key ยังไม่เปิดใช้ Geocoding API (เปิดใน Google Cloud แล้วกด 🔄 ลองใหม่)'
+      :(all?'หาพิกัดใหม่ทั้งหมด':'ปรับพิกัด')+'ต้องใช้ Google Maps (ใส่ key ที่ตั้งค่าระบบก่อน)');
+    return;
+  }
+  let list=all?customers.slice():refine?customers.filter(c=>c.lat&&c.lng&&c.geo_src==='district'):customers.filter(c=>!(c.lat&&c.lng));
   const noGeoAll=list.length;
   const tried=cmTriedLoad();
   if(auto&&useG){                    // เข้าหน้าอัตโนมัติ: หาให้เองเฉพาะร้านที่ยังไม่เคยลอง — ร้านที่ Google หาไม่เจอจะไม่ถูกถามซ้ำทุกครั้งที่เปิดหน้า (โควตา) จนกว่าจะกดปุ่มเอง/ผ่านไป 7 วัน
@@ -2410,18 +2488,23 @@ async function cmGeocodeAll(auto,mode){
       return;
     }
   }
-  if(!list.length){if(!auto)toast(refine?'ไม่มีร้านที่พิกัดยังคร่าว':'ทุกร้านมีพิกัดครบแล้ว');return;}
+  if(!list.length){if(!auto)toast(refine?'ไม่มีร้านที่พิกัดยังคร่าว':all?'ยังไม่มีข้อมูลลูกค้า':'ทุกร้านมีพิกัดครบแล้ว');return;}
   const per=useG?0.8:2.4;                                          // วินาที/ร้าน (OSM ต้องเว้น 1.1 วิ ต่อครั้ง)
-  if(!auto&&!confirm((refine?'ให้ Google หาที่อยู่จริงให้ '+list.length+' ร้านที่พิกัดยังคร่าว (ระดับอำเภอ)\nจะเปลี่ยนพิกัดเฉพาะร้านที่ Google หาได้ระดับที่อยู่'
+  const est=Math.max(1,Math.ceil(list.length*per/60));
+  if(!auto&&!confirm((all?'หาพิกัดใหม่ให้ทุกร้าน '+list.length+' ร้าน ด้วย Google (ค้นชื่อร้าน → ที่อยู่)\n'
+        +'• หมุดจะถูกย้ายเฉพาะเมื่อได้พิกัดที่แม่นเท่าเดิมหรือดีกว่า (ลิงก์แผนที่ > ชื่อร้าน > ที่อยู่ > อำเภอ)\n'
+        +'• ร้านที่มีลิงก์แผนที่ใช้ตามลิงก์เหมือนเดิม · ใช้โควตา Google ประมาณ '+(list.length*2)+' ครั้ง'
+      :refine?'ให้ Google หาที่อยู่จริงให้ '+list.length+' ร้านที่พิกัดยังคร่าว (ระดับอำเภอ)\nจะเปลี่ยนพิกัดเฉพาะร้านที่ Google หาได้ระดับที่อยู่'
       :'หาพิกัดให้ '+list.length+' ร้านที่ยังไม่มีพิกัด'+(useG?' (ด้วย Google)':' (ด้วย OpenStreetMap)'))
-    +'\nใช้เวลาราว '+Math.max(1,Math.ceil(list.length*per/60))+' นาที — เปิดหน้านี้ทิ้งไว้จนจบ\n\nเริ่มเลย?'))return;
+    +'\nใช้เวลาราว '+est+' นาที — เปิดหน้านี้ทิ้งไว้จนจบ กดปุ่มเดิมเพื่อหยุดได้\n\nเริ่มเลย?'))return;
   cmGeoBusy=true;window.cmGeoStop=false;
-  const btn=document.getElementById('cm-geo-btn'), rb=document.getElementById('cm-refine-btn');
+  const btn=document.getElementById('cm-geo-btn'), rb=document.getElementById('cm-refine-btn'), ab=document.getElementById('cm-all-btn');
   btn.disabled=false;btn.textContent='⏹️ หยุดหาพิกัด';btn.onclick=()=>{window.cmGeoStop=true;};
   if(rb){rb.disabled=true;if(refine)rb.textContent='⏳ กำลังปรับพิกัด…';}
+  if(ab){ab.disabled=true;if(all)ab.textContent='⏳ กำลังหาพิกัดใหม่ทั้งหมด…';}
   if(auto)toast('📍 กำลังหาพิกัดให้ '+list.length+' ร้านที่ยังไม่มี'+(useG?' ด้วย Google':'')+' — ใช้งานหน้าอื่นต่อได้ กดปุ่มเพื่อหยุด');
   const prog=document.getElementById('cm-geo-progress');
-  let ok=0,miss=0,i=0,saveFail=0,lastErr='';
+  let ok=0,miss=0,same=0,i=0,saveFail=0,lastErr='',byPlace=0,byAddr=0;
   for(const c of list){
     if(window.cmGeoStop||(useG&&cmGFailed))break;                    // กดหยุด / Google เพิ่งปฏิเสธ key ระหว่างทาง
     i++;prog.textContent='📍 '+i+'/'+list.length+' — '+c.code;
@@ -2436,18 +2519,23 @@ async function cmGeocodeAll(auto,mode){
         if(r0&&(r0.precise||!refine))g={lat:r0.lat,lng:r0.lng,src:r0.precise?'addr':'district'};
         if(!g&&!refine&&!cmGeoDenied){const r1=await cmGeocodeGoogle(cmAddrText(c,1));await cmSleep(250);if(r1)g={lat:r1.lat,lng:r1.lng,src:'district'};}
       }
-      if(!g&&!refine&&(!useG||cmGeoDenied)){                       // ไม่มี Google → OpenStreetMap (ต้องเว้นจังหวะ 1 วิ/ครั้ง)
+      if(!g&&!strict&&(!useG||cmGeoDenied)){                         // ไม่มี Google → OpenStreetMap (ต้องเว้นจังหวะ 1 วิ/ครั้ง)
         const r0=await cmNominatim(cmAddrText(c,0));await cmSleep(1100);if(r0)g={...r0,src:'addr'};
         if(!g){const r1=await cmNominatim(cmAddrText(c,1));await cmSleep(1100);if(r1)g={...r1,src:'district'};}
       }
     }catch(e){}
-    if(refine&&cmGeoDenied)break;                                     // ปรับพิกัดต้องใช้ Google — key ไม่มี Geocoding API ก็ทำต่อไม่ได้
+    if(strict&&cmGeoDenied)break;                                     // ต้องใช้ Google — key ไม่มี Geocoding API ก็ทำต่อไม่ได้
     if(g&&refine&&g.src==='district')g=null;                          // ปรับพิกัด: ได้แค่คร่าวเท่าเดิม = ไม่เปลี่ยน
+    let kept=false;
+    if(g&&all){                                                       // หาใหม่ทั้งหมด: ไม่ยอมให้แม่นน้อยลง · ได้ที่เดิม = คงเดิม ไม่ต้องบันทึก
+      if(cmRank(g.src)<cmRank(c.geo_src))g=null;
+      else if(c.lat&&c.lng&&Math.abs(Number(c.lat)-g.lat)<1e-6&&Math.abs(Number(c.lng)-g.lng)<1e-6){kept=true;same++;g=null;}
+    }
     if(g){
       const {data:upd,error}=await db.from('customers').update({lat:g.lat,lng:g.lng,geo_src:g.src}).eq('id',c.id).select('id');
-      if(!error&&upd&&upd.length){c.lat=g.lat;c.lng=g.lng;c.geo_src=g.src;ok++;}
+      if(!error&&upd&&upd.length){c.lat=g.lat;c.lng=g.lng;c.geo_src=g.src;ok++;if(g.src==='place')byPlace++;else if(g.src==='addr')byAddr++;}
       else{saveFail++;lastErr=error?error.message:'ไม่มีแถวถูกอัปเดต (สิทธิ์ฐานข้อมูล?)';console.error('บันทึกพิกัดไม่สำเร็จ',c.code,lastErr);}   // บันทึกไม่ได้ ≠ หาไม่เจอ — ต้องบอกให้รู้ ไม่งั้นรีเฟรชแล้วหมุดหาย
-    }else miss++;
+    }else if(!kept)miss++;
     if(!refine){if(c.lat&&c.lng)delete tried[c.id];else tried[c.id]=Date.now();}   // จำว่าลองแล้ว — เปิดหน้าครั้งหน้าไม่ถามซ้ำ
     if(i%10===0)cmRender();
   }
@@ -2455,14 +2543,18 @@ async function cmGeocodeAll(auto,mode){
   cmGeoBusy=false;prog.textContent='';
   btn.disabled=false;btn.textContent='📍 หาพิกัดร้านที่ยังไม่มี';btn.onclick=()=>cmGeocodeAll();
   if(rb){rb.disabled=false;rb.textContent='🎯 ปรับพิกัดที่ยังคร่าว';}
+  if(ab){ab.disabled=false;ab.textContent='🔁 หาพิกัดใหม่ทั้งหมด';}
   cmRender();
-  const deniedStop=refine&&cmGeoDenied;
+  const deniedStop=strict&&cmGeoDenied;
   const left=customers.filter(c=>!(c.lat&&c.lng)).length;
-  toast((window.cmGeoStop?'⏹️ หยุดแล้ว · ':deniedStop?'⏹️ หยุดแล้ว — key ยังไม่เปิดใช้ Geocoding API (เปิดใน Google Cloud แล้วรีเฟรช) · ':(refine?'🎯 เสร็จ: ':'📍 เสร็จ: '))
-    +(refine?'ปรับพิกัดได้ ':'ได้พิกัด ')+ok+' ร้าน'
-    +(miss&&!deniedStop?(refine?' · อีก '+miss+' ร้าน Google ยังหาได้แค่คร่าว — เพิ่มลิงก์ Google Maps แบบเต็มในหน้าลูกค้าแทน'
-                  :' · หาไม่เจอ '+miss+' ร้าน — เพิ่มลิงก์ Google Maps แบบเต็มในหน้าลูกค้า แล้วกดซ้ำ'):'')
-    +(auto&&useG&&left?' · ที่หาไม่เจอ: เติมลิงก์แผนที่/ที่อยู่ในหน้าลูกค้า แล้วกด 🎯 ที่หมุด':'')
+  const head=window.cmGeoStop?'⏹️ หยุดแล้ว · ':deniedStop?'⏹️ หยุดแล้ว — key ยังไม่เปิดใช้ Geocoding API (เปิดใน Google Cloud แล้วกด 🔄 ลองใหม่) · ':(all?'🔁 เสร็จ: ':refine?'🎯 เสร็จ: ':'📍 เสร็จ: ');
+  toast(head
+    +(all?'หาใหม่ทั้งหมด — ย้าย/ยืนยันหมุด '+ok+' ร้าน (ค้นชื่อร้านเจอ '+byPlace+' · จากที่อยู่ '+byAddr+') · ตรงที่เดิม '+same+' · ไม่ได้แม่นขึ้น/หาไม่เจอ '+miss
+         +(left?' · ยังไม่มีพิกัด '+left+' ร้าน — เติมลิงก์แผนที่/ที่อยู่ในหน้าลูกค้า':'')
+      :(refine?'ปรับพิกัดได้ ':'ได้พิกัด ')+ok+' ร้าน'
+        +(miss&&!deniedStop?(refine?' · อีก '+miss+' ร้าน Google ยังหาได้แค่คร่าว — เพิ่มลิงก์ Google Maps แบบเต็มในหน้าลูกค้าแทน'
+                      :' · หาไม่เจอ '+miss+' ร้าน — เพิ่มลิงก์ Google Maps แบบเต็มในหน้าลูกค้า แล้วกดซ้ำ'):'')
+        +(auto&&useG&&left?' · ที่หาไม่เจอ: เติมลิงก์แผนที่/ที่อยู่ในหน้าลูกค้า แล้วกด 🎯 ที่หมุด':''))
     +(saveFail?' · ⚠️ บันทึกลงฐานข้อมูลไม่สำเร็จ '+saveFail+' ร้าน ('+lastErr+') — พิกัดจะหายเมื่อรีเฟรช แจ้งผู้ดูแลระบบ':''));
   window.cmGeoStop=false;
 }
