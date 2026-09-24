@@ -28,6 +28,67 @@
   --display:'Mali','IBM Plex Sans Thai',sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+/* ---------- Scrollbar: แท่งทองลงยาแดง บนร่องแดงชาด + แสงออร่า ----------
+   Chrome/Edge/Safari ใช้ ::-webkit-scrollbar-* · Firefox ใช้ scrollbar-color ใน @supports ด้านล่าง
+   (ต้องแยกไว้ เพราะ Chrome 121+ จะเลิกใช้ ::-webkit-scrollbar ทันทีถ้าเจอ scrollbar-color) */
+*::-webkit-scrollbar{width:10px;height:10px;background:transparent}
+html::-webkit-scrollbar,body::-webkit-scrollbar{width:14px;height:14px}
+*::-webkit-scrollbar-button{width:0;height:0;display:none}
+/* ร่อง: ในการ์ดขาวจางมาก · แถบเลื่อนหน้าหลักเป็นร่องแดงชาดชัดขึ้น มีเส้นทองบาง ๆ ด้านในเหมือนขอบเคลือบ */
+*::-webkit-scrollbar-track{border-radius:999px;background:linear-gradient(90deg,rgba(158,20,20,.03),rgba(158,20,20,.07) 50%,rgba(158,20,20,.03))}
+*::-webkit-scrollbar-track:horizontal{background:linear-gradient(180deg,rgba(158,20,20,.03),rgba(158,20,20,.07) 50%,rgba(158,20,20,.03))}
+html::-webkit-scrollbar-track,body::-webkit-scrollbar-track{border-radius:0;background:linear-gradient(90deg,rgba(158,20,20,.05),rgba(158,20,20,.13) 50%,rgba(158,20,20,.05));box-shadow:inset 1px 0 0 rgba(201,150,60,.45),inset -1px 0 0 rgba(255,255,255,.75)}
+html::-webkit-scrollbar-track:horizontal,body::-webkit-scrollbar-track:horizontal{background:linear-gradient(180deg,rgba(158,20,20,.05),rgba(158,20,20,.13) 50%,rgba(158,20,20,.05));box-shadow:inset 0 1px 0 rgba(201,150,60,.45),inset 0 -1px 0 rgba(255,255,255,.75)}
+*::-webkit-scrollbar-corner{background:rgba(158,20,20,.06)}
+html::-webkit-scrollbar-corner,body::-webkit-scrollbar-corner{background:#f4e3dc}
+/* แท่งเลื่อน: ขอบโปร่ง 2px (หน้าหลัก 3px) คือพื้นที่ให้แสงฟุ้ง — แท่งทอง (มีเส้นแดงลงยากลางแท่ง ~1px) วาดใน padding-box · แสงทอง+ขอบแดงวาดใน border-box · เงาฟุ้งออกไปในร่อง */
+*::-webkit-scrollbar-thumb{border:2px solid transparent;border-radius:999px;min-height:40px;min-width:40px;
+  background:linear-gradient(90deg,#c9932f,#f2cd6d 40%,#f2cd6d 60%,#c9932f) padding-box;
+  box-shadow:0 0 6px 1px rgba(255,214,102,.85),0 0 12px 3px rgba(212,175,55,.50),0 0 22px 7px rgba(192,32,31,.36)}
+html::-webkit-scrollbar-thumb,body::-webkit-scrollbar-thumb{border-width:3px}
+*::-webkit-scrollbar-thumb:vertical{background:
+  linear-gradient(90deg,#c9932f 0%,#f2cd6d 18%,#fff3c4 30%,#f2cd6d 41%,#c0201f 41%,#c0201f 59%,#f2cd6d 59%,#e2b94f 78%,#c9932f 100%) padding-box,
+  linear-gradient(90deg,rgba(158,20,20,0) 0%,rgba(158,20,20,.82) 11%,rgba(255,222,130,.72) 24%,rgba(255,222,130,.72) 76%,rgba(158,20,20,.82) 89%,rgba(158,20,20,0) 100%) border-box}
+*::-webkit-scrollbar-thumb:horizontal{background:
+  linear-gradient(180deg,#c9932f 0%,#f2cd6d 18%,#fff3c4 30%,#f2cd6d 41%,#c0201f 41%,#c0201f 59%,#f2cd6d 59%,#e2b94f 78%,#c9932f 100%) padding-box,
+  linear-gradient(180deg,rgba(158,20,20,0) 0%,rgba(158,20,20,.82) 11%,rgba(255,222,130,.72) 24%,rgba(255,222,130,.72) 76%,rgba(158,20,20,.82) 89%,rgba(158,20,20,0) 100%) border-box}
+/* ชี้: ทองสว่างขึ้น แสงกว้างขึ้น */
+*::-webkit-scrollbar-thumb:hover{box-shadow:0 0 10px 3px rgba(255,232,150,1),0 0 24px 8px rgba(230,190,70,.65),0 0 34px 11px rgba(192,32,31,.42)}
+*::-webkit-scrollbar-thumb:vertical:hover{background:
+  linear-gradient(90deg,#d9a338 0%,#f7d97e 18%,#fffbe8 30%,#f7d97e 41%,#d42a28 41%,#d42a28 59%,#f7d97e 59%,#ecc45a 78%,#d9a338 100%) padding-box,
+  linear-gradient(90deg,rgba(192,32,31,0) 0%,rgba(192,32,31,.92) 10%,rgba(255,232,150,.92) 24%,rgba(255,232,150,.92) 76%,rgba(192,32,31,.92) 90%,rgba(192,32,31,0) 100%) border-box}
+*::-webkit-scrollbar-thumb:horizontal:hover{background:
+  linear-gradient(180deg,#d9a338 0%,#f7d97e 18%,#fffbe8 30%,#f7d97e 41%,#d42a28 41%,#d42a28 59%,#f7d97e 59%,#ecc45a 78%,#d9a338 100%) padding-box,
+  linear-gradient(180deg,rgba(192,32,31,0) 0%,rgba(192,32,31,.92) 10%,rgba(255,232,150,.92) 24%,rgba(255,232,150,.92) 76%,rgba(192,32,31,.92) 90%,rgba(192,32,31,0) 100%) border-box}
+/* กดลาก: ทองเข้ม แดงลึกขึ้นเหมือนถ่านคุ */
+*::-webkit-scrollbar-thumb:active{box-shadow:0 0 8px 2px rgba(255,200,90,.95),0 0 18px 5px rgba(212,150,40,.60),0 0 30px 9px rgba(158,20,20,.50)}
+*::-webkit-scrollbar-thumb:vertical:active{background:
+  linear-gradient(90deg,#b5801f 0%,#e5bd55 18%,#f5d986 30%,#e5bd55 41%,#9e1414 41%,#9e1414 59%,#e5bd55 59%,#cfa53a 78%,#b5801f 100%) padding-box,
+  linear-gradient(90deg,rgba(158,20,20,0) 0%,rgba(158,20,20,.95) 11%,rgba(255,210,110,.95) 24%,rgba(255,210,110,.95) 76%,rgba(158,20,20,.95) 89%,rgba(158,20,20,0) 100%) border-box}
+*::-webkit-scrollbar-thumb:horizontal:active{background:
+  linear-gradient(180deg,#b5801f 0%,#e5bd55 18%,#f5d986 30%,#e5bd55 41%,#9e1414 41%,#9e1414 59%,#e5bd55 59%,#cfa53a 78%,#b5801f 100%) padding-box,
+  linear-gradient(180deg,rgba(158,20,20,0) 0%,rgba(158,20,20,.95) 11%,rgba(255,210,110,.95) 24%,rgba(255,210,110,.95) 76%,rgba(158,20,20,.95) 89%,rgba(158,20,20,0) 100%) border-box}
+/* เมนูซ้าย (พื้นแดง #9e1414): แท่งทองแกนแดงเข้ม บนร่องมืด แสงทอง */
+#side .menu::-webkit-scrollbar{width:9px}
+#side .menu::-webkit-scrollbar-track{background:linear-gradient(90deg,rgba(0,0,0,.12),rgba(0,0,0,.28) 50%,rgba(0,0,0,.12));box-shadow:inset 1px 0 0 rgba(0,0,0,.30),inset -1px 0 0 rgba(255,209,102,.18)}
+#side .menu::-webkit-scrollbar-thumb{border-width:2px;background:
+  linear-gradient(90deg,#d29a2c 0%,#f6cf67 24%,#ffe7a3 38%,#7a0f0f 40%,#7a0f0f 60%,#ffe7a3 62%,#f6cf67 76%,#d29a2c 100%) padding-box,
+  linear-gradient(90deg,rgba(60,0,0,0) 0%,rgba(60,0,0,.60) 12%,rgba(255,222,130,.60) 30%,rgba(255,222,130,.60) 70%,rgba(60,0,0,.60) 88%,rgba(60,0,0,0) 100%) border-box;
+  box-shadow:0 0 6px 1px rgba(255,220,120,.85),0 0 14px 4px rgba(255,200,90,.50),0 0 24px 8px rgba(255,232,150,.25)}
+#side .menu::-webkit-scrollbar-thumb:hover{background:
+  linear-gradient(90deg,#e2ab38 0%,#ffdc7a 24%,#fff2c2 38%,#8f1212 40%,#8f1212 60%,#fff2c2 62%,#ffdc7a 76%,#e2ab38 100%) padding-box,
+  linear-gradient(90deg,rgba(60,0,0,0) 0%,rgba(60,0,0,.70) 12%,rgba(255,232,150,.85) 30%,rgba(255,232,150,.85) 70%,rgba(60,0,0,.70) 88%,rgba(60,0,0,0) 100%) border-box;
+  box-shadow:0 0 10px 3px rgba(255,238,170,1),0 0 22px 7px rgba(255,215,110,.70),0 0 34px 11px rgba(255,232,150,.40)}
+#side .menu::-webkit-scrollbar-thumb:active{background:
+  linear-gradient(90deg,#b8860b 0%,#f0d67a 24%,#fff1c2 38%,#5e0a0a 40%,#5e0a0a 60%,#fff1c2 62%,#f0d67a 76%,#b8860b 100%) padding-box,
+  linear-gradient(90deg,rgba(60,0,0,0) 0%,rgba(60,0,0,.90) 12%,rgba(255,210,110,.95) 30%,rgba(255,210,110,.95) 70%,rgba(60,0,0,.90) 88%,rgba(60,0,0,0) 100%) border-box;
+  box-shadow:0 0 8px 2px rgba(255,220,120,.95),0 0 18px 5px rgba(255,200,90,.60),0 0 30px 9px rgba(255,232,150,.30)}
+/* Firefox เท่านั้น */
+@supports not selector(::-webkit-scrollbar){
+  *{scrollbar-width:thin;scrollbar-color:#d4af37 #f3e3dc}
+  html{scrollbar-width:auto;scrollbar-color:#d4af37 #f3e3dc}
+  #side .menu{scrollbar-color:#e6c860 rgba(0,0,0,.24)}
+}
 body{font-family:'IBM Plex Sans Thai',sans-serif;background:var(--bg);color:var(--ink);font-size:15px;padding-bottom:90px}
 header{background:linear-gradient(135deg,#9e1414,#c0201f);color:#fff;padding:14px 16px;position:sticky;top:0;z-index:10;box-shadow:0 3px 14px rgba(158,20,20,.18)}
 header h1{font-size:17px;font-weight:700;font-family:var(--display)}
