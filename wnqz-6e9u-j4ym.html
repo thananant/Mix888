@@ -1414,7 +1414,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-p" style="align-self:flex-end" onclick="saveGmapsKey()">บันทึก key</button>
     </div>
     <p class="hint">ใส่ key แล้วหน้า 🗺️ แผนที่ลูกค้า จะเปลี่ยนเป็น Google Maps และปุ่ม "หาพิกัด" จะใช้ Google (หาที่อยู่ไทยแม่นกว่ามาก) ·
-      วิธีขอ key: console.cloud.google.com → สร้างโปรเจกต์ → เปิดใช้ <b>Maps JavaScript API</b> + <b>Geocoding API</b> → Credentials → Create API key →
+      วิธีขอ key: console.cloud.google.com → สร้างโปรเจกต์ → เปิดใช้ <b>Maps JavaScript API</b> + <b>Geocoding API</b> + <b>Places API (New)</b> (ค้นชื่อร้าน) → Credentials → Create API key →
       จำกัดให้ใช้ได้เฉพาะเว็บ <b>https://thananant.github.io/*</b> · ต้องเปิด Billing (ผูกบัตร) แต่การใช้งานระดับร้านอยู่ในโควตาฟรีรายเดือนของ Google ·
       ถ้า key ใช้ไม่ได้ ระบบจะถอยกลับไปใช้ OpenStreetMap เองพร้อมแจ้งเตือน</p>
     <h3 class="ct" style="margin-top:18px">🏢 ข้อมูลบริษัท (สำหรับบิลเต็มรูปแบบ/ใบเสร็จ)</h3>
@@ -2095,7 +2095,7 @@ function showPage(p){
 // ไม่มี key / key ใช้ไม่ได้ / โหลดไม่ขึ้น → ถอยไปใช้ OpenStreetMap (Leaflet) แบบเดิมอัตโนมัติ
 let cmMap=null,cmLayer=null,cmRevenue={},cmGeoBusy=false;
 let cmEngine=null;                                  // 'google' | 'leaflet' — แผนที่ที่แสดงอยู่ตอนนี้ใช้ตัวไหน
-let cmGMarkers=[],cmGInfo=null,cmGeocoder=null,cmGLoading=null,cmGFailed=false,cmGeoDenied=false,cmGLoadFailed=false,cmGLoadedKey=null;
+let cmGMarkers=[],cmGInfo=null,cmGeocoder=null,cmGLoading=null,cmGFailed=false,cmGeoDenied=false,cmPlaceDenied=false,cmGLoadFailed=false,cmGLoadedKey=null;
 function cmKey(){return String((typeof appSettings!=='undefined'&&appSettings||{}).google_maps_key||'').trim();}
 /** เหตุที่ใช้ Google ไม่ได้ตอนนี้: 'auth' Google ปฏิเสธ key · 'load' โหลดสคริปต์ไม่ขึ้น · 'reload' เปลี่ยน key หลังสคริปต์โหลดไปแล้ว (ต้องรีเฟรช) · null = ใช้ได้ */
 function cmGBlocked(key){
@@ -2123,7 +2123,7 @@ function cmLoadGoogle(key){
     const done=ok=>{if(settled)return;settled=true;resolve(ok);};
     window.__cmGoogleReady=()=>done(true);
     const s=document.createElement('script');
-    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&v=weekly&loading=async&language=th&region=TH&callback=__cmGoogleReady';
+    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&v=weekly&loading=async&language=th&region=TH&libraries=places&callback=__cmGoogleReady';
     s.async=true;
     s.onerror=()=>done(false);
     setTimeout(()=>done(!!(window.google&&google.maps&&google.maps.Map)),15000);
@@ -2142,7 +2142,7 @@ window.gm_authFailure=function(){
 /** เปิด Geocoding API ใน Google Cloud แล้ว → ให้ลองใช้ Google หาพิกัดใหม่โดยไม่ต้องรีเฟรช */
 function cmGeoRetry(){
   if(cmGeoBusy){toast('รอให้รอบหาพิกัดปัจจุบันจบก่อน');return;}
-  cmGeoDenied=false;
+  cmGeoDenied=false;cmPlaceDenied=false;
   cmRender();
   toast('ลองใช้ Google Geocoding อีกครั้ง — กดปุ่ม 📍 หาพิกัดร้านที่ยังไม่มี ได้เลย (ถ้ายังไม่ได้ Google อาจใช้เวลา 1–5 นาทีหลังกด Enable)');
 }
@@ -2151,7 +2151,7 @@ function cmNoticeHtml(){
   const key=cmKey(), why=cmGBlocked(key);
   if(cmEngine==='google')el.innerHTML='<span style="color:var(--ok,#159b78)">● Google Maps</span> '
     +(cmGeoDenied?'<span style="color:var(--danger,#b52020)">· ⚠️ key ยังไม่เปิดใช้ Geocoding API — หาพิกัดใช้ OpenStreetMap แทนไปก่อน (เปิด Geocoding API ใน Google Cloud + ติ๊กใน API restrictions ของ key แล้วกด <a href="javascript:void(0)" onclick="cmGeoRetry()" style="color:var(--accent);font-weight:600">🔄 ลองใหม่</a>)</span>'
-                 :'<span style="color:var(--muted)">· หาพิกัดด้วย Google Geocoding (ที่อยู่ไทยแม่นกว่า) — ร้านที่ยังไม่มีพิกัด กดปุ่ม 📍 ให้ Google หาให้</span>');
+                 :'<span style="color:var(--muted)">· หาพิกัดด้วย Google (ค้นชื่อร้าน → ที่อยู่) — ร้านใหม่หาให้เองตอนเปิดหน้า · ร้านที่หาไม่เจอ: เติมลิงก์แผนที่/ที่อยู่ในหน้าลูกค้า แล้วกด 🎯 ที่หมุด</span>');
   else if(key&&why==='auth')el.innerHTML='<span style="color:var(--danger,#b52020)">⚠️ Google Maps key ใช้ไม่ได้ — ตอนนี้ใช้ OpenStreetMap แทน</span> <span style="color:var(--muted)">· แก้ key ที่ ผู้ใช้ระบบ → ตั้งค่า (เปิด Maps JavaScript API + Geocoding API + Billing และจำกัดเว็บให้ถูก) แล้วรีเฟรช</span>';
   else if(key&&why==='reload')el.innerHTML='<span style="color:var(--warn,#a04a00)">🔄 เปลี่ยน key แล้ว — กดรีเฟรชหน้าเว็บ (F5) 1 ครั้ง แผนที่จะใช้ Google Maps ด้วย key ใหม่</span> <span style="color:var(--muted)">· ตอนนี้ใช้ OpenStreetMap ไปก่อน</span>';
   else if(key)el.innerHTML='<span style="color:var(--muted)">● OpenStreetMap · โหลด Google Maps ไม่ขึ้น (เช็คเน็ต/ตัวบล็อกโฆษณา) แล้วรีเฟรชอีกที</span>';
@@ -2252,7 +2252,7 @@ function cmPopupHtml(x){
   return '<b>'+esc(x.c.code+' '+x.c.name+(x.c.branch_name?' • '+x.c.branch_name:''))+'</b>'
     +'<br>ยอดขายช่วงนี้: <b>'+fmt(x.rev.sum)+'</b> ('+x.rev.count+' บิล)'
     +(x.c.sale_name?'<br>เซลล์: '+esc(x.c.sale_name):'')
-    +'<br><span style="color:#888;font-size:11px">พิกัดจาก: '+(x.c.geo_src==='maplink'?'ลิงก์แผนที่ (แม่นสุด)':x.c.geo_src==='district'?'ระดับอำเภอ (คร่าว)':'ที่อยู่')+'</span>'
+    +'<br><span style="color:#888;font-size:11px">พิกัดจาก: '+(x.c.geo_src==='maplink'?'ลิงก์แผนที่ (แม่นสุด)':x.c.geo_src==='place'?'ค้นชื่อร้านใน Google Maps':x.c.geo_src==='district'?'ระดับอำเภอ (คร่าว)':'ที่อยู่')+'</span>'
     +' <a href="https://www.google.com/maps?q='+lat+','+lng+'" target="_blank" rel="noopener" style="font-size:11px">เปิดใน Google Maps ↗</a>'
     +' · <a href="javascript:void(0)" onclick="cmGeocodeOne('+Number(x.c.id)+')" style="font-size:11px" title="ลิงก์แผนที่ก่อน ไม่มีก็หาจากที่อยู่อีกครั้ง">🎯 หาพิกัดใหม่</a>'
     +'<div style="color:#888;font-size:11px">ที่อยู่ที่ใช้หา: '+esc(cmAddrText(x.c,0)||(cmAddrText(x.c,1)?'(ไม่มีที่อยู่ — ใช้ '+cmAddrText(x.c,1)+')':'(ไม่มีที่อยู่)'))+'</div>';
@@ -2264,7 +2264,8 @@ async function cmGeocodeOne(id){
   const useG=cmEngine==='google'&&!cmGeoDenied&&!!(window.google&&google.maps&&google.maps.Geocoder);
   let g=cmParseMapLink(c.map_link);
   try{
-    if(!g&&useG){
+    if(!g&&useG){const pl=await cmPlaceSearch(c);if(pl)g={lat:pl.lat,lng:pl.lng,src:'place'};}
+    if(!g&&useG&&!cmGeoDenied){
       const r0=await cmGeocodeGoogle(cmAddrText(c,0));if(r0)g={lat:r0.lat,lng:r0.lng,src:r0.precise?'addr':'district'};
       if(!g&&!cmGeoDenied){const r1=await cmGeocodeGoogle(cmAddrText(c,1));if(r1)g={lat:r1.lat,lng:r1.lng,src:'district'};}
     }
@@ -2276,7 +2277,7 @@ async function cmGeocodeOne(id){
   c.lat=g.lat;c.lng=g.lng;c.geo_src=g.src;
   cmRender();
   try{if(cmEngine==='google')cmMap.panTo({lat:g.lat,lng:g.lng});else cmMap.panTo([g.lat,g.lng]);}catch(e){}
-  toast(g.src==='maplink'?'📍 ย้ายหมุดตามลิงก์แผนที่แล้ว':g.src==='addr'?'📍 ได้พิกัดระดับที่อยู่แล้ว'
+  toast(g.src==='maplink'?'📍 ย้ายหมุดตามลิงก์แผนที่แล้ว':g.src==='place'?'📍 เจอร้านใน Google Maps แล้ว — ย้ายหมุดไปหน้าร้าน':g.src==='addr'?'📍 ได้พิกัดระดับที่อยู่แล้ว'
     :'📍 ยังได้แค่ระดับอำเภอ/จังหวัด (คร่าว) — วางลิงก์ Google Maps แบบเต็มในหน้าลูกค้าจะแม่นสุด');
 }
 function cmRender(){
@@ -2351,6 +2352,44 @@ async function cmGeocodeGoogle(qtext,retry){
     ||(r.types||[]).some(t=>/^(administrative_area|locality|sublocality|postal_code|country|political)/.test(t));
   return {lat,lng,precise:!rough};
 }
+/* จำร้านที่เคยลองหาพิกัดแล้วไม่เจอ (เครื่องนี้) — เปิดหน้าอัตโนมัติจะไม่ถาม Google ซ้ำภายใน 7 วัน · กดปุ่มเองลองใหม่ได้เสมอ */
+function cmTriedLoad(){try{const t=JSON.parse(localStorage.getItem('cm_geo_tried')||'{}');return t&&typeof t==='object'?t:{};}catch(e){return {};}}
+function cmTriedSave(t){try{const now=Date.now();Object.keys(t).forEach(k=>{if(!(now-t[k]<30*86400000))delete t[k];});localStorage.setItem('cm_geo_tried',JSON.stringify(t));}catch(e){}}
+function cmTriedRecently(t,id){return !!(t&&t[id]&&Date.now()-t[id]<7*86400000);}
+function cmNorm(s){return String(s||'').toLowerCase().replace(/ร้าน|บริษัท|จำกัด|หจก\.?|สาขา|\(.*?\)|[\s\-_.,·•'"()]/g,'');}
+/** ค้นชื่อร้านใน Google Maps (Places API) — ได้พิกัดหน้าร้านจริง แม่นกว่าที่อยู่
+ *  กันร้านชื่อซ้ำที่อื่น: ผลลัพธ์ต้องอยู่จังหวัดเดียวกับข้อมูลลูกค้า (ถ้ามี) และชื่อต้องคล้ายกัน */
+async function cmPlaceSearch(c){
+  if(cmPlaceDenied||!(window.google&&google.maps&&google.maps.places&&google.maps.places.Place))return null;
+  const g=k=>String(c['ship_'+k]||c['bill_'+k]||'').trim();
+  const prov=g('province').replace(/^จ(ังหวัด|\.)\s*/,''), dist=g('district');
+  const name=String(c.name||'').trim();if(name.length<2)return null;
+  const q=[name,c.branch_name||'',dist,prov].filter(Boolean).join(' ');
+  let res;
+  try{
+    res=await google.maps.places.Place.searchByText({textQuery:q,fields:['displayName','location','formattedAddress'],
+      region:'th',language:'th',maxResultCount:3,locationRestriction:{south:5.5,west:97.3,north:20.5,east:105.7}});
+  }catch(e){
+    const code=String((e&&(e.code||e.message))||e);
+    if(/DENIED|NOT_ACTIVATED|not authorized|not enabled|403/i.test(code)){
+      cmPlaceDenied=true;
+      toast('⚠️ key ยังไม่เปิดใช้ Places API (New) — ค้นชื่อร้านไม่ได้ ใช้ที่อยู่แทนไปก่อน (เปิดใน Google Cloud แล้วกด 🔄 ลองใหม่)');
+    }
+    return null;
+  }
+  const nm=cmNorm(name), head=nm.slice(0,Math.min(6,nm.length));
+  const provKey=prov?(/กรุงเทพ/.test(prov)?'กรุงเทพ':prov):'';
+  for(const p of ((res&&res.places)||[])){
+    const loc=p.location;if(!loc)continue;
+    const lat=Number(typeof loc.lat==='function'?loc.lat():loc.lat),lng=Number(typeof loc.lng==='function'?loc.lng():loc.lng);
+    if(!(lat>=4&&lat<=21&&lng>=96&&lng<=106.5))continue;
+    const addr=String(p.formattedAddress||''), dn=cmNorm(p.displayName);
+    if(provKey&&!addr.includes(provKey))continue;                       // ร้านชื่อเดียวกันแต่อยู่จังหวัดอื่น = ไม่ใช่
+    if(!(nm.length>=3&&(dn.includes(nm)||nm.includes(dn)||(head.length>=3&&dn.includes(head)))))continue;   // ชื่อไม่คล้าย = ไม่ใช่
+    return {lat,lng,label:String(p.displayName||''),addr};
+  }
+  return null;
+}
 window.cmGeoStop=false;
 /** หาพิกัดร้าน · mode 'refine' = เอาเฉพาะร้านที่เคยได้แค่ระดับอำเภอ (คร่าว) มาให้ Google หาที่อยู่จริงอีกที */
 async function cmGeocodeAll(auto,mode){
@@ -2360,12 +2399,19 @@ async function cmGeocodeAll(auto,mode){
   if(refine&&!useG){toast(cmGeoDenied?'ปรับพิกัดต้องใช้ Google Geocoding — key ยังไม่เปิดใช้ Geocoding API (เปิดใน Google Cloud แล้วรีเฟรช)':'ปรับพิกัดต้องใช้ Google Maps (ใส่ key ที่ตั้งค่าระบบก่อน)');return;}
   let list=refine?customers.filter(c=>c.lat&&c.lng&&c.geo_src==='district'):customers.filter(c=>!(c.lat&&c.lng));
   const noGeoAll=list.length;
-  if(auto&&useG){                    // เข้าหน้าอัตโนมัติ: ทำเฉพาะส่วนฟรี (อ่านพิกัดจากลิงก์แผนที่) — Google Geocoding คิดโควตา ให้พนักงานกดปุ่มเองครั้งเดียว
-    list=list.filter(c=>cmParseMapLink(c.map_link));
-    if(!list.length){if(noGeoAll)toast('📍 มี '+noGeoAll+' ร้านยังไม่มีพิกัด — กดปุ่ม "หาพิกัดร้านที่ยังไม่มี" ให้ Google หาให้');return;}
+  const tried=cmTriedLoad();
+  if(auto&&useG){                    // เข้าหน้าอัตโนมัติ: หาให้เองเฉพาะร้านที่ยังไม่เคยลอง — ร้านที่ Google หาไม่เจอจะไม่ถูกถามซ้ำทุกครั้งที่เปิดหน้า (โควตา) จนกว่าจะกดปุ่มเอง/ผ่านไป 7 วัน
+    list=list.filter(c=>cmParseMapLink(c.map_link)||!cmTriedRecently(tried,c.id));
+    if(!list.length){
+      if(noGeoAll&&!sessionStorage.getItem('cm_geo_hint')){
+        sessionStorage.setItem('cm_geo_hint','1');
+        toast('📍 มี '+noGeoAll+' ร้านที่ Google หาพิกัดไม่เจอ — เติมลิงก์แผนที่หรือที่อยู่ในหน้าลูกค้า แล้วกด 🎯 ที่หมุด (หรือกดปุ่ม 📍 เพื่อลองทั้งหมดอีกครั้ง)');
+      }
+      return;
+    }
   }
   if(!list.length){if(!auto)toast(refine?'ไม่มีร้านที่พิกัดยังคร่าว':'ทุกร้านมีพิกัดครบแล้ว');return;}
-  const per=useG?0.5:2.4;                                          // วินาที/ร้าน (OSM ต้องเว้น 1.1 วิ ต่อครั้ง)
+  const per=useG?0.8:2.4;                                          // วินาที/ร้าน (OSM ต้องเว้น 1.1 วิ ต่อครั้ง)
   if(!auto&&!confirm((refine?'ให้ Google หาที่อยู่จริงให้ '+list.length+' ร้านที่พิกัดยังคร่าว (ระดับอำเภอ)\nจะเปลี่ยนพิกัดเฉพาะร้านที่ Google หาได้ระดับที่อยู่'
       :'หาพิกัดให้ '+list.length+' ร้านที่ยังไม่มีพิกัด'+(useG?' (ด้วย Google)':' (ด้วย OpenStreetMap)'))
     +'\nใช้เวลาราว '+Math.max(1,Math.ceil(list.length*per/60))+' นาที — เปิดหน้านี้ทิ้งไว้จนจบ\n\nเริ่มเลย?'))return;
@@ -2375,12 +2421,16 @@ async function cmGeocodeAll(auto,mode){
   if(rb){rb.disabled=true;if(refine)rb.textContent='⏳ กำลังปรับพิกัด…';}
   if(auto)toast('📍 กำลังหาพิกัดให้ '+list.length+' ร้านที่ยังไม่มี'+(useG?' ด้วย Google':'')+' — ใช้งานหน้าอื่นต่อได้ กดปุ่มเพื่อหยุด');
   const prog=document.getElementById('cm-geo-progress');
-  let ok=0,miss=0,i=0;
+  let ok=0,miss=0,i=0,saveFail=0,lastErr='';
   for(const c of list){
     if(window.cmGeoStop||(useG&&cmGFailed))break;                    // กดหยุด / Google เพิ่งปฏิเสธ key ระหว่างทาง
     i++;prog.textContent='📍 '+i+'/'+list.length+' — '+c.code;
     let g=cmParseMapLink(c.map_link);
     try{
+      if(!g&&useG){                                                   // ค้นชื่อร้านใน Google Maps ก่อน — หมุดหน้าร้านจริง
+        const pl=await cmPlaceSearch(c);await cmSleep(150);
+        if(pl)g={lat:pl.lat,lng:pl.lng,src:'place'};
+      }
       if(!g&&useG&&!cmGeoDenied){
         const r0=await cmGeocodeGoogle(cmAddrText(c,0));await cmSleep(250);
         if(r0&&(r0.precise||!refine))g={lat:r0.lat,lng:r0.lng,src:r0.precise?'addr':'district'};
@@ -2395,10 +2445,13 @@ async function cmGeocodeAll(auto,mode){
     if(g&&refine&&g.src==='district')g=null;                          // ปรับพิกัด: ได้แค่คร่าวเท่าเดิม = ไม่เปลี่ยน
     if(g){
       const {data:upd,error}=await db.from('customers').update({lat:g.lat,lng:g.lng,geo_src:g.src}).eq('id',c.id).select('id');
-      if(!error&&upd&&upd.length){c.lat=g.lat;c.lng=g.lng;c.geo_src=g.src;ok++;}else miss++;
+      if(!error&&upd&&upd.length){c.lat=g.lat;c.lng=g.lng;c.geo_src=g.src;ok++;}
+      else{saveFail++;lastErr=error?error.message:'ไม่มีแถวถูกอัปเดต (สิทธิ์ฐานข้อมูล?)';console.error('บันทึกพิกัดไม่สำเร็จ',c.code,lastErr);}   // บันทึกไม่ได้ ≠ หาไม่เจอ — ต้องบอกให้รู้ ไม่งั้นรีเฟรชแล้วหมุดหาย
     }else miss++;
+    if(!refine){if(c.lat&&c.lng)delete tried[c.id];else tried[c.id]=Date.now();}   // จำว่าลองแล้ว — เปิดหน้าครั้งหน้าไม่ถามซ้ำ
     if(i%10===0)cmRender();
   }
+  cmTriedSave(tried);
   cmGeoBusy=false;prog.textContent='';
   btn.disabled=false;btn.textContent='📍 หาพิกัดร้านที่ยังไม่มี';btn.onclick=()=>cmGeocodeAll();
   if(rb){rb.disabled=false;rb.textContent='🎯 ปรับพิกัดที่ยังคร่าว';}
@@ -2409,7 +2462,8 @@ async function cmGeocodeAll(auto,mode){
     +(refine?'ปรับพิกัดได้ ':'ได้พิกัด ')+ok+' ร้าน'
     +(miss&&!deniedStop?(refine?' · อีก '+miss+' ร้าน Google ยังหาได้แค่คร่าว — เพิ่มลิงก์ Google Maps แบบเต็มในหน้าลูกค้าแทน'
                   :' · หาไม่เจอ '+miss+' ร้าน — เพิ่มลิงก์ Google Maps แบบเต็มในหน้าลูกค้า แล้วกดซ้ำ'):'')
-    +(auto&&useG&&left?' · อีก '+left+' ร้านยังไม่มีพิกัด — กดปุ่ม "หาพิกัดร้านที่ยังไม่มี" ให้ Google หาให้':''));
+    +(auto&&useG&&left?' · ที่หาไม่เจอ: เติมลิงก์แผนที่/ที่อยู่ในหน้าลูกค้า แล้วกด 🎯 ที่หมุด':'')
+    +(saveFail?' · ⚠️ บันทึกลงฐานข้อมูลไม่สำเร็จ '+saveFail+' ร้าน ('+lastErr+') — พิกัดจะหายเมื่อรีเฟรช แจ้งผู้ดูแลระบบ':''));
   window.cmGeoStop=false;
 }
 
@@ -12167,7 +12221,7 @@ async function saveGmapsKey(){
   const {error}=await db.from('settings').upsert({key:'google_maps_key',value:val},{onConflict:'key'});
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
   appSettings.google_maps_key=val;
-  cmGFailed=false;cmGLoadFailed=false;cmGeoDenied=false;cmGLoading=null;   // key ใหม่ = ให้โอกาสลองใหม่
+  cmGFailed=false;cmGLoadFailed=false;cmGeoDenied=false;cmPlaceDenied=false;cmGLoading=null;   // key ใหม่ = ให้โอกาสลองใหม่
   cmResetMap();                                   // เปิดหน้าแผนที่ครั้งหน้าจะสร้างใหม่ด้วยเครื่องมือที่ตรงกับ key
   const needReload=!!val&&!!(window.google&&google.maps)&&cmGLoadedKey!==val;   // สคริปต์ Google ผูกกับ key ที่โหลดไปแล้ว — เปลี่ยน key ต้องรีเฟรช
   toast(!val?'ลบ key แล้ว — กลับไปใช้แผนที่ OpenStreetMap'
