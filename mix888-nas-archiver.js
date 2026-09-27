@@ -37,7 +37,11 @@
    ============================================================ */
 'use strict';
 
-/* ================= ตั้งค่า ================= */
+/* ================= ตั้งค่า =================
+   ⚠️ ไม่ต้องแก้ไฟล์นี้ — สร้างไฟล์ archiver.config.json ไว้ข้าง ๆ แล้วใส่ค่าที่ต้องการ (ตัวอย่างอยู่ในไฟล์ archiver.config.example.json)
+      {"NAS_ROOT":"/volume1/Mix888","NAS_EXPORT_KEY":"รหัสลับ"}
+   ค่าในไฟล์นั้นจะทับค่าด้านล่างทั้งหมด (แก้ไฟล์ .js ด้วยโปรแกรมที่ไม่ใช่ UTF-8 จะทำอีโมจิ/ภาษาไทยพัง แล้วรันไม่ได้)
+   =========================================== */
 const NAS_ROOT   = '';                // เว้นว่าง = หาโฟลเดอร์ Mix888 บน NAS อัตโนมัติ (volume1-6) / หรือระบุเอง เช่น '/volume2/Mix888' หรือ 'Z:\\Mix888'
 const DAYS_BACK  = 45;                // ซิงก์บิลย้อนหลังกี่วัน (รอบแรกแนะนำตั้งเยอะ ๆ เช่น 400 แล้วค่อยลดลง)
 const EVERY_MIN  = 30;                // ซิงก์ซ้ำทุกกี่นาที
@@ -56,6 +60,20 @@ const ORDER_HISTORY_DAYS     = 730;   // ประวัติสั่งซื
 
 const fs   = require('fs');
 const path = require('path');
+// ---- อ่านค่าตั้งค่าจาก archiver.config.json (ถ้ามี) ทับค่าคงที่ด้านบน ----
+const CFG = (() => {
+  const c = {NAS_ROOT, DAYS_BACK, EVERY_MIN, NAS_EXPORT_KEY, KEEP_A4_PAGES, PRUNE_PAID_BILLS, PRUNE_PAID_AFTER_DAYS, PRUNE_DAYS_BACK, PRUNE_BROADCAST_DAYS, BACKUP_EVERY_DAYS, ORDER_HISTORY_DAYS};
+  try{
+    const f = path.join(__dirname, 'archiver.config.json');
+    if(fs.existsSync(f)){
+      const raw = fs.readFileSync(f, 'utf8').replace(/^\uFEFF/, '');
+      const j = JSON.parse(raw);
+      for(const k of Object.keys(c)) if(j[k] !== undefined && j[k] !== null && j[k] !== '') c[k] = j[k];
+      c._from = f;
+    }
+  }catch(e){ console.log('⚠️ อ่าน archiver.config.json ไม่ได้: ' + e.message + ' — ใช้ค่าในไฟล์สคริปต์แทน'); }
+  return c;
+})();
 const DRY_RUN = process.argv.includes('--dry-run');   // เก็บลง NAS ตามปกติ แต่ไม่ลบไฟล์/ไม่แก้ข้อมูลใน Supabase
 const REPORT = {};                                    // สรุปท้ายรอบ: หมวด → {new, have, fail, pruned}
 function tally(section, key, n = 1){ const r = REPORT[section] || (REPORT[section] = {new: 0, have: 0, fail: 0, pruned: 0}); r[key] += n; }
@@ -70,7 +88,7 @@ function flushLog(){   // เขียนผลรอบล่าสุดไว
   try{ fs.writeFileSync(path.join(__dirname, 'archiver-log.txt'), logLines.slice(-500).join('\r\n')); }catch(e){}
 }
 function resolveNasRoot(){
-  if(NAS_ROOT) return fs.existsSync(NAS_ROOT) ? NAS_ROOT : null;
+  if(CFG.NAS_ROOT) return fs.existsSync(CFG.NAS_ROOT) ? CFG.NAS_ROOT : null;
   for(let i=1; i<=6; i++){
     const p = '/volume' + i + '/Mix888';
     if(fs.existsSync(p)) return p;
@@ -149,7 +167,7 @@ async function fetchBills(sinceISO){
       method: 'POST',
       headers: {apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY,
                 'Content-Type': 'application/json'},
-      body: JSON.stringify({p_key: NAS_EXPORT_KEY, p_since: sinceISO})});
+      body: JSON.stringify({p_key: CFG.NAS_EXPORT_KEY, p_since: sinceISO})});
     if(!r.ok) throw new Error('RPC ' + r.status + ': ' + (await r.text()).slice(0, 200));
     const data = await r.json();
     return Array.isArray(data) ? data : (data || []);
@@ -268,7 +286,7 @@ function custInfoText(c){
   if(c.note) L.push('หมายเหตุ: ' + c.note);
   if(c.crm_note) L.push('โน้ต CRM: ' + c.crm_note);
   L.push('สถานะ: ' + (c.active === false ? 'ปิดใช้งาน' : 'ใช้งาน') + '   เพิ่มเมื่อ: ' + (c.created_at ? thDateTimeStr(c.created_at) : '-'));
-  if(c._stats) L.push('ยอดซื้อ (ย้อนหลัง ' + ORDER_HISTORY_DAYS + ' วัน): ' + c._stats.orders + ' ออเดอร์ · ' + Number(c._stats.total).toLocaleString('th-TH') + ' บาท · ล่าสุด ' + (c._stats.last ? thDateTimeStr(c._stats.last) : '-'));
+  if(c._stats) L.push('ยอดซื้อ (ย้อนหลัง ' + CFG.ORDER_HISTORY_DAYS + ' วัน): ' + c._stats.orders + ' ออเดอร์ · ' + Number(c._stats.total).toLocaleString('th-TH') + ' บาท · ล่าสุด ' + (c._stats.last ? thDateTimeStr(c._stats.last) : '-'));
   return '\uFEFF' + L.join('\r\n') + '\r\n';
 }
 async function syncCustomers(ROOT){
@@ -281,7 +299,7 @@ async function syncCustomers(ROOT){
   const cps   = await apiAll('/rest/v1/customer_prices?select=customer_id,product_id,price');
   let plog = []; try{ plog = await apiAll('/rest/v1/price_log?select=id,customer_id,product_id,field,old_price,new_price,action,source,changed_by,changed_at&order=id.asc'); }catch(e){ log('  ⚠️ อ่านประวัติราคาไม่ได้ (รัน mix888-price-log.sql หรือยัง?): ' + e.message); }
   let lgroups = {}; try{ (await apiAll('/rest/v1/line_groups?select=group_id,name')).forEach(g => lgroups[g.group_id] = g.name); }catch(e){}
-  const since = new Date(Date.now() - ORDER_HISTORY_DAYS * 24 * 3600 * 1000).toISOString();
+  const since = new Date(Date.now() - CFG.ORDER_HISTORY_DAYS * 24 * 3600 * 1000).toISOString();
   let orders = []; try{ orders = await apiAll('/rest/v1/orders?select=id,order_no,customer_id,created_at,status,total,created_by,order_items(product_id,qty,price,amount)&created_at=gte.' + encodeURIComponent(since) + '&order=created_at.asc'); }
   catch(e){ log('  ⚠️ อ่านประวัติสั่งซื้อไม่ได้: ' + e.message); }
   log('ลูกค้า ' + custs.length + ' ราย · จัดสินค้า ' + cps.length + ' แถว · ประวัติราคา ' + plog.length + ' · ออเดอร์ ' + orders.length);
@@ -294,7 +312,7 @@ async function syncCustomers(ROOT){
   const stats = {};
   orders.forEach(o => { if((o.status || '') === 'cancelled') return; const st = stats[o.customer_id] || (stats[o.customer_id] = {orders: 0, total: 0, last: null}); st.orders++; st.total += Number(o.total || 0); if(!st.last || o.created_at > st.last) st.last = o.created_at; });
   // รายชื่อลูกค้ารวม
-  const head = ['รหัส','ชื่อร้าน','สาขา','สาขาของ','เซลล์','ประเภทจ่าย','เครดิต','สถานะเครดิต','ผู้ติดต่อ','โทร','ที่อยู่ออกบิล','ผู้รับของ','โทรผู้รับ','ที่อยู่จัดส่ง','วิธีส่ง','เวลารับของ','กลุ่มราคา','ประเภทบิล','ซ่อนราคา','กลุ่ม LINE','ชื่อกลุ่ม LINE','โน้ต CRM','หมายเหตุ','สถานะ','เพิ่มเมื่อ','ออเดอร์ (' + ORDER_HISTORY_DAYS + ' วัน)','ยอดซื้อ','สั่งล่าสุด'];
+  const head = ['รหัส','ชื่อร้าน','สาขา','สาขาของ','เซลล์','ประเภทจ่าย','เครดิต','สถานะเครดิต','ผู้ติดต่อ','โทร','ที่อยู่ออกบิล','ผู้รับของ','โทรผู้รับ','ที่อยู่จัดส่ง','วิธีส่ง','เวลารับของ','กลุ่มราคา','ประเภทบิล','ซ่อนราคา','กลุ่ม LINE','ชื่อกลุ่ม LINE','โน้ต CRM','หมายเหตุ','สถานะ','เพิ่มเมื่อ','ออเดอร์ (' + CFG.ORDER_HISTORY_DAYS + ' วัน)','ยอดซื้อ','สั่งล่าสุด'];
   const lines = [head.map(csvCell).join(',')];
   for(const c of custs){
     const st = stats[c.id] || {orders: 0, total: 0, last: null};
@@ -380,7 +398,7 @@ function shortHash(s){ let h = 0; for(const ch of String(s)) h = (h * 31 + ch.ch
 async function rpc(name, body){
   const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + name, {method: 'POST',
     headers: {apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json'},
-    body: JSON.stringify(Object.assign({p_key: NAS_EXPORT_KEY}, body || {}))});
+    body: JSON.stringify(Object.assign({p_key: CFG.NAS_EXPORT_KEY}, body || {}))});
   if(!r.ok) throw new Error('RPC ' + name + ' ' + r.status + ': ' + (await r.text()).slice(0, 200));
   return r.json();
 }
@@ -394,10 +412,10 @@ const onNas = p => { try{ return fs.statSync(p).size > 0; }catch(e){ return fals
 
 // (1) บิลจ่ายครบแล้ว: ไฟล์อยู่บน NAS ครบ → ลบรูปบิล/สลิปออกจาก Supabase แล้วบันทึกว่า "เก็บบน NAS แล้ว"
 async function pruneBills(ROOT){
-  if(!PRUNE_PAID_BILLS) return {pruned: 0};
+  if(!CFG.PRUNE_PAID_BILLS) return {pruned: 0};
   let pruned = 0, kept = 0;
-  const since = new Date(Date.now() - PRUNE_DAYS_BACK * 24 * 3600 * 1000).toISOString();
-  const cutoff = Date.now() - PRUNE_PAID_AFTER_DAYS * 24 * 3600 * 1000;
+  const since = new Date(Date.now() - CFG.PRUNE_DAYS_BACK * 24 * 3600 * 1000).toISOString();
+  const cutoff = Date.now() - CFG.PRUNE_PAID_AFTER_DAYS * 24 * 3600 * 1000;
   let bills = [];
   try{ bills = await rpc('nas_export_bills', {p_since: since}); }catch(e){ log('⚠️ อ่านบิลเพื่อลบไฟล์ไม่ได้: ' + e.message); return {pruned}; }
   for(const b of bills){
@@ -452,7 +470,7 @@ async function syncMedia(ROOT){
   // ไฟล์อื่นใน bucket products = สื่อบรอดแคสต์/โปรโมชั่น (ชื่อขึ้นต้น broadcast-/media-/promo-…)
   let objs = [];
   try{ objs = await rpc('nas_list_objects', {p_bucket: 'products'}); }catch(e){ log('⚠️ อ่านรายชื่อไฟล์ใน products ไม่ได้: ' + e.message); return {saved, skipped, failed, pruned}; }
-  const cutoff = Date.now() - PRUNE_BROADCAST_DAYS * 24 * 3600 * 1000;
+  const cutoff = Date.now() - CFG.PRUNE_BROADCAST_DAYS * 24 * 3600 * 1000;
   for(const o of objs){
     if(referenced.has(o.name)) continue;                        // รูปสินค้าที่ยังใช้อยู่ เก็บไว้ข้างบนแล้ว ไม่ลบ
     const url = SUPABASE_URL + '/storage/v1/object/public/products/' + o.name.split('/').map(encodeURIComponent).join('/');
@@ -505,7 +523,7 @@ async function syncExpenses(ROOT){
   return {saved, skipped, failed};
 }
 
-// (4) สำรองตารางข้อมูลเป็น CSV + JSON ทุก BACKUP_EVERY_DAYS วัน
+// (4) สำรองตารางข้อมูลเป็น CSV + JSON ทุก CFG.BACKUP_EVERY_DAYS วัน
 function toCsv(rows){
   if(!rows || !rows.length) return '\uFEFF';
   const cols = [...new Set(rows.flatMap(r => Object.keys(r)))];
@@ -517,7 +535,7 @@ async function backupTables(ROOT){
   const marks = fs.readdirSync(base, {withFileTypes: true}).filter(d => d.isDirectory()).map(d => d.name).filter(n => /^\d{4}-\d{2}-\d{2}$/.test(n)).sort();
   const last = marks[marks.length - 1];
   const today = thDate(new Date().toISOString()); const todayStr = today.y + '-' + today.m + '-' + today.d;
-  if(last && (new Date(todayStr) - new Date(last)) / 86400000 < BACKUP_EVERY_DAYS) return {done: false};
+  if(last && (new Date(todayStr) - new Date(last)) / 86400000 < CFG.BACKUP_EVERY_DAYS) return {done: false};
   const data = await rpc('nas_export_backup');
   const dir = path.join(base, todayStr); fs.mkdirSync(dir, {recursive: true});
   let n = 0;
@@ -541,15 +559,15 @@ async function syncOnce(){
   try{
     const ROOT = resolveNasRoot();
     if(!ROOT){
-      log('❌ หาโฟลเดอร์ปลายทางไม่เจอ: ' + (NAS_ROOT || 'ลองแล้ว /volume1-6/Mix888'));
-      log('   แก้ค่า NAS_ROOT หัวไฟล์นี้ให้ตรงกับที่อยู่จริงของโฟลเดอร์ Mix888');
+      log('❌ หาโฟลเดอร์ปลายทางไม่เจอ: ' + (CFG.NAS_ROOT || 'ลองแล้ว /volume1-6/Mix888'));
+      log('   ใส่ NAS_ROOT ใน archiver.config.json ให้ตรงกับที่อยู่จริงของโฟลเดอร์ Mix888');
       running = false; flushLog();
       return false;
     }
     log('ปลายทาง: ' + ROOT);
-    const since = new Date(Date.now() - DAYS_BACK * 24 * 3600 * 1000).toISOString();
+    const since = new Date(Date.now() - CFG.DAYS_BACK * 24 * 3600 * 1000).toISOString();
     const bills = await fetchBills(since);
-    log('พบบิล ' + bills.length + ' ใบ (ย้อนหลัง ' + DAYS_BACK + ' วัน)');
+    log('พบบิล ' + bills.length + ' ใบ (ย้อนหลัง ' + CFG.DAYS_BACK + ' วัน)');
 
     const byDay = {};   // โฟลเดอร์รายวัน → รายการบิล (ไว้ทำไฟล์สรุป)
     for(const b of bills){
@@ -567,7 +585,7 @@ async function syncOnce(){
       const files = [];
       const rev = b.revision || 1;
       if(b.image_url) files.push([b.image_url, safeName(b.bill_no) + '_บิล_v' + rev + extOf(b.image_url)]);
-      if(KEEP_A4_PAGES)
+      if(CFG.KEEP_A4_PAGES)
         (Array.isArray(b.page_urls) ? b.page_urls : []).forEach((u, i) =>
           files.push([u, safeName(b.bill_no) + '_บิลหน้า' + (i+1) + '_v' + rev + extOf(u)]));
       const slipSet = [];
@@ -649,13 +667,14 @@ async function syncOnce(){
 
 console.log('==========================================================');
 console.log('  Mix Fresh 168 — เก็บบิล + สลิปเข้า NAS อัตโนมัติ');
-console.log('  ปลายทาง: ' + NAS_ROOT);
-console.log('  ซิงก์ย้อนหลัง ' + DAYS_BACK + ' วัน · ทำซ้ำทุก ' + EVERY_MIN + ' นาที' + (DRY_RUN ? '  [โหมดทดลอง --dry-run: ไม่ลบ/ไม่แก้อะไรใน Supabase]' : ''));
+console.log('  ปลายทาง: ' + (CFG.NAS_ROOT || '(หาอัตโนมัติ /volume1-6/Mix888)') + (CFG._from ? '  · ตั้งค่าจาก archiver.config.json' : '  · ตั้งค่าจากในไฟล์สคริปต์'));
+if(!CFG.NAS_EXPORT_KEY || CFG.NAS_EXPORT_KEY === 'PASTE_NAS_EXPORT_KEY_HERE') console.log('  ⚠️ ยังไม่ได้ใส่ NAS_EXPORT_KEY — ใส่ใน archiver.config.json (จะอ่านบิลได้ 0 ใบ)');
+console.log('  ซิงก์ย้อนหลัง ' + CFG.DAYS_BACK + ' วัน · ทำซ้ำทุก ' + CFG.EVERY_MIN + ' นาที' + (DRY_RUN ? '  [โหมดทดลอง --dry-run: ไม่ลบ/ไม่แก้อะไรใน Supabase]' : ''));
 console.log('  เปิดหน้าต่างนี้ทิ้งไว้ (ย่อได้ อย่าปิด) — ปิดแล้วเปิดใหม่ก็ซิงก์ต่อจากเดิมได้');
 console.log('==========================================================');
 if(process.argv.includes('--once')){
   syncOnce().then(ok => process.exit(ok ? 0 : 1));   // โหมด Task Scheduler: ทำรอบเดียวแล้วจบ (ล้ม = สถานะผิดปกติ)
 }else{
   syncOnce();
-  setInterval(syncOnce, EVERY_MIN * 60 * 1000); // โหมดเปิดค้าง: ทำซ้ำเองเรื่อย ๆ
+  setInterval(syncOnce, CFG.EVERY_MIN * 60 * 1000); // โหมดเปิดค้าง: ทำซ้ำเองเรื่อย ๆ
 }
