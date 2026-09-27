@@ -710,6 +710,9 @@ async function notifyCentral(data,ci){
     if(!gids.length)return;
     const c=customer;
     let t='🆕 ออเดอร์ใหม่ '+data.order_no+'\n';
+    // ใครกดสั่ง: เครื่องที่เคยล็อกอินหลังบ้าน = พนักงานสั่งให้ (ชื่อจาก localStorage เดียวกับ markStaffOrder) · ไม่มี = ลูกค้าสั่งเอง
+    let staff='';try{const u=JSON.parse(localStorage.getItem('mix888_user')||'null')||{};staff=u.display_name||u.username||'';}catch(e){}
+    t+=(staff?'👤 สั่งโดย : พนักงาน '+staff+' (กดสั่งให้ลูกค้า)':'📱 สั่งโดย : ลูกค้าสั่งเอง')+'\n';
     if(c.sale_name)t+='Sale : '+c.sale_name+'\n';
     t+='ร้าน : '+c.name+' ('+c.code+')\n';
     t+='ผู้รับ : '+(c.ship_receiver||c.contact_name||'-');
