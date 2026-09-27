@@ -15,6 +15,13 @@
         BAM00006_สำเนาบัตรประชาชน_20261001-1030.jpg       ← เอกสารขอใช้เครดิต (ไฟล์ใหม่เมื่อมีการเปลี่ยนเอกสาร)
         (เปลี่ยนรหัสลูกค้าในหลังบ้าน → โฟลเดอร์ถูกเปลี่ยนชื่อตามให้เอง ดูจากไฟล์ .customer_id ข้างใน)
      <NAS_ROOT>\ใบวางบิล\BAM00006\ใบวางบิล_2026-11-01.png  ← รูปใบวางบิลที่ระบบส่งให้ลูกค้า
+     <NAS_ROOT>\สื่อสินค้า\สินค้า\<SKU>_<ชื่อ>_<รหัสไฟล์>.jpg   ← รูปสินค้า (เปลี่ยนรูป = ไฟล์ใหม่ ของเก่าไม่ลบ)
+     <NAS_ROOT>\สื่อสินค้า\บรอดแคสต์\2026-10\…                ← รูป/วิดีโอที่ส่งบรอดแคสต์ (ลบออกจาก Supabase หลัง 7 วัน)
+     <NAS_ROOT>\รายจ่าย\2026\2026-10\รายจ่าย_2026-10.csv     ← Petty Cash รายเดือน + รูปใบเสร็จในโฟลเดอร์เดียวกัน
+     <NAS_ROOT>\สำรองข้อมูล\2026-10-06\<ตาราง>.csv/.json       ← สำรองตารางข้อมูลทุก 7 วัน (แยกจากโฟลเดอร์ สำรองข้อมูล เดิมของคุณ) (กู้คืนได้ถ้า Supabase มีปัญหา)
+
+   ประหยัดพื้นที่ Supabase: บิลที่จ่ายครบแล้วเกิน 30 วัน และไฟล์อยู่บน NAS แล้ว → ลบรูปบิล/สลิปออกจาก Supabase
+   (ต้องรัน mix888-nas-archiver-v2.sql ก่อน · หลังบ้านยังกด "สร้างรูปบิลใหม่" ได้ ระบบจะเก็บสำเนาแล้วลบให้อีกรอบ)
 
    วิธีใช้ (เลือกอย่างใดอย่างหนึ่ง):
    ① บน Synology NAS: ลงแพ็กเกจ Node.js จาก Package Center แล้วตั้ง
@@ -33,6 +40,12 @@ const SUPABASE_URL = 'https://eqbzpgynzgdwvouuzfwt.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_HqLNQDwR4omYcb7BNUEKIw_vyHCo4N-';
 const NAS_EXPORT_KEY = 'PASTE_NAS_EXPORT_KEY_HERE';   // รหัสลับให้ตรงกับที่รันในไฟล์ mix888-nas-export.sql
 const KEEP_A4_PAGES  = false;         // true = เก็บไฟล์บิลแบบแบ่งหน้า A4 ด้วย (เนื้อหาซ้ำกับใบเต็ม ปกติไม่จำเป็น)
+/* ---- ประหยัดพื้นที่ Supabase (ต้องรัน mix888-nas-archiver-v2.sql ก่อน) ---- */
+const PRUNE_PAID_BILLS       = true;  // ลบรูปบิล+สลิปออกจาก Supabase เมื่อบิล "จ่ายครบแล้ว" และไฟล์อยู่บน NAS แล้ว (ต้นฉบับอยู่ NAS · หลังบ้านกดสร้างรูปใหม่ได้ ระบบจะเก็บแล้วลบซ้ำให้)
+const PRUNE_PAID_AFTER_DAYS  = 30;    // ลบหลังจ่ายครบมาแล้วกี่วัน
+const PRUNE_DAYS_BACK        = 400;   // มองหาบิลที่ควรลบย้อนหลังกี่วัน
+const PRUNE_BROADCAST_DAYS   = 7;     // สื่อบรอดแคสต์ (รูป/วิดีโอที่ส่งไลน์แล้ว) ลบออกจาก Supabase หลังเก็บลง NAS และเก่ากว่ากี่วัน (รูปสินค้าไม่ลบ — หน้าสั่งของยังใช้)
+const BACKUP_EVERY_DAYS      = 7;     // สำรองตารางข้อมูล (ลูกค้า สินค้า ออเดอร์ บิล การชำระ รายจ่าย …) เป็น CSV+JSON ทุกกี่วัน
 /* =========================================== */
 
 const fs   = require('fs');
@@ -263,6 +276,165 @@ async function syncStatements(ROOT){
   return {saved, skipped, failed};
 }
 
+/* ================= ประหยัดพื้นที่ Supabase + สื่อสินค้า + รายจ่าย + สำรองข้อมูล ================= */
+const MEDIA_DIR = 'สื่อสินค้า', EXP_DIR = 'รายจ่าย', BACKUP_DIR = 'สำรองตาราง';
+function objPathOf(url, bucket){   // public URL → path ใน bucket
+  const m = String(url || '').split('?')[0].match(new RegExp('/storage/v1/object/(?:public|sign|authenticated)/' + bucket + '/(.+)$'));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+function shortHash(s){ let h = 0; for(const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h.toString(36); }
+async function rpc(name, body){
+  const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + name, {method: 'POST',
+    headers: {apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json'},
+    body: JSON.stringify(Object.assign({p_key: NAS_EXPORT_KEY}, body || {}))});
+  if(!r.ok) throw new Error('RPC ' + name + ' ' + r.status + ': ' + (await r.text()).slice(0, 200));
+  return r.json();
+}
+async function deleteObject(bucket, objPath){
+  const r = await fetch(SUPABASE_URL + '/storage/v1/object/' + bucket + '/' + objPath.split('/').map(encodeURIComponent).join('/'), {
+    method: 'DELETE', headers: {apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY}});
+  if(!r.ok) throw new Error('ลบไฟล์ ' + bucket + '/' + objPath + ' ไม่ได้ (' + r.status + ') — รัน mix888-nas-archiver-v2.sql หรือยัง?');
+}
+const onNas = p => { try{ return fs.statSync(p).size > 0; }catch(e){ return false; } };
+
+// (1) บิลจ่ายครบแล้ว: ไฟล์อยู่บน NAS ครบ → ลบรูปบิล/สลิปออกจาก Supabase แล้วบันทึกว่า "เก็บบน NAS แล้ว"
+async function pruneBills(ROOT){
+  if(!PRUNE_PAID_BILLS) return {pruned: 0};
+  let pruned = 0, kept = 0;
+  const since = new Date(Date.now() - PRUNE_DAYS_BACK * 24 * 3600 * 1000).toISOString();
+  const cutoff = Date.now() - PRUNE_PAID_AFTER_DAYS * 24 * 3600 * 1000;
+  let bills = [];
+  try{ bills = await rpc('nas_export_bills', {p_since: since}); }catch(e){ log('⚠️ อ่านบิลเพื่อลบไฟล์ไม่ได้: ' + e.message); return {pruned}; }
+  for(const b of bills){
+    if((b.ship_status || 'pending') === 'cancelled' || b.payment_status !== 'paid') continue;
+    if(!b.paid_at || new Date(b.paid_at).getTime() > cutoff) continue;
+    const urls = [];
+    if(b.image_url) urls.push(['bills', b.image_url]);
+    (Array.isArray(b.page_urls) ? b.page_urls : []).forEach(u => urls.push(['bills', u]));
+    const slips = [];
+    (Array.isArray(b.payments) ? b.payments : []).forEach(p => (Array.isArray(p.slips) ? p.slips : []).forEach(u => { if(u && !slips.includes(u)) slips.push(u); }));
+    if(b.slip_url && !slips.includes(b.slip_url)) slips.push(b.slip_url);
+    slips.forEach(u => urls.push([objPathOf(u, 'slips') ? 'slips' : 'bills', u]));
+    if(!urls.length) continue;                                     // ไม่มีไฟล์ค้างใน Supabase แล้ว
+    // ต้องมีสำเนาบน NAS: รูปบิล (เวอร์ชันไหนก็ได้) + สลิปครบจำนวน
+    const {y, m, ddmmyyyy} = thDate(b.created_at);
+    const dayDir = path.join(ROOT, y, m, ddmmyyyy);
+    let billDir = null;
+    for(const sfx of ['', ...PAY_SUFFIXES]){ const p = path.join(dayDir, safeName(b.bill_no) + sfx); if(fs.existsSync(p)){ billDir = p; break; } }
+    if(!billDir){ kept++; continue; }
+    const files = fs.readdirSync(billDir);
+    const hasBill = !b.image_url || files.some(f => f.includes('_บิล_v') && onNas(path.join(billDir, f)));
+    const nSlipNas = files.filter(f => f.includes('_สลิป') && onNas(path.join(billDir, f))).length;
+    if(!hasBill || nSlipNas < slips.length){ kept++; continue; }   // ยังเก็บไม่ครบ รอรอบหน้า
+    let okAll = true;
+    for(const [bucket, u] of urls){
+      const op = objPathOf(u, bucket); if(!op) continue;
+      try{ await deleteObject(bucket, op); }catch(e){ okAll = false; log('  ⚠️ ' + e.message); break; }
+    }
+    if(!okAll){ kept++; continue; }
+    try{ await rpc('nas_mark_pruned', {p_bill_id: b.id, p_nas_path: path.relative(ROOT, billDir)}); pruned++; log('  🧹 ลบไฟล์ใน Supabase ของบิล ' + b.bill_no + ' (จ่ายครบ · สำเนาอยู่ ' + path.relative(ROOT, billDir) + ')'); }
+    catch(e){ log('  ⚠️ บันทึกสถานะบิล ' + b.bill_no + ' ไม่ได้: ' + e.message); }
+  }
+  if(pruned || kept) log('ประหยัดพื้นที่: ลบไฟล์บิลจ่ายครบแล้ว ' + pruned + ' ใบ' + (kept ? ' · รอ ' + kept + ' ใบ (ยังไม่ครบ/ยังไม่ถึงเวลา)' : ''));
+  return {pruned};
+}
+
+// (2) รูปสินค้า + สื่อบรอดแคสต์ (bucket products)
+async function syncMedia(ROOT){
+  let saved = 0, skipped = 0, failed = 0, pruned = 0;
+  const base = path.join(ROOT, MEDIA_DIR);
+  const products = await api('/rest/v1/products?select=id,sku,name,image_url&image_url=not.is.null&limit=10000');
+  const pdir = path.join(base, 'สินค้า'); fs.mkdirSync(pdir, {recursive: true});
+  const referenced = new Set();
+  for(const p of products){
+    const op = objPathOf(p.image_url, 'products'); if(op) referenced.add(op);
+    const name = safeName((p.sku || p.id) + '_' + (p.name || '')).slice(0, 60) + '_' + shortHash(p.image_url) + extOf(p.image_url);
+    const dest = path.join(pdir, name);
+    if(fs.existsSync(dest)){ skipped++; continue; }
+    try{ await download(p.image_url, dest); saved++; }catch(e){ failed++; log('  ⚠️ โหลดรูปสินค้า ' + (p.sku || p.id) + ' ไม่ได้ — ' + e.message); }
+  }
+  // ไฟล์อื่นใน bucket products = สื่อบรอดแคสต์/โปรโมชั่น (ชื่อขึ้นต้น broadcast-/media-/promo-…)
+  let objs = [];
+  try{ objs = await rpc('nas_list_objects', {p_bucket: 'products'}); }catch(e){ log('⚠️ อ่านรายชื่อไฟล์ใน products ไม่ได้: ' + e.message); return {saved, skipped, failed, pruned}; }
+  const cutoff = Date.now() - PRUNE_BROADCAST_DAYS * 24 * 3600 * 1000;
+  for(const o of objs){
+    if(referenced.has(o.name)) continue;                        // รูปสินค้าที่ยังใช้อยู่ เก็บไว้ข้างบนแล้ว ไม่ลบ
+    const url = SUPABASE_URL + '/storage/v1/object/public/products/' + o.name.split('/').map(encodeURIComponent).join('/');
+    const {y, m} = thDate(o.created_at);
+    const dir = path.join(base, 'บรอดแคสต์', y + '-' + m); fs.mkdirSync(dir, {recursive: true});
+    const dest = path.join(dir, safeName(o.name.replace(/\//g, '_')));
+    if(!fs.existsSync(dest)){
+      try{ await download(url, dest); saved++; log('  💾 ' + path.join(MEDIA_DIR, 'บรอดแคสต์', y + '-' + m, path.basename(dest))); }
+      catch(e){ failed++; log('  ⚠️ โหลดสื่อ ' + o.name + ' ไม่ได้ — ' + e.message); continue; }
+    }else skipped++;
+    if(new Date(o.created_at).getTime() < cutoff && onNas(dest)){
+      try{ await deleteObject('products', o.name); pruned++; log('  🧹 ลบสื่อบรอดแคสต์ออกจาก Supabase: ' + o.name); }
+      catch(e){ log('  ⚠️ ' + e.message); }
+    }
+  }
+  return {saved, skipped, failed, pruned};
+}
+
+// (3) รายจ่าย Petty Cash: CSV รายเดือน + รูปใบเสร็จ ในโฟลเดอร์ รายจ่าย/ปี/ปี-เดือน
+async function syncExpenses(ROOT){
+  let saved = 0, skipped = 0, failed = 0;
+  const cats = {}; try{ (await api('/rest/v1/expense_categories?select=id,name&limit=1000')).forEach(c => cats[c.id] = c.name); }catch(e){}
+  const rows = await api('/rest/v1/petty_cash?select=*&order=spent_at.asc&limit=50000');
+  if(!rows.length) return {saved, skipped, failed};
+  const byMonth = {};
+  rows.forEach(r => { const ym = String(r.spent_at || r.created_at || '').slice(0, 7); if(ym) (byMonth[ym] = byMonth[ym] || []).push(r); });
+  const nowYm = thDate(new Date().toISOString()); const curYm = nowYm.y + '-' + nowYm.m;
+  for(const [ym, list] of Object.entries(byMonth)){
+    const dir = path.join(ROOT, EXP_DIR, ym.slice(0, 4), ym);
+    const csvPath = path.join(dir, 'รายจ่าย_' + ym + '.csv');
+    const monthsAgo = (Number(curYm.slice(0,4)) - Number(ym.slice(0,4))) * 12 + (Number(curYm.slice(5,7)) - Number(ym.slice(5,7)));
+    if(fs.existsSync(csvPath) && monthsAgo > 1){ skipped += list.length; continue; }   // เดือนเก่ากว่า 1 เดือนที่มี CSV แล้ว ไม่ต้องทำซ้ำ
+    fs.mkdirSync(dir, {recursive: true});
+    const head = ['วันที่','หมวด','รายละเอียด','ร้านค้า','จำนวนเงิน','วิธีจ่าย','ผู้จ่าย','เลขอ้างอิง','หมายเหตุ','บันทึกโดย','ไฟล์ใบเสร็จ'];
+    const lines = [head.map(csvCell).join(',')]; let total = 0;
+    for(const r of list){
+      let rname = '';
+      if(r.receipt_url){
+        rname = safeName(String(r.spent_at || '').slice(0, 10) + '_' + (cats[r.category_id] || 'ไม่ระบุหมวด') + '_' + Number(r.amount || 0) + '_' + r.id) + extOf(r.receipt_url);
+        const dest = path.join(dir, rname);
+        if(!fs.existsSync(dest)){ try{ await download(r.receipt_url, dest); saved++; }catch(e){ failed++; rname = '(โหลดไม่ได้)'; } }
+      }
+      total += Number(r.amount || 0);
+      lines.push([String(r.spent_at || '').slice(0, 10), cats[r.category_id] || '', r.description || '', r.vendor || '', Number(r.amount || 0),
+        r.pay_method === 'cash' ? 'เงินสด' : (r.pay_method === 'transfer' ? 'โอน' : (r.pay_method || '')), r.paid_by || '', r.ref_no || '', r.note || '', r.created_by || '', rname].map(csvCell).join(','));
+    }
+    lines.push('', ['', 'รวมรายจ่ายเดือน ' + ym, '', '', total].map(csvCell).join(','));
+    fs.writeFileSync(csvPath, '\uFEFF' + lines.join('\r\n'));
+  }
+  return {saved, skipped, failed};
+}
+
+// (4) สำรองตารางข้อมูลเป็น CSV + JSON ทุก BACKUP_EVERY_DAYS วัน
+function toCsv(rows){
+  if(!rows || !rows.length) return '\uFEFF';
+  const cols = [...new Set(rows.flatMap(r => Object.keys(r)))];
+  const cell = v => csvCell(v !== null && typeof v === 'object' ? JSON.stringify(v) : v);
+  return '\uFEFF' + [cols.map(csvCell).join(','), ...rows.map(r => cols.map(c => cell(r[c])).join(','))].join('\r\n');
+}
+async function backupTables(ROOT){
+  const base = path.join(ROOT, BACKUP_DIR); fs.mkdirSync(base, {recursive: true});
+  const marks = fs.readdirSync(base, {withFileTypes: true}).filter(d => d.isDirectory()).map(d => d.name).filter(n => /^\d{4}-\d{2}-\d{2}$/.test(n)).sort();
+  const last = marks[marks.length - 1];
+  const today = thDate(new Date().toISOString()); const todayStr = today.y + '-' + today.m + '-' + today.d;
+  if(last && (new Date(todayStr) - new Date(last)) / 86400000 < BACKUP_EVERY_DAYS) return {done: false};
+  const data = await rpc('nas_export_backup');
+  const dir = path.join(base, todayStr); fs.mkdirSync(dir, {recursive: true});
+  let n = 0;
+  for(const [table, rows] of Object.entries(data || {})){
+    if(!Array.isArray(rows)) continue;
+    fs.writeFileSync(path.join(dir, table + '.json'), JSON.stringify(rows));
+    fs.writeFileSync(path.join(dir, table + '.csv'), toCsv(rows));
+    n++;
+  }
+  log('💽 สำรองข้อมูล ' + n + ' ตาราง → ' + path.join(BACKUP_DIR, todayStr));
+  return {done: true, tables: n};
+}
+
 let running = false;
 async function syncOnce(){
   if(running) return true;
@@ -353,6 +525,14 @@ async function syncOnce(){
     catch(e){ log('⚠️ เก็บข้อมูลลูกค้าเครดิตไม่สำเร็จ: ' + (e.message || e) + ' (รัน mix888-credit-docs.sql หรือยัง?)'); }
     try{ const r = await syncStatements(ROOT); saved += r.saved; skipped += r.skipped; failed += r.failed; }
     catch(e){ log('⚠️ เก็บใบวางบิลไม่สำเร็จ: ' + (e.message || e) + ' (รัน mix888-credit-statement.sql หรือยัง?)'); }
+    try{ const r = await syncMedia(ROOT); saved += r.saved; skipped += r.skipped; failed += r.failed; }
+    catch(e){ log('⚠️ เก็บสื่อสินค้าไม่สำเร็จ: ' + (e.message || e)); }
+    try{ const r = await syncExpenses(ROOT); saved += r.saved; skipped += r.skipped; failed += r.failed; }
+    catch(e){ log('⚠️ เก็บรายจ่ายไม่สำเร็จ: ' + (e.message || e)); }
+    try{ await pruneBills(ROOT); }
+    catch(e){ log('⚠️ ลบไฟล์บิลจ่ายครบไม่สำเร็จ: ' + (e.message || e)); }
+    try{ await backupTables(ROOT); }
+    catch(e){ log('⚠️ สำรองข้อมูลไม่สำเร็จ: ' + (e.message || e) + ' (รัน mix888-nas-archiver-v2.sql หรือยัง?)'); }
 
     log('✅ ซิงก์เสร็จใน ' + Math.round((Date.now()-t0)/1000) + ' วิ — ไฟล์ใหม่ ' + saved
         + ' · มีอยู่แล้ว ' + skipped + (failed ? ' · โหลดพลาด ' + failed + ' (จะลองใหม่รอบหน้า)' : ''));
