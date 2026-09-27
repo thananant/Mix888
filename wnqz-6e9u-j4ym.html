@@ -279,7 +279,6 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div class="msub">
         <div class="mi" data-page="customers" onclick="showPage('customers')"><span class="ic">👥</span>ลูกค้า</div>
         <div class="mi" data-page="pricing" onclick="showPage('pricing')"><span class="ic">🏷️</span>จัดสินค้า</div>
-        <div class="mi" data-page="shipcalc" onclick="showPage('shipcalc')"><span class="ic">🚚</span>คำนวณค่าส่ง</div>
         <div class="mi" data-page="crm" onclick="showPage('crm')"><span class="ic">📇</span>ลูกค้า CRM</div>
         <div class="mi" data-page="custhist" onclick="showPage('custhist')"><span class="ic">🧾</span>ประวัติสั่งซื้อ</div>
         <div class="mi" data-page="custmap" onclick="showPage('custmap')"><span class="ic">🗺️</span>แผนที่ลูกค้า</div>
@@ -966,44 +965,6 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <thead><tr><th style="width:48px">รูป</th><th>SKU</th><th>สินค้า</th><th>หน่วย</th><th class="num" style="width:130px" title="ราคาซื้อล่าสุด — ใช้เป็นทุนตั้งต้นและสำรองเมื่อไม่มีลอต">ราคาซื้อล่าสุด</th><th class="num" title="ทุนเฉลี่ยของลอตที่เหลืออยู่ (FIFO)">ทุน FIFO เฉลี่ย</th><th class="num">คงเหลือ(ลอต)</th><th class="num">ราคาขายกลาง</th><th class="num">กำไร/หน่วย</th><th class="num">มาร์จิ้น</th><th style="width:36px"></th></tr></thead>
       <tbody id="cost-body"></tbody>
     </table></div>
-  </div>
-</div>
-
-<div class="page" id="page-shipcalc">
-  <div class="pagehead"><h2>🚚 คำนวณค่าส่ง BI</h2></div>
-  <div class="card">
-    <div class="row" style="align-items:flex-end;margin-bottom:10px">
-      <div style="min-width:230px"><label>ลูกค้า (เลือกแล้วเรทตั้งให้อัตโนมัติ)</label>
-        <select id="shc-cust" style="width:100%" onchange="shcPickCust()"><option value="">— ไม่เลือก —</option></select></div>
-      <div style="min-width:190px"><label>เรทค่าส่ง</label>
-        <select id="shc-rate" style="width:100%" onchange="shcCalc()">
-          <option value="other">เรทอื่นๆ (1ลัง=100 · คู่=50/ลัง)</option>
-          <option value="upc">เรทรวมส่งตจว (คู่=10 · เศษคี่=20 · ใหญ่=20)</option>
-        </select></div>
-    </div>
-
-    <div class="row" style="align-items:flex-end;margin-bottom:8px">
-      <div style="flex:1;min-width:240px"><label>เพิ่มจากสินค้าจริง (รู้ชิ้นใหญ่อัตโนมัติ)</label>
-        <input id="shc-add" list="shc-prodlist" placeholder="พิมพ์ชื่อหรือ SKU…" style="width:100%">
-        <datalist id="shc-prodlist"></datalist></div>
-      <div><label>จำนวนลัง</label><input id="shc-add-qty" type="number" min="1" value="1" class="num" style="width:80px"></div>
-      <button class="btn-s" onclick="shcAdd()">+ เพิ่ม</button>
-    </div>
-    <div id="shc-items"></div>
-
-    <div class="row" style="align-items:flex-end;margin:12px 0 4px">
-      <div><label>หรือกรอกเองเร็วๆ — ลังปกติ</label><input id="shc-qnormal" type="number" min="0" value="0" class="num" style="width:110px" oninput="shcCalc()"></div>
-      <div><label>ลังชิ้นใหญ่</label><input id="shc-qbig" type="number" min="0" value="0" class="num" style="width:110px" oninput="shcCalc()"></div>
-    </div>
-
-    <div id="shc-result" style="margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:12px;background:#faf7f2">
-      <div style="font-size:14px;color:var(--muted)">ใส่จำนวนลังหรือเพิ่มสินค้า แล้วผลจะคำนวณให้ทันที</div>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn-g" onclick="shcCopy()">📋 คัดลอกผล</button>
-      <button class="btn-g" onclick="shcClear()">ล้าง</button>
-    </div>
-    <p class="hint" style="margin-top:10px">สูตร — <b>เรทรวมส่งตจว:</b> ลังปกติจับคู่ละ 10 บาท/ลัง เศษคี่ตัวสุดท้าย 20 บาท · ชิ้นใหญ่ 20 บาท/ลังทั้งหมด (ติ๊ก "ชิ้นใหญ่" ในหน้าสินค้า) &nbsp;|&nbsp; <b>เรทอื่นๆ:</b> 1 ลัง = 100 บาท · เลขคู่ 50 บาท/ลัง · เลขคี่ = (n−1)×50 + 100 · นับเฉพาะหน่วยลัง (ตัวปลีก S ไม่นับ)</p>
   </div>
 </div>
 
@@ -3287,7 +3248,7 @@ async function loadProducts(){
     fetchAllPages(()=>db.from('stock').select('product_id,warehouse_id,qty')).then(r=>({data:r}),e=>({data:null,error:e})),
   ]);
   products = (data||[]).sort(byThaiName);
-  qtInit(); shcInit();
+  qtInit();
   try{
     stockByProd={};
     (stRes.data||[]).forEach(s=>{(stockByProd[s.product_id]=stockByProd[s.product_id]||{})[s.warehouse_id]=Number(s.qty)||0;});
@@ -3808,7 +3769,7 @@ async function loadCustomers(){
   if(!Object.keys(lineGroupNames).length)await loadLineGroupNames().catch(()=>{});
   const data=await fetchAllPages(()=>db.from('customers').select('*').order('code'));
   customers=data||[];
-  qtInit(); shcInit(); fillParentSelect(editCustomerId||null);
+  qtInit(); fillParentSelect(editCustomerId||null);
   renderCustomers();
   // นับราคาพิเศษเบื้องหลัง — ไม่ถ่วงหน้าแรก (ดึงทีละหน้าให้ครบ เพราะค่าเริ่มต้นตัดที่ 1,000 แถว)
   const pcg=window._pcGen=(window._pcGen||0)+1;
@@ -8225,8 +8186,7 @@ async function saveCosts(btn){
   renderCost();
 }
 
-/* ==================== หน้าคำนวณค่าส่ง BI ==================== */
-let shcItems=[];
+/* ==================== คำนวณค่าส่ง BI (ใช้ในหน้าทำบิล — เมนูคำนวณค่าส่งถูกเอาออกแล้ว) ==================== */
 function calcBIShipRaw(big,normal,rateKey){
   let fee=0,detail=[];
   big=Math.max(0,Math.floor(big));normal=Math.max(0,Math.floor(normal));
@@ -8248,65 +8208,6 @@ function calcBIShipRaw(big,normal,rateKey){
   }
   return {fee,detail,cases:big+normal,big,normal};
 }
-function shcInit(){
-  const sel=document.getElementById('shc-cust');
-  if(sel&&customers.length&&sel.options.length<=1){
-    sel.innerHTML='<option value="">— ไม่เลือก —</option>'+customers.filter(c=>c.active!==false)
-      .map(c=>`<option value="${c.id}">${esc(c.code)} · ${esc(c.name)} (${c.price_group==='upc'?'เรทตจว':'เรทปกติ'})</option>`).join('');
-  }
-  const dl=document.getElementById('shc-prodlist');
-  if(dl)dl.innerHTML=products.filter(p=>p.active!==false&&skuSuffix(p.sku)!=='S')
-    .map(p=>`<option value="${esc(p.sku)} · ${esc(p.name)}${p.is_big?' [ใหญ่]':''}"></option>`).join('');
-}
-function shcPickCust(){
-  const c=customers.find(x=>x.id===Number(document.getElementById('shc-cust').value));
-  if(c)document.getElementById('shc-rate').value=(c.price_group==='upc')?'upc':'other';
-  shcCalc();
-}
-function shcAdd(){
-  const val=document.getElementById('shc-add').value.trim();
-  if(!val){toast('พิมพ์เลือกสินค้าก่อน');return;}
-  const sku=val.split('·')[0].trim();
-  const p=products.find(x=>x.sku===sku);
-  if(!p){toast('ไม่พบสินค้า — เลือกจากรายการที่ขึ้น');return;}
-  if(skuSuffix(p.sku)==='S'){toast('ตัวปลีก (S) ไม่นับลัง ไม่คิดค่าส่ง BI');return;}
-  const qty=Math.max(1,Number(document.getElementById('shc-add-qty').value)||1);
-  const ex=shcItems.find(x=>x.product_id===p.id);
-  if(ex)ex.qty+=qty;
-  else shcItems.push({product_id:p.id,sku:p.sku,name:p.name,qty,big:!!p.is_big});
-  document.getElementById('shc-add').value='';document.getElementById('shc-add-qty').value=1;
-  shcRender();
-}
-function shcRender(){
-  const el=document.getElementById('shc-items');
-  el.innerHTML=!shcItems.length?'':'<table style="margin-top:4px"><tbody>'+shcItems.map((it,i)=>`<tr>
-    <td>${esc(it.name)} ${it.big?'<span class="tag tag-low">ชิ้นใหญ่</span>':''}<span style="color:var(--muted);font-size:12px"> ${esc(it.sku)}</span></td>
-    <td class="num"><input type="number" min="1" value="${it.qty}" class="num" style="width:70px" onchange="shcItems[${i}].qty=Math.max(1,Number(this.value)||1);shcRender()"> ลัง</td>
-    <td style="width:36px"><button class="btn-d mini" onclick="shcItems.splice(${i},1);shcRender()">✕</button></td></tr>`).join('')+'</tbody></table>';
-  shcCalc();
-}
-function shcCalc(){
-  const big=shcItems.filter(x=>x.big).reduce((s,x)=>s+x.qty,0)+(Number(document.getElementById('shc-qbig').value)||0);
-  const normal=shcItems.filter(x=>!x.big).reduce((s,x)=>s+x.qty,0)+(Number(document.getElementById('shc-qnormal').value)||0);
-  const rate=document.getElementById('shc-rate').value;
-  const el=document.getElementById('shc-result');
-  if(!big&&!normal){el.innerHTML='<div style="font-size:14px;color:var(--muted)">ใส่จำนวนลังหรือเพิ่มสินค้า แล้วผลจะคำนวณให้ทันที</div>';window._shcText='';return;}
-  const r=calcBIShipRaw(big,normal,rate);
-  el.innerHTML=`<div style="font-size:14px">รวม <b>${r.cases}</b> ลัง (ปกติ ${r.normal} / ชิ้นใหญ่ ${r.big}) · ${rate==='upc'?'เรทรวมส่งตจว':'เรทอื่นๆ'}</div>
-    <div style="font-size:13.5px;color:var(--muted);margin:6px 0">${r.detail.join('<br>')}</div>
-    <div style="font-size:22px;font-weight:800">ค่าส่ง = ฿${fmt(r.fee)}</div>`;
-  window._shcText='ค่าส่ง BI ('+(rate==='upc'?'เรทรวมส่งตจว':'เรทอื่นๆ')+') รวม '+r.cases+' ลัง = '+r.detail.join(' | ')+' → ฿'+fmt(r.fee);
-}
-async function shcCopy(){
-  if(!window._shcText){toast('ยังไม่มีผลให้คัดลอก');return;}
-  try{await navigator.clipboard.writeText(window._shcText);toast('คัดลอกผลแล้ว ✓');}
-  catch(e){prompt('คัดลอก:',window._shcText);}
-}
-function shcClear(){
-  shcItems=[];document.getElementById('shc-qnormal').value=0;document.getElementById('shc-qbig').value=0;
-  document.getElementById('shc-cust').value='';shcRender();
-}
-
 /* ==================== ใบเสนอราคา ==================== */
 let qtItems=[];
 function qtInit(){
