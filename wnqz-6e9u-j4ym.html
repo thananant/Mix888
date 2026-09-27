@@ -157,6 +157,8 @@ tr:hover td{background:#fcf8f4}
 #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 22px;border-radius:99px;font-weight:500;opacity:0;transition:opacity .25s;pointer-events:none;z-index:60;max-width:92vw;text-align:center}
 #toast.show{opacity:1}
 .hint{font-size:13px;color:var(--muted);margin-top:8px;line-height:1.6}
+.req-miss{border-color:var(--danger)!important;background:var(--danger-soft)!important;box-shadow:0 0 0 3px rgba(220,60,60,.12)}
+.req-star{color:var(--danger);font-weight:700}
 .count{font-size:13px;color:var(--muted);font-weight:500}
 .price-in{width:100px;text-align:right}
 .price-in:disabled{background:#f5f0ea;color:var(--muted)}
@@ -663,9 +665,11 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ ลูกค้า ============ -->
 <div class="page" id="page-customers">
-  <div class="pagehead"><h2>ลูกค้า</h2></div>
-  <div class="card">
-    <h3 class="ct" id="cust-form-title">เพิ่มลูกค้า</h3>
+  <div class="pagehead"><h2>ลูกค้า</h2>
+    <button class="btn-p" id="c-add-btn" onclick="openCustomerForm()">➕ เพิ่มลูกค้า</button>
+  </div>
+  <div class="card" id="cust-form-card" style="display:none">
+    <h3 class="ct" id="cust-form-title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span id="cust-form-title-txt">เพิ่มลูกค้า</span><button class="btn-g mini" style="margin-left:auto" onclick="closeCustomerForm()">✕ ปิด</button></h3>
     <div class="row">
       <div id="c-prefix-wrap"><label>รหัสลูกค้า (รันจากรหัสเซลล์)</label><input id="c-prefix" style="width:150px;background:#f5f0ea" readonly placeholder="เลือกเซลล์ก่อน"></div>
       <div id="c-code-wrap" style="display:none"><label>รหัสลูกค้า</label><input id="c-code" style="width:130px;background:#f5f0ea" readonly></div>
@@ -675,6 +679,43 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div><label>กลุ่มราคา</label><select id="c-pgroup"><option value="base">ราคากลาง</option><option value="r20">เรท 20 ลัง</option><option value="r50">เรท 50 ลัง</option><option value="upc">รวมส่งตจว</option></select></div>
     </div>
     <p class="hint">เลือกเซลล์ก่อน → รหัสลูกค้าจะรันต่อจากรหัสเซลล์อัตโนมัติ เช่น เซลล์รหัส AAA → ลูกค้าได้ AAA00001, AAA00002 …</p>
+
+    <h3 class="ct" style="margin-top:16px">💳 ประเภทการชำระเงิน</h3>
+    <div class="row">
+      <div><label>ลูกค้าประเภท</label><select id="c-paytype" onchange="cPayUI()" style="min-width:190px">
+        <option value="prepay">1. จ่ายก่อนส่ง</option>
+        <option value="postpay">2. จ่ายหลังส่ง</option>
+        <option value="credit">3. เครดิต</option></select></div>
+      <div id="c-credit-mode-wrap" style="display:none"><label>รูปแบบเครดิต</label><select id="c-credit-mode" onchange="cPayUI()" style="min-width:230px">
+        <option value="days">เครดิตตามจำนวนวัน</option>
+        <option value="schedule">เครดิตตามรอบวางบิล (ตารางทั้งปี)</option></select></div>
+      <div id="c-credit-days-wrap" style="display:none"><label>จำนวนวันเครดิต (นับจากวันส่งของ)</label><input id="c-credit-days" type="number" min="1" max="365" step="1" class="num" style="width:120px" placeholder="เช่น 30"></div>
+    </div>
+    <div id="c-credit-sched" style="display:none;margin-top:10px;background:#faf5f1;border:1px solid #f0e4dc;border-radius:12px;padding:12px">
+      <div class="row">
+        <div><label>ปี (พ.ศ.)</label><select id="cs-year" onchange="csYearChanged()" style="width:110px"></select></div>
+        <div><label>วางบิลทุกวันที่</label><select id="cs-bill-day" style="width:120px"></select></div>
+        <div><label>ยอดรอบ: ตัดยอดถึงวันที่</label><select id="cs-cut-day" style="width:120px" title="ยอดขายตั้งแต่วันถัดจากวันตัดยอดครั้งก่อน ถึงวันตัดยอดของเดือนนี้ — ปกติ = วันวางบิล หรือก่อนวางบิล 1–2 วัน"></select></div>
+        <div><label>ลูกค้าชำระ</label><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <select id="cs-due-mode" onchange="csDueModeUI()" style="min-width:160px"><option value="after">หลังวางบิล … วัน</option><option value="fixed">วันที่ … ของเดือนถัดไป</option><option value="same">วันที่ … ของเดือนเดียวกัน</option></select>
+          <input id="cs-due-n" type="number" min="0" max="120" step="1" class="num" style="width:80px" value="30">
+          <select id="cs-due-day" style="width:100px;display:none"></select>
+        </div></div>
+        <div style="align-self:flex-end"><button class="btn-s" onclick="csGenerate()">📅 สร้างตารางทั้งปี</button></div>
+      </div>
+      <p class="hint" style="margin-top:6px">สร้างตารางแล้วแก้รายงวดได้ทุกช่อง (เช่น เลื่อนวันหยุด) · วันที่ 31 ของเดือนที่ไม่มี = ใช้วันสิ้นเดือนแทน · เพิ่ม/ลบงวดเองได้</p>
+      <div style="overflow-x:auto;margin-top:8px">
+      <table id="cs-table" style="font-size:13.5px">
+        <thead><tr><th style="width:52px">งวด</th><th>ยอดตั้งแต่วันที่</th><th>ถึงวันที่</th><th>วางบิลวันที่</th><th>ลูกค้าชำระวันที่</th><th class="num">ระยะเครดิต</th><th></th></tr></thead>
+        <tbody id="cs-body"><tr><td colspan="7" style="color:var(--muted);text-align:center;padding:14px">ยังไม่มีตาราง — ตั้งค่าด้านบนแล้วกด "สร้างตารางทั้งปี" หรือกด "เพิ่มงวด"</td></tr></tbody>
+      </table>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn-g mini" onclick="csAddRow()">➕ เพิ่มงวด</button>
+        <button class="btn-g mini" onclick="csClear()">🗑 ล้างตาราง</button>
+        <span class="count" id="cs-count"></span>
+      </div>
+    </div>
 
     <h3 class="ct" style="margin-top:16px">🧾 ข้อมูลออกบิล</h3>
     <div class="row">
@@ -743,6 +784,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div class="row" style="margin-bottom:12px;align-items:center">
       <input id="c-search" placeholder="ค้นหาลูกค้า…" style="flex:1;min-width:200px" oninput="renderCustomers()">
       <button class="btn-s mini" id="c-noline-btn" onclick="openNoLineModal()" title="กดดูรายชื่อร้านที่ยังไม่ผูกกลุ่มไลน์ แยกตามเซลล์">🔗 ยังไม่ผูกกลุ่ม</button>
+      <button class="btn-d mini" id="c-incomplete-btn" onclick="toggleIncompleteFilter()" title="ลูกค้าที่ข้อมูลออกบิล/จัดส่งยังกรอกไม่ครบ — กดเพื่อกรองดูเฉพาะรายการนี้">⚠️ ข้อมูลไม่ครบ</button>
       <span class="count" id="c-count"></span>
     </div>
     <div style="overflow-x:auto">
@@ -4263,6 +4305,10 @@ function renderCustomers(){
   let list=customers.filter(c=>!q||c.name.toLowerCase().includes(q)||c.code.toLowerCase().includes(q));
   const noLine=customers.filter(c=>c.active!==false&&!c.line_group_id);
   if(custNoLineOnly)list=list.filter(c=>c.active!==false&&!c.line_group_id);
+  const incomplete=customers.filter(c=>c.active!==false&&custMissing(c).length);
+  if(custIncompleteOnly)list=list.filter(c=>c.active!==false&&custMissing(c).length);
+  const ib=document.getElementById('c-incomplete-btn');
+  if(ib){ib.textContent=(custIncompleteOnly?'✓ ':'')+'⚠️ ข้อมูลไม่ครบ '+incomplete.length+' ราย';ib.style.display=incomplete.length||custIncompleteOnly?'':'none';ib.style.background=custIncompleteOnly?'#fdecec':'';}
   document.getElementById('c-count').textContent=list.length+' ราย';
   const nb=document.getElementById('c-noline-btn');
   if(nb){nb.textContent=(custNoLineOnly?'✓ ':'')+'🔗 ยังไม่ผูกกลุ่ม '+noLine.length+' ราย';nb.style.background=custNoLineOnly?'#fdf6dd':'';}
@@ -4277,7 +4323,9 @@ function renderCustomers(){
       c.parent_id
         ?' <span class="tag tag-low">🏬 '+esc(c.branch_name||'สาขา')+'</span><div style="font-size:11.5px;color:var(--muted)">สาขาของ '+esc(customers.find(p=>p.id===c.parent_id)?.name||'?')+'</div>'
         :(customers.some(x=>x.parent_id===c.id)?' <span class="tag tag-ov">ร้านแม่ '+customers.filter(x=>x.parent_id===c.id).length+' สาขา</span>':'')
-    }</td>
+    }<div style="margin-top:3px;display:flex;gap:4px;flex-wrap:wrap"><span class="tag ${(c.pay_type||'prepay')==='credit'?'tag-low':(c.pay_type==='postpay'?'tag-ov':'tag-ok')}" style="font-size:11px">💳 ${esc(payTypeLabel(c))}</span>${
+      (()=>{const m=custMissing(c);return m.length?`<span class="tag tag-out" style="font-size:11px;cursor:pointer" onclick="editCustomer(${c.id})" title="ยังว่าง: ${esc(m.map(f=>f.label).join(', '))} — คลิกเพื่อกรอก">⚠️ ข้อมูลไม่ครบ ${m.length} ช่อง</span>`:''})()
+    }</div></td>
     <td>${sname?esc(sname):'<span style="color:var(--muted)">—</span>'}</td>
     <td style="font-variant-numeric:tabular-nums">${c.phone?esc(c.phone):'<span style="color:var(--muted)">—</span>'}</td>
     <td style="font-size:12.5px;color:var(--muted)">${c.line_group_id?esc(c.line_group_id.slice(0,14))+'…':'<span class="tag tag-low">ยังไม่ผูก</span>'}</td>
@@ -4325,7 +4373,8 @@ function copyLineFrom(sel){
 function editCustomer(id){
   const c=customers.find(x=>x.id===id);if(!c)return;
   editCustomerId=id;
-  document.getElementById('cust-form-title').textContent='แก้ไข: '+c.name;
+  document.getElementById('cust-form-card').style.display='';
+  document.getElementById('cust-form-title-txt').textContent='แก้ไข: '+c.name;
   document.getElementById('c-prefix-wrap').style.display='none';
   document.getElementById('c-code-wrap').style.display='';
   document.getElementById('c-code').value=c.code;
@@ -4351,12 +4400,16 @@ function editCustomer(id){
   document.getElementById('c-branch').value=c.branch_name||'';
   cParentUI();
   document.getElementById('c-note').value=c.note||'';
+  setPayTerms(c);
   // ที่อยู่แยกช่อง — บิล
   fillAddr('cb',{name:c.bill_addr_name,no:c.bill_no,soi:c.bill_soi,road:c.bill_road,
     postcode:c.bill_postcode,subdistrict:c.bill_subdistrict,district:c.bill_district,province:c.bill_province});
   // ที่อยู่แยกช่อง — จัดส่ง
   fillAddr('cs',{name:c.ship_addr_name,no:c.ship_no,soi:c.ship_soi,road:c.ship_road,
     postcode:c.ship_postcode,subdistrict:c.ship_subdistrict,district:c.ship_district,province:c.ship_province});
+  custReqInit();
+  const missNow=custMarkMissing(custFormValues(),false);
+  if(missNow.length)toast('⚠️ ลูกค้ารายนี้ข้อมูลยังไม่ครบ '+missNow.length+' ช่อง (กรอบแดง) — กรอกให้ครบก่อนบันทึก');
   showPage('customers');
   window.scrollTo({top:0,behavior:'smooth'});
 }
@@ -4407,9 +4460,19 @@ function setRtime(val){
   document.getElementById('c-rt-tm').value=snap(m[4]);
   composeRtime();
 }
+function openCustomerForm(){
+  custReqInit();
+  resetCustomerForm();
+  document.getElementById('cust-form-card').style.display='';
+  setTimeout(()=>{const el=document.getElementById('c-name');if(el)el.focus();},50);
+}
+function closeCustomerForm(){
+  resetCustomerForm();
+  document.getElementById('cust-form-card').style.display='none';
+}
 function resetCustomerForm(){
   editCustomerId=null;
-  document.getElementById('cust-form-title').textContent='เพิ่มลูกค้า';
+  document.getElementById('cust-form-title-txt').textContent='เพิ่มลูกค้า';
   document.getElementById('c-prefix-wrap').style.display='';
   document.getElementById('c-code-wrap').style.display='none';
   ['c-prefix','c-code','c-name','c-sale','c-line','c-contact','c-phone',
@@ -4426,7 +4489,227 @@ function resetCustomerForm(){
   document.getElementById('c-parent').value='';
   document.getElementById('c-branch').value='';
   cParentUI();
+  setPayTerms(null);
+  CUST_REQUIRED.forEach(f=>custReqEls(f).forEach(e=>e.classList.remove('req-miss')));
 }
+/* ---------- ประเภทการชำระเงิน / เครดิต ---------- */
+// เก็บใน customers: pay_type ('prepay'|'postpay'|'credit') · credit_mode ('days'|'schedule') ·
+// credit_days (int) · credit_schedule (jsonb: [{from,to,bill,due}] วันที่แบบ YYYY-MM-DD)
+const PAY_TYPE_LABEL={prepay:'จ่ายก่อนส่ง',postpay:'จ่ายหลังส่ง',credit:'เครดิต'};
+function payTypeLabel(c){
+  if(!c)return '';
+  const t=c.pay_type||'prepay';
+  if(t!=='credit')return PAY_TYPE_LABEL[t]||t;
+  if(c.credit_mode==='schedule')return 'เครดิต · รอบวางบิล';
+  return 'เครดิต '+(c.credit_days||0)+' วัน';
+}
+function cPayUI(){
+  const t=document.getElementById('c-paytype').value;
+  const m=document.getElementById('c-credit-mode').value;
+  document.getElementById('c-credit-mode-wrap').style.display=t==='credit'?'':'none';
+  document.getElementById('c-credit-days-wrap').style.display=(t==='credit'&&m==='days')?'':'none';
+  document.getElementById('c-credit-sched').style.display=(t==='credit'&&m==='schedule')?'':'none';
+}
+function csDueModeUI(){
+  const mode=document.getElementById('cs-due-mode').value;
+  document.getElementById('cs-due-n').style.display=mode==='after'?'':'none';
+  document.getElementById('cs-due-day').style.display=mode==='after'?'none':'';
+}
+function csInitSelects(){
+  const dayOpts=Array.from({length:31},(_,i)=>`<option value="${i+1}">${i+1===31?'31 / สิ้นเดือน':i+1}</option>`).join('');
+  // เติมตัวเลือกครั้งแรกครั้งเดียว พร้อมค่าเริ่มต้นที่ใช้บ่อย (วางบิล 25 · ตัดยอด 25 · ชำระวันที่ 10 เดือนถัดไป)
+  [['cs-bill-day','25'],['cs-cut-day','25'],['cs-due-day','10']].forEach(([id,def])=>{
+    const el=document.getElementById(id);if(el&&!el.options.length){el.innerHTML=dayOpts;el.value=def;}
+  });
+  const y=new Date().getFullYear();
+  const ySel=document.getElementById('cs-year');
+  if(ySel&&!ySel.options.length){
+    ySel.innerHTML=[y-1,y,y+1,y+2].map(v=>`<option value="${v}">${v+543}</option>`).join('');
+    ySel.value=y;
+  }
+  csDueModeUI();
+}
+function csYearChanged(){
+  // เปลี่ยนปีเฉย ๆ ไม่ลบตารางเดิม — ผู้ใช้กด "สร้างตารางทั้งปี" เองเมื่อพร้อม
+  const rows=csRead();
+  if(rows.length)toast('เปลี่ยนปีแล้ว — กด "สร้างตารางทั้งปี" ถ้าต้องการสร้างของปีนี้ใหม่');
+}
+// วันที่ d ของเดือน (y,m0) — ถ้าเดือนนั้นไม่มีวันที่นั้น ใช้วันสิ้นเดือน
+function csDateOf(y,m0,d){
+  const dt=new Date(y,m0+1,0);              // สิ้นเดือน
+  const last=dt.getDate();
+  return new Date(y,m0,Math.min(d,last));
+}
+function csAddDays(dt,n){const r=new Date(dt);r.setDate(r.getDate()+n);return r;}
+function csGenerate(){
+  const y=Number(document.getElementById('cs-year').value);
+  const billD=Number(document.getElementById('cs-bill-day').value);
+  const cutD=Number(document.getElementById('cs-cut-day').value);
+  const dueMode=document.getElementById('cs-due-mode').value;
+  const dueN=Number(document.getElementById('cs-due-n').value)||0;
+  const dueD=Number(document.getElementById('cs-due-day').value)||1;
+  if(csRead().length&&!confirm('มีตารางอยู่แล้ว — สร้างใหม่ทับของเดิมทั้งหมด?'))return;
+  const rows=[];
+  for(let m=0;m<12;m++){
+    const to=csDateOf(y,m,cutD);
+    const from=csAddDays(csDateOf(y,m-1,cutD),1);    // วันถัดจากวันตัดยอดเดือนก่อน
+    const bill=csDateOf(y,m,billD);
+    let due;
+    if(dueMode==='after')due=csAddDays(bill,dueN);
+    else if(dueMode==='fixed')due=csDateOf(y,m+1,dueD);
+    else due=csDateOf(y,m,dueD);
+    rows.push({from:ymd(from),to:ymd(to),bill:ymd(bill),due:ymd(due)});
+  }
+  csRender(rows);
+  toast('สร้างตารางปี '+(y+543)+' แล้ว 12 งวด — แก้รายงวดได้เลย');
+}
+function csRender(rows){
+  const tb=document.getElementById('cs-body');
+  if(!rows||!rows.length){
+    tb.innerHTML='<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:14px">ยังไม่มีตาราง — ตั้งค่าด้านบนแล้วกด "สร้างตารางทั้งปี" หรือกด "เพิ่มงวด"</td></tr>';
+    document.getElementById('cs-count').textContent='';
+    return;
+  }
+  const inp=(f,v)=>`<input type="date" data-f="${f}" value="${esc(v||'')}" style="width:150px;padding:6px 8px;font-size:13.5px" onchange="csRowChanged(this)">`;
+  tb.innerHTML=rows.map((r,i)=>`<tr data-i="${i}">
+    <td style="color:var(--muted);font-weight:600">${i+1}</td>
+    <td>${inp('from',r.from)}</td><td>${inp('to',r.to)}</td><td>${inp('bill',r.bill)}</td><td>${inp('due',r.due)}</td>
+    <td class="num" data-days style="color:var(--muted);white-space:nowrap">${csDaysText(r)}</td>
+    <td><button class="btn-d mini" onclick="csDelRow(this)" title="ลบงวดนี้">✕</button></td></tr>`).join('');
+  document.getElementById('cs-count').textContent=rows.length+' งวด';
+}
+function csDaysText(r){
+  if(!r.bill||!r.due)return '—';
+  const d=Math.round((new Date(r.due)-new Date(r.bill))/86400000);
+  return isNaN(d)?'—':(d+' วัน');
+}
+function csRowChanged(el){
+  const tr=el.closest('tr');
+  const r={};tr.querySelectorAll('input[data-f]').forEach(i=>r[i.dataset.f]=i.value);
+  const c=tr.querySelector('[data-days]');if(c)c.textContent=csDaysText(r);
+}
+function csRead(){
+  return Array.from(document.querySelectorAll('#cs-body tr[data-i]')).map(tr=>{
+    const r={};tr.querySelectorAll('input[data-f]').forEach(i=>r[i.dataset.f]=i.value||null);return r;
+  });
+}
+function csAddRow(){
+  const rows=csRead();
+  const last=rows[rows.length-1];
+  let r={from:null,to:null,bill:null,due:null};
+  if(last&&last.to&&last.bill&&last.due){
+    // ต่อจากงวดล่าสุด: เลื่อนทุกวันไป 1 เดือน (คงวันที่เดิม / สิ้นเดือนถ้าไม่มี)
+    const shift=v=>{const d=new Date(v);return ymd(csDateOf(d.getFullYear(),d.getMonth()+1,d.getDate()));};
+    r={from:ymd(csAddDays(new Date(last.to),1)),to:shift(last.to),bill:shift(last.bill),due:shift(last.due)};
+  }
+  rows.push(r);csRender(rows);
+  const inputs=document.querySelectorAll('#cs-body tr:last-child input');if(inputs[0])inputs[0].focus();
+}
+function csDelRow(btn){
+  const tr=btn.closest('tr');const i=Number(tr.dataset.i);
+  const rows=csRead();rows.splice(i,1);csRender(rows);
+}
+function csClear(){
+  if(csRead().length&&!confirm('ล้างตารางรอบวางบิลทั้งหมด?'))return;
+  csRender([]);
+}
+// เติมค่าจากลูกค้าลงฟอร์ม (null = ค่าเริ่มต้นสำหรับเพิ่มใหม่)
+function setPayTerms(c){
+  csInitSelects();
+  document.getElementById('c-paytype').value=(c&&c.pay_type)||'prepay';
+  document.getElementById('c-credit-mode').value=(c&&c.credit_mode)||'days';
+  document.getElementById('c-credit-days').value=(c&&c.credit_days)||'';
+  const rows=Array.isArray(c&&c.credit_schedule)?c.credit_schedule:[];
+  csRender(rows);
+  if(rows.length&&rows[0].bill){
+    const y=new Date(rows[0].bill).getFullYear();
+    const ySel=document.getElementById('cs-year');
+    if(ySel&&Array.from(ySel.options).some(o=>Number(o.value)===y))ySel.value=y;
+  }
+  cPayUI();
+}
+// อ่านค่าจากฟอร์มไปใส่ rec — คืน string ข้อความ error ถ้าไม่ผ่าน
+function readPayTerms(rec){
+  const t=document.getElementById('c-paytype').value;
+  rec.pay_type=t;
+  rec.credit_mode=null;rec.credit_days=null;rec.credit_schedule=null;
+  if(t!=='credit')return null;
+  const m=document.getElementById('c-credit-mode').value;
+  rec.credit_mode=m;
+  if(m==='days'){
+    const d=Number(document.getElementById('c-credit-days').value);
+    if(!d||d<1)return 'ใส่จำนวนวันเครดิตก่อน (อย่างน้อย 1 วัน)';
+    rec.credit_days=Math.round(d);
+    return null;
+  }
+  const rows=csRead();
+  if(!rows.length)return 'เครดิตตามรอบวางบิล ต้องมีตารางอย่างน้อย 1 งวด — กด "สร้างตารางทั้งปี"';
+  for(let i=0;i<rows.length;i++){
+    const r=rows[i];
+    if(!r.from||!r.to||!r.bill||!r.due)return 'งวดที่ '+(i+1)+' กรอกวันที่ไม่ครบ';
+    if(r.from>r.to)return 'งวดที่ '+(i+1)+': วันเริ่มยอดต้องไม่เกินวันตัดยอด';
+    if(r.due<r.bill)return 'งวดที่ '+(i+1)+': วันชำระต้องไม่ก่อนวันวางบิล';
+  }
+  rows.sort((a,b)=>a.bill.localeCompare(b.bill));
+  rec.credit_schedule=rows;
+  return null;
+}
+/* ---------- ช่องที่ต้องกรอกให้ครบ (ข้อมูลออกบิล + ข้อมูลจัดส่ง) ----------
+   key = ชื่อคอลัมน์ใน customers · id = ช่องในฟอร์ม · ids = ช่องที่ต้องไฮไลต์ (ถ้าไม่ใช่ id เดียว) · label = ข้อความเตือน
+   เจ้าของสั่ง: ยกเว้นแค่ เลขผู้เสียภาษี / ซอย / ถนน / หมายเหตุ — ที่เหลือบังคับทั้งหมด */
+const CUST_REQUIRED=[
+  {key:'contact_name',id:'c-contact',label:'ชื่อลูกค้า (ผู้ติดต่อ)'},
+  {key:'phone',id:'c-phone',label:'เบอร์โทร (บิล)'},
+  {key:'bill_addr_name',id:'cb-name',label:'ชื่อสถานที่/อาคาร (บิล)'},
+  {key:'bill_no',id:'cb-no',label:'เลขที่ (บิล)'},
+  {key:'bill_postcode',id:'cb-postcode',label:'รหัสไปรษณีย์ (บิล)'},
+  {key:'bill_subdistrict',id:'cb-subdistrict',label:'ตำบล/แขวง (บิล)'},
+  {key:'bill_district',id:'cb-district',label:'อำเภอ/เขต (บิล)'},
+  {key:'bill_province',id:'cb-province',label:'จังหวัด (บิล)'},
+  {key:'ship_shop_name',id:'c-shipshop',label:'ชื่อร้าน (จุดส่ง)'},
+  {key:'ship_receiver',id:'c-receiver',label:'ชื่อผู้รับของ'},
+  {key:'ship_phone',id:'c-shipphone',label:'เบอร์ผู้รับ'},
+  {key:'ship_addr_name',id:'cs-name',label:'ชื่อสถานที่/อาคาร (จัดส่ง)'},
+  {key:'ship_no',id:'cs-no',label:'เลขที่ (จัดส่ง)'},
+  {key:'ship_postcode',id:'cs-postcode',label:'รหัสไปรษณีย์ (จัดส่ง)'},
+  {key:'ship_subdistrict',id:'cs-subdistrict',label:'ตำบล/แขวง (จัดส่ง)'},
+  {key:'ship_district',id:'cs-district',label:'อำเภอ/เขต (จัดส่ง)'},
+  {key:'ship_province',id:'cs-province',label:'จังหวัด (จัดส่ง)'},
+  {key:'map_link',id:'c-map',label:'Google Map Link'},
+  {key:'receive_time',id:'c-rtime',ids:['c-rt-fh','c-rt-fm','c-rt-th','c-rt-tm'],label:'เวลารับของ'}];
+// รายการช่องที่ยังว่างของลูกค้า (ใช้ได้ทั้ง rec จากฟอร์ม และแถวจากฐานข้อมูล)
+function custMissing(c){
+  return CUST_REQUIRED.filter(f=>!String(c[f.key]??'').trim());
+}
+function custReqEls(f){return (f.ids||[f.id]).map(id=>document.getElementById(id)).filter(Boolean);}
+// ใส่ * แดงหลังป้ายชื่อช่องที่บังคับ + ล้างกรอบแดงทันทีที่กรอกครบ (ทำครั้งเดียว)
+function custReqInit(){
+  if(window._custReqInited)return;window._custReqInited=true;
+  CUST_REQUIRED.forEach(f=>{
+    const el=document.getElementById(f.id);if(!el)return;
+    const lb=el.parentElement&&el.parentElement.querySelector('label');
+    if(lb&&!lb.querySelector('.req-star'))lb.insertAdjacentHTML('beforeend',' <span class="req-star">*</span>');
+    const clear=()=>{if(el.value.trim())custReqEls(f).forEach(e=>e.classList.remove('req-miss'));};
+    custReqEls(f).forEach(e=>{e.addEventListener('input',clear);e.addEventListener('change',()=>setTimeout(clear,0));});
+  });
+}
+// ไฮไลต์ช่องที่ว่างในฟอร์ม — คืนจำนวนช่องที่ว่าง
+function custMarkMissing(rec,scroll){
+  CUST_REQUIRED.forEach(f=>custReqEls(f).forEach(e=>e.classList.remove('req-miss')));
+  const miss=custMissing(rec);
+  miss.forEach(f=>custReqEls(f).forEach(e=>e.classList.add('req-miss')));
+  if(miss.length&&scroll){
+    const first=custReqEls(miss[0])[0];
+    if(first){first.scrollIntoView({behavior:'smooth',block:'center'});setTimeout(()=>first.focus({preventScroll:true}),350);}
+  }
+  return miss;
+}
+// ค่าที่กรอกในฟอร์มตอนนี้ (สำหรับไฮไลต์ตอนเปิดแก้ไขลูกค้าเก่า)
+function custFormValues(){
+  const r={};CUST_REQUIRED.forEach(f=>{const el=document.getElementById(f.id);r[f.key]=el?el.value:'';});return r;
+}
+let custIncompleteOnly=false;
+function toggleIncompleteFilter(){custIncompleteOnly=!custIncompleteOnly;if(custIncompleteOnly)custNoLineOnly=false;renderCustomers();}
 function copyBillToShip(){
   document.getElementById('c-shipshop').value=document.getElementById('c-name').value;
   document.getElementById('c-receiver').value=document.getElementById('c-contact').value;
@@ -4498,6 +4781,10 @@ async function saveCustomer(){
     rec.slug=slugRaw;
   }else rec.slug=null;
   if(!rec.name){toast('กรอกชื่อร้านก่อน');return;}
+  const miss=custMarkMissing(rec,true);
+  if(miss.length){toast('⚠️ กรอกข้อมูลออกบิล/จัดส่งให้ครบก่อน — ยังว่าง '+miss.length+' ช่อง: '+miss.slice(0,4).map(f=>f.label).join(', ')+(miss.length>4?' …':''));return;}
+  const payErr=readPayTerms(rec);
+  if(payErr){toast(payErr);return;}
   if(phone&&!/^[0-9]{10}$/.test(phone)){toast('เบอร์โทรออกบิลต้องเป็นตัวเลข 10 หลักเท่านั้น');return;}
   if(shipPhone&&!/^[0-9]{10}$/.test(shipPhone)){toast('เบอร์ผู้รับของต้องเป็นตัวเลข 10 หลักเท่านั้น');return;}
   if(rec.tax_id&&!/^[0-9]{13}$/.test(rec.tax_id)){toast('เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก');return;}
@@ -4553,7 +4840,7 @@ async function saveCustomer(){
   const {error}=await q;
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
   toast((editCustomerId?'อัพเดตลูกค้าแล้ว':'เพิ่มลูกค้า '+rec.code+' แล้ว')+(ml?' · 📍 ปักหมุดตามลิงก์แผนที่แล้ว':''));
-  resetCustomerForm(); loadCustomers();
+  closeCustomerForm(); loadCustomers();
 }
 async function deleteCustomer(id){
   const c=customers.find(x=>x.id===id);if(!c)return;
