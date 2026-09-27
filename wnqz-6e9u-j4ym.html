@@ -1051,7 +1051,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 </div>
 
 <div class="page" id="page-plan">
-  <div class="pagehead"><h2>📅 แพลนการสั่งซื้อ</h2><span class="date">สั่งทุกวันที่ 1 และ 15 · รอของ 30 วัน → ต้องมีของครอบคลุม 60 วัน</span></div>
+  <div class="pagehead"><h2>📅 แพลนการสั่งซื้อ</h2><span class="date" id="pl-headnote">สั่งทุกวันที่ 1 และ 15 · รอของ 20 วัน → ต้องมีของครอบคลุม 45 วัน</span></div>
   <div class="card">
     <div class="row" style="align-items:flex-end;flex-wrap:wrap;gap:10px">
       <div><label>ดูยอดขายย้อนหลัง</label><select id="pl-days" onchange="plCalc()"><option value="30" selected>30 วัน</option><option value="90">90 วัน</option><option value="180">180 วัน</option></select></div>
@@ -1073,7 +1073,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div style="overflow-x:auto;margin-top:10px"><table>
       <thead><tr><th>SKU</th><th>สินค้า</th><th class="num">ขาย/วัน</th><th class="num">สต๊อกรวม</th><th class="num">กำลังมา</th><th class="num">ใช้ได้อีก</th><th class="num">เป้าหมาย</th><th class="num">ต้องสั่ง</th><th>ซัพ</th><th>สถานะ</th></tr></thead>
       <tbody id="pl-body"><tr><td colspan="10" class="empty">กด "คำนวณแผน"</td></tr></tbody></table></div>
-    <p class="hint" style="margin-top:8px">เป้าหมาย = ขาย/วัน × (รอของ + รอบสั่ง + เผื่อ) · ต้องสั่ง = เป้าหมาย − (สต๊อก + กำลังมา − ยอดจอง) ปัดขึ้น 5/0 · สินค้าไม่มีประวัติขายใช้ Max Stock แทน</p>
+    <p class="hint" style="margin-top:8px">เป้าหมาย = ขาย/วัน × (รอของ + รอบสั่ง + เผื่อ) · ต้องสั่ง = เป้าหมาย − (สต๊อก + กำลังมา − ยอดจอง) ปัดขึ้น 5 · <b>กดที่ช่อง "กำลังมา"</b> เพื่อบันทึกของที่สั่งไปแล้วกำลังรอรับ/0 · สินค้าไม่มีประวัติขายใช้ Max Stock แทน</p>
   </div>
   <div class="card">
     <h3 class="ct">📦 ใบสั่งซื้อที่ยังไม่ครบ (ของกำลังมา)</h3>
@@ -1436,6 +1436,26 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       ค่าเริ่มต้น: 90 วันแรก 1% → 90 วันถัดไป 0.5% → หลังจากนั้น 0.25% (ตั้งต่างกันรายคนได้ที่ ⚙️) ·
       โบนัสลูกค้าใหม่ = จำนวนลูกค้าที่ <b>บิลแรกถูกชำระในเดือนนั้น</b> ครบขั้น (ค่าเริ่มต้น 10 คน 2,000 · 20 คน 5,000 · 30 คน 7,000) ·
       ย้ายลูกค้าไปเซลล์อื่น = ยอดของลูกค้ารายนั้นย้ายตามไปทั้งหมด</p>
+  </div>
+</div>
+
+<div id="pl-inc-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)plIncClose()">
+  <div style="background:#fff;border-radius:14px;max-width:560px;width:100%;padding:18px;margin:14px auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h3 style="margin:0;font-size:16px" id="pli-head">🚚 ของกำลังมา</h3>
+      <button class="btn-g mini" onclick="plIncClose()">ปิด</button>
+    </div>
+    <div id="pli-list" style="margin-top:10px"></div>
+    <div style="border-top:1px dashed var(--line,#eee);margin-top:12px;padding-top:12px">
+      <div style="font-weight:700;font-size:13.5px;margin-bottom:6px">➕ สั่งไปแล้ว กำลังรอของ</div>
+      <div class="row" style="flex-wrap:wrap;gap:8px;align-items:flex-end">
+        <div><label>จำนวน</label><input id="pli-qty" type="number" min="1" class="num" style="width:100px" onkeydown="if(event.key==='Enter')plIncAdd(this.parentNode.parentNode.querySelector('button'))"></div>
+        <div><label>คาดว่าถึง</label><input id="pli-eta" type="date"></div>
+        <div><label>ซัพพลายเออร์</label><select id="pli-sup" style="min-width:150px"></select></div>
+        <button class="btn-p" onclick="plIncAdd(this)">บันทึก</button>
+      </div>
+      <p class="hint" style="margin-top:6px">ระบบสร้างใบสั่งซื้อให้ 1 ใบ และนับเป็น "กำลังมา" ทันที (แผนจะไม่สั่งซ้ำ) · <b>กำลังมาไม่ถูกนับเป็นสต๊อกที่ลูกค้าสั่งได้</b> — ของถึงแล้วกด 📥 ของถึงแล้ว → ใส่จำนวนที่นับได้จริง → ระบบเพิ่มสต๊อกให้เอง</p>
+    </div>
   </div>
 </div>
 
@@ -12124,6 +12144,150 @@ function mcCSV(){
 
 /* ==================== แพลนการสั่งซื้อ ==================== */
 let plRows=[], plVel={};
+/* ---- ของกำลังมา: กดที่ช่อง "กำลังมา" แล้วใส่จำนวนที่สั่งไปแล้วรอรับ (เก็บเป็นใบสั่งซื้อ 1 ใบ/รายการ) ---- */
+let plPOItems={}, plIncPid=null;   // product_id -> [{item_id,po_id,po_no,qty,received,eta,sup}]
+async function plLoadOpenPO(){
+  const {data,error}=await db.from('purchase_order_items')
+    .select('id,po_id,product_id,qty,received_qty,purchase_orders!inner(po_no,eta,status,suppliers(name))')
+    .in('purchase_orders.status',['ordered','partial']);
+  if(error){plPOItems=null;return;}
+  plPOItems={};
+  (data||[]).forEach(i=>(plPOItems[i.product_id]=plPOItems[i.product_id]||[]).push({item_id:i.id,po_id:i.po_id,qty:Number(i.qty)||0,
+    received:Number(i.received_qty)||0,po_no:i.purchase_orders?.po_no||'',eta:i.purchase_orders?.eta||'',sup:i.purchase_orders?.suppliers?.name||''}));
+}
+function plThToday(){return new Date(Date.now()+7*3600000).toISOString().slice(0,10);}
+function plIncClose(){document.getElementById('pl-inc-modal').style.display='none';plIncPid=null;}
+function plIncOpen(pid){
+  const p=products.find(x=>x.id===pid);if(!p)return;
+  plIncPid=pid;
+  document.getElementById('pli-head').textContent='🚚 ของกำลังมา — '+(p.name||'')+(p.unit?' ('+p.unit+')':'');
+  const lead=Number(document.getElementById('pl-lead').value)||20;
+  document.getElementById('pli-qty').value='';
+  document.getElementById('pli-eta').value=new Date(Date.now()+7*3600000+lead*86400000).toISOString().slice(0,10);
+  const sups=supsOf(pid), sel=document.getElementById('pli-sup');
+  sel.innerHTML='<option value="">— ไม่ระบุ —</option>'+(suppliers||[]).map(x=>'<option value="'+x.id+'">'+esc(x.name)+'</option>').join('');
+  const first=(suppliers||[]).find(x=>sups.includes(x.name));if(first)sel.value=first.id;
+  plIncRender();
+  document.getElementById('pl-inc-modal').style.display='flex';
+  setTimeout(()=>document.getElementById('pli-qty').focus(),50);
+}
+function plIncRender(){
+  const el=document.getElementById('pli-list'), rows=(plPOItems&&plPOItems[plIncPid])||[], today=plThToday();
+  if(!rows.length){el.innerHTML='<div class="empty">ยังไม่มีของกำลังมาสำหรับสินค้านี้ — ใส่จำนวนด้านล่างได้เลย</div>';return;}
+  const total=rows.reduce((a,i)=>a+Math.max(0,i.qty-i.received),0);
+  el.innerHTML='<div style="font-size:13px;margin-bottom:6px">กำลังมารวม <b style="color:#159b78">'+total+'</b></div>'
+    +rows.map(i=>{const late=i.eta&&i.eta<today;
+      return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid var(--line,#eee);border-radius:10px;padding:8px 10px;margin-bottom:6px">'
+      +'<div style="flex:1;min-width:150px"><b>'+esc(i.po_no)+'</b>'+(i.sup?' · '+esc(i.sup):'')
+      +'<div style="font-size:12px;color:var(--muted)">คาดถึง '+esc(i.eta||'—')+(late?' <span style="color:#b52020">⚠️ เลยกำหนด</span>':'')+(i.received?' · รับแล้ว '+i.received:'')+'</div></div>'
+      +'<input type="number" min="0" class="num" style="width:80px" value="'+i.qty+'" onchange="plIncQty('+i.item_id+',this.value)" title="แก้จำนวนที่สั่ง">'
+      +'<button class="btn-s mini" onclick="plIncRecvForm('+i.item_id+')">📥 ของถึงแล้ว</button>'
+      +'<button class="btn-g mini" style="color:#b52020" onclick="plIncDel('+i.item_id+')">ลบ</button>'
+      +'<div id="pli-rcv-'+i.item_id+'" style="display:none;width:100%"></div></div>';}).join('');
+}
+function plIncFind(itemId){for(const rows of Object.values(plPOItems||{}))for(const r of rows)if(r.item_id===itemId)return r;return null;}
+async function plIncRefresh(){await plCalc();if(plIncPid!==null)plIncRender();}
+async function plIncAdd(btn){
+  const p=products.find(x=>x.id===plIncPid);if(!p)return;
+  const qty=Number(document.getElementById('pli-qty').value)||0;
+  if(qty<=0){toast('ใส่จำนวนก่อน');document.getElementById('pli-qty').focus();return;}
+  const eta=document.getElementById('pli-eta').value||null;
+  const supId=Number(document.getElementById('pli-sup').value)||null;
+  btn.disabled=true;
+  try{
+    const poNo='PO'+plThToday().slice(2).replace(/-/g,'')+'-'+rndTag(4);
+    const {data:po,error}=await db.from('purchase_orders').insert({po_no:poNo,supplier_id:supId,eta,
+      created_by:currentUser?.display_name||currentUser?.username||null}).select('id').single();
+    if(error)throw new Error(error.message);
+    const {error:ie}=await db.from('purchase_order_items').insert({po_id:po.id,product_id:p.id,qty,unit_cost:Number(p.base_price)||null});
+    if(ie)throw new Error(ie.message);
+    toast('บันทึกแล้ว ✓ นับเป็นของกำลังมา '+qty+' '+(p.unit||''));
+    document.getElementById('pli-qty').value='';
+    await plIncRefresh();
+  }catch(e){toast('บันทึกไม่สำเร็จ: '+(e.message||e));}
+  btn.disabled=false;
+}
+async function plIncQty(itemId,val){
+  const qty=Number(val)||0;
+  if(qty<=0){plIncRender();return plIncDel(itemId);}
+  const {error}=await db.from('purchase_order_items').update({qty}).eq('id',itemId);
+  if(error){toast('ไม่สำเร็จ: '+error.message);return;}
+  toast('แก้จำนวนแล้ว ✓'); await plIncRefresh();
+}
+/* ของถึง: ตรวจนับจริง → ระบบรับเข้าสต๊อกให้เอง (RPC receive_stock ตัวเดียวกับหน้า "รับสินค้าเข้า" + ลอต FIFO)
+   "กำลังมา" ไม่เคยถูกนับเป็นสต๊อกที่ลูกค้าสั่งได้ — สต๊อกจะเพิ่มก็ต่อเมื่อกดยืนยันจำนวนที่นับได้จริงตรงนี้ */
+function plIncRecvForm(itemId){
+  const row=plIncFind(itemId);if(!row)return;
+  const box=document.getElementById('pli-rcv-'+itemId);if(!box)return;
+  if(box.style.display!=='none'){box.style.display='none';return;}
+  const left=Math.max(0,row.qty-row.received), p=products.find(x=>x.id===plIncPid)||{};
+  let defWh=null;try{defWh=Number(localStorage.getItem('pick_wh_last'))||null;}catch(e){}
+  if(!defWh){const w=whList.find(w=>String(w.name).includes('วังหิน'))||whList.find(w=>w.is_default)||whList[0];defWh=w?w.id:null;}
+  box.innerHTML='<div style="background:#f6faf8;border-radius:8px;padding:8px 10px;margin-top:6px">'
+    +'<div style="font-size:12.5px;margin-bottom:6px">ตรวจนับของที่มาถึงจริง แล้วระบบจะ<b>เพิ่มสต๊อกให้ทันที</b> (สั่งไว้ '+row.qty+(row.received?' · รับแล้ว '+row.received:'')+')</div>'
+    +'<div class="row" style="flex-wrap:wrap;gap:8px;align-items:flex-end">'
+    +'<div><label>นับได้จริง</label><input id="pli-rq-'+itemId+'" type="number" min="0" class="num" style="width:90px" value="'+left+'"></div>'
+    +'<div><label>เข้าคลัง</label><select id="pli-rw-'+itemId+'">'+whList.map(w=>'<option value="'+w.id+'"'+(w.id===defWh?' selected':'')+'>'+esc(w.name)+'</option>').join('')+'</select></div>'
+    +'<div><label>ทุน/หน่วย (ไม่บังคับ)</label><input id="pli-rc-'+itemId+'" type="number" min="0" step="0.01" class="num" style="width:100px" placeholder="'+(Number(p.last_cost)||'')+'"></div>'
+    +'<button class="btn-p mini" onclick="plIncRecv('+itemId+',this)">✓ ยืนยันรับเข้าสต๊อก</button></div></div>';
+  box.style.display='';
+  setTimeout(()=>{const q=document.getElementById('pli-rq-'+itemId);if(q){q.focus();q.select();}},30);
+}
+let plRecvBusy=false;
+async function plIncRecv(itemId,btn){
+  if(plRecvBusy)return;
+  const row=plIncFind(itemId);if(!row)return;
+  const p=products.find(x=>x.id===plIncPid);if(!p)return;
+  const got=Number(document.getElementById('pli-rq-'+itemId)?.value)||0;
+  const wh=Number(document.getElementById('pli-rw-'+itemId)?.value)||null;
+  const cost=Number(document.getElementById('pli-rc-'+itemId)?.value)||null;
+  const left=Math.max(0,row.qty-row.received);
+  if(got<=0){toast('ใส่จำนวนที่นับได้จริงก่อน');return;}
+  if(!wh&&whList.length){toast('เลือกคลังก่อน');return;}
+  let msg='รับเข้าสต๊อก '+p.name+' '+got+' '+(p.unit||'')+(wh?' → '+(whList.find(w=>w.id===wh)?.name||''):'');
+  let closeRest=true;
+  if(got<left){
+    msg+='\n\n⚠️ นับได้น้อยกว่าที่สั่ง (ขาด '+(left-got)+' '+(p.unit||'')+')\nกดตกลง = ส่วนที่ขาดยังนับเป็น "กำลังมา" รอรับรอบหน้า\nกดยกเลิก = ไม่บันทึก';
+    closeRest=false;
+  }else if(got>left){msg+='\n\n⚠️ นับได้มากกว่าที่สั่ง (เกิน '+(got-left)+' '+(p.unit||'')+') — จะรับเข้าตามที่นับได้จริง';}
+  if(!confirm(msg))return;
+  plRecvBusy=true; if(btn)btn.disabled=true;
+  try{
+    const by=currentUser?.display_name||currentUser?.username||null;
+    const items=[{product_id:p.id,qty:got,cost:cost>0?cost:null,expiry:''}];
+    const {error}=await db.rpc('receive_stock',{p_supplier:(row.sup||'')+' (ใบสั่งซื้อ '+row.po_no+')',p_items:items,p_created_by:by,p_warehouse:wh});
+    if(error)throw new Error(error.message);
+    try{   // ลอต FIFO เหมือนหน้า "รับสินค้าเข้า"
+      const uc=cost>0?cost:Number(p.last_cost||0);
+      await db.from('stock_lots').insert([{product_id:p.id,qty:got,remaining:got,unit_cost:uc,ref:'รับเข้า · '+row.po_no+(row.sup?' · '+row.sup:'')}]);
+      if(cost>0)await db.from('products').update({last_cost:cost}).eq('id',p.id);
+    }catch(e){console.warn('fifo lots',e);}
+    try{if(wh)localStorage.setItem('pick_wh_last',String(wh));}catch(e){}
+    // จดในใบสั่งซื้อ: รับแล้วเท่าไร · ขาด = ยังค้างเป็นกำลังมา · ครบ/เกิน = ปิดรายการ
+    const rec=closeRest?row.qty:row.received+got;
+    const {error:ue}=await db.from('purchase_order_items').update({received_qty:rec}).eq('id',itemId);
+    if(ue)toast('รับเข้าสต๊อกแล้ว แต่จดในใบสั่งซื้อไม่ได้: '+ue.message);
+    await plIncSettlePO(row.po_id);
+    toast('รับเข้าสต๊อก '+got+' '+(p.unit||'')+' แล้ว ✓'+(closeRest?'':' · ค้างอีก '+(left-got)+' ยังนับเป็นกำลังมา'));
+    await loadProducts();
+    await plIncRefresh();
+  }catch(e){toast('รับเข้าไม่สำเร็จ: '+(e.message||e));}
+  finally{plRecvBusy=false;if(btn)btn.disabled=false;}
+}
+async function plIncDel(itemId){
+  const row=plIncFind(itemId);if(!row)return;
+  if(!confirm('ลบรายการนี้ออกจากของกำลังมา?'))return;
+  const {error}=await db.from('purchase_order_items').delete().eq('id',itemId);
+  if(error){toast('ไม่สำเร็จ: '+error.message);return;}
+  await plIncSettlePO(row.po_id);
+  toast('ลบแล้ว'); await plIncRefresh();
+}
+async function plIncSettlePO(poId){   // ทุกรายการในใบรับครบ → ปิดใบ · ไม่เหลือรายการ → ยกเลิกใบ · รับบางส่วน → partial
+  const {data}=await db.from('purchase_order_items').select('qty,received_qty').eq('po_id',poId);
+  const items=data||[];
+  const st=!items.length?'cancelled':items.every(i=>Number(i.received_qty||0)>=Number(i.qty))?'received':items.some(i=>Number(i.received_qty||0)>0)?'partial':'ordered';
+  await db.from('purchase_orders').update({status:st}).eq('id',poId);
+}
 async function plCalc(){
   const days=Number(document.getElementById('pl-days').value)||30;
   const lead=Number(document.getElementById('pl-lead').value)||20;
@@ -12131,18 +12295,23 @@ async function plCalc(){
   const safe=Number(document.getElementById('pl-safety').value)||0;
   const cover=lead+cycle+safe;
   const mode=document.getElementById('pl-mode').value;
+  const hn=document.getElementById('pl-headnote');
+  if(hn)hn.textContent='สั่งทุก '+cycle+' วัน · รอของ '+lead+' วัน → ต้องมีของครอบคลุม '+cover+' วัน';
   const [{data,error},{data:d30}]=await Promise.all([
     db.rpc('sales_velocity',{p_days:days}),
-    db.rpc('sales_velocity',{p_days:30})     // ยอดล่าสุด ไว้จับเทรนด์
+    db.rpc('sales_velocity',{p_days:30}),    // ยอดล่าสุด ไว้จับเทรนด์
+    plLoadOpenPO()                            // ของกำลังมา (ใบสั่งซื้อที่ยังรับไม่ครบ) รายสินค้า
   ]);
   if(error){document.getElementById('pl-body').innerHTML='<tr><td colspan="10" class="empty">โหลดไม่ได้: '+esc(error.message)+' (รัน purchase_plan.sql หรือยัง?)</td></tr>';return;}
   plVel={};(data||[]).forEach(r=>plVel[r.product_id]=r);
   const vel30={};(d30||[]).forEach(r=>vel30[r.product_id]=Number(r.adu)||0);
   window._plDataDays=Number((data||[])[0]?.data_days)||0;   // ระบบมีข้อมูลจริงกี่วัน
   plRows=[];
-  products.filter(p=>p.active!==false&&!/S$/.test(String(p.sku||''))).forEach(p=>{
+  products.filter(p=>p.active!==false&&!/[TS]$/i.test(String(p.sku||''))).forEach(p=>{   // SKU ลงท้าย T/S = แบ่งขาย/ตัวย่อย ไม่เอาเข้าแผนสั่งซื้อ
     const v=plVel[p.id]||{adu:0,incoming:0,sold:0};
-    const aduBase=Number(v.adu)||0, incoming=Number(v.incoming)||0;
+    const aduBase=Number(v.adu)||0;
+    // กำลังมา = ยอดค้างรับจากใบสั่งซื้อที่ยังเปิดอยู่ (กดใส่ได้ที่ช่อง "กำลังมา") · โหลดใบสั่งซื้อไม่ได้ค่อยใช้ค่าจาก RPC
+    const incoming=plPOItems?(plPOItems[p.id]||[]).reduce((a,i)=>a+Math.max(0,i.qty-i.received),0):(Number(v.incoming)||0);
     const adu30=vel30[p.id]||0;
     // ยอดโต → ตามให้ทัน · ยอดตก → ไม่รีบลด (กันสั่งขาด) · พุ่งผิดปกติ → จำกัดไม่เกิน 2 เท่า
     const adu=mode==='avg'?aduBase
@@ -12164,14 +12333,15 @@ async function plCalc(){
   });
   plRows.sort((a,b)=>(a.daysLeft??9999)-(b.daysLeft??9999)||byThaiName(a.p,b.p));
   const sel=document.getElementById('pl-sup'),keep=sel.value;
-  sel.innerHTML='<option value="">ทั้งหมด</option>'+[...new Set(plRows.flatMap(r=>r.sups))]
+  const noSup=plRows.filter(r=>!r.sups.length).length;
+  sel.innerHTML='<option value="">ทั้งหมด</option><option value="__none__">— ไม่มีซัพ ('+noSup+')</option>'+[...new Set(plRows.flatMap(r=>r.sups))]
     .sort((a,b)=>String(a).localeCompare(String(b),'th')).map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join('');
-  sel.value=keep;
+  sel.value=keep; if(sel.value!==keep)sel.value='';
   plRender(); plLoadPO();
 }
 function plFiltered(){
   const sup=document.getElementById('pl-sup').value, only=document.getElementById('pl-only').checked;
-  return plRows.filter(r=>(!sup||r.sups.includes(sup))&&(!only||r.need>0));
+  return plRows.filter(r=>(!sup||(sup==='__none__'?!r.sups.length:r.sups.includes(sup)))&&(!only||r.need>0));
 }
 function plRender(){
   const list=plFiltered(), el=document.getElementById('pl-body');
@@ -12210,8 +12380,8 @@ function plRender(){
       if(pct>=15)return '<div style="font-size:11px;color:#159b78">📈 +'+pct+'%</div>';
       if(pct<=-15)return '<div style="font-size:11px;color:#b52020">📉 '+pct+'%</div>';
       return '<div style="font-size:11px;color:#999">คงที่</div>';})()}</td>
-    <td class="num">${r.stock}${r.reserved?'<div style="font-size:11px;color:#a04a00">จอง ${r.reserved}</div>':''}</td>
-    <td class="num" style="color:#159b78">${r.incoming||'—'}</td>
+    <td class="num">${r.stock}${r.reserved?'<div style="font-size:11px;color:#a04a00">จอง '+r.reserved+'</div>':''}</td>
+    <td class="num" style="color:#159b78;cursor:pointer;white-space:nowrap" title="กดเพื่อบันทึก/แก้ของที่สั่งไปแล้วกำลังรอรับ" onclick="plIncOpen(${r.p.id})">${r.incoming?r.incoming+' <span style="font-size:11px">✏️</span>':'<span style="color:#b9b9b9;font-size:12px">＋ ใส่</span>'}</td>
     <td class="num" style="font-weight:700;color:${r.daysLeft===null?'#999':(r.daysLeft<30?'#b52020':(r.daysLeft<45?'#a04a00':'#159b78'))}">${r.daysLeft===null?'—':r.daysLeft+' วัน'}</td>
     <td class="num">${r.target||'—'}</td>
     <td class="num" style="font-weight:700;color:#b52020">${r.need||'—'} ${r.need?esc(r.p.unit||''):''}</td>
@@ -12235,7 +12405,7 @@ function plCopy(){
 async function plCreatePO(btn){
   const list=plFiltered().filter(r=>r.need>0);
   if(!list.length){toast('ไม่มีรายการต้องสั่ง');return;}
-  const supName=document.getElementById('pl-sup').value;
+  const supSel=document.getElementById('pl-sup').value, supName=supSel==='__none__'?'':supSel;
   const sup=(suppliers||[]).find(x=>x.name===supName);
   const lead=Number(document.getElementById('pl-lead').value)||20;
   const eta=new Date(Date.now()+(lead+7)*3600000*24).toISOString().slice(0,10);
