@@ -783,6 +783,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="card">
     <div class="row" style="margin-bottom:12px;align-items:center">
       <input id="c-search" placeholder="ค้นหาลูกค้า…" style="flex:1;min-width:200px" oninput="renderCustomers()">
+      <select id="c-sale-filter" style="min-width:170px" onchange="renderCustomers()" title="กรองลูกค้าตามรหัสเซลล์ที่ดูแล"><option value="">เซลล์: ทั้งหมด</option></select>
       <button class="btn-s mini" id="c-noline-btn" onclick="openNoLineModal()" title="กดดูรายชื่อร้านที่ยังไม่ผูกกลุ่มไลน์ แยกตามเซลล์">🔗 ยังไม่ผูกกลุ่ม</button>
       <button class="btn-d mini" id="c-incomplete-btn" onclick="toggleIncompleteFilter()" title="ลูกค้าที่ข้อมูลออกบิล/จัดส่งยังกรอกไม่ครบ — กดเพื่อกรองดูเฉพาะรายการนี้">⚠️ ข้อมูลไม่ครบ</button>
       <span class="count" id="c-count"></span>
@@ -4302,7 +4303,10 @@ function openNoLineModal(){
 }
 function renderCustomers(){
   const q=(document.getElementById('c-search').value||'').toLowerCase();
+  const sf=document.getElementById('c-sale-filter');const saleF=sf?sf.value:'';
   let list=customers.filter(c=>!q||c.name.toLowerCase().includes(q)||c.code.toLowerCase().includes(q));
+  if(saleF==='none')list=list.filter(c=>!c.sale_id);
+  else if(saleF)list=list.filter(c=>String(c.sale_id)===saleF);
   const noLine=customers.filter(c=>c.active!==false&&!c.line_group_id);
   if(custNoLineOnly)list=list.filter(c=>c.active!==false&&!c.line_group_id);
   const incomplete=customers.filter(c=>c.active!==false&&custMissing(c).length);
@@ -5106,6 +5110,14 @@ function fillSaleSelect(){
     sales.filter(s=>s.active!==false).map(s=>`<option value="${s.id}">${esc(s.code||'???')} · ${esc(s.name)}</option>`).join('');
   if(cur)sel.value=cur;
   updateCodePreview();
+  // ตัวกรองเซลล์ในรายชื่อลูกค้า (รวมเซลล์ที่ปิดใช้แล้ว เพราะลูกค้าเก่ายังผูกอยู่)
+  const fs=document.getElementById('c-sale-filter');
+  if(fs){const fcur=fs.value;
+    fs.innerHTML='<option value="">เซลล์: ทั้งหมด</option>'
+      +sales.map(s=>`<option value="${s.id}">${esc(s.code||'???')} · ${esc(s.name)}${s.active===false?' (ปิดใช้)':''}</option>`).join('')
+      +'<option value="none">— ไม่ระบุเซลล์ —</option>';
+    if(fcur)fs.value=fcur;
+  }
 }
 function renderSales(){
   const counts={};customers.forEach(c=>{if(c.sale_id)counts[c.sale_id]=(counts[c.sale_id]||0)+1;});
