@@ -11034,7 +11034,7 @@ async function pySaveRules(){
   rows.forEach(r=>appSettings[r.key]=r.value);
   toast('บันทึกกติกาแล้ว');pyRender();
 }
-function pyMonthStr(){const el=document.getElementById('py-month');if(!el.value)el.value=ymd(new Date()).slice(0,7);return el.value;}
+function pyMonthStr(){const el=document.getElementById('py-month');if(!el.value){const cur=ymd(new Date()).slice(0,7),st=pyRules().start.slice(0,7);el.value=cur<st?st:cur;}return el.value;}   // เปิดหน้าก่อนวันเริ่มระบบ → ไปเดือนแรกที่ใช้ระบบใหม่ให้เลย
 function pyShiftMonth(d){const [y,m]=pyMonthStr().split('-').map(Number);const dt=new Date(y,m-1+d,1);document.getElementById('py-month').value=ymd(dt).slice(0,7);pyRender();}
 function pyCompOf(saleId){return Object.assign({},PY_DEF,pyComp[saleId]||{},{bonus:(pyComp[saleId]&&Array.isArray(pyComp[saleId].bonus)&&pyComp[saleId].bonus.length)?pyComp[saleId].bonus:PY_DEF.bonus});}
 async function pyLoad(force){
@@ -11111,6 +11111,14 @@ function pyRender(){
   pyCalc=pyCompute();
   const month=pyCalc.month;const [y,m]=month.split('-').map(Number);
   document.getElementById('py-month-lbl').textContent='· '+TH_MONTHS[m-1]+' '+(y+543);
+  // เดือนก่อนวันเริ่มระบบ = ยังใช้วิธีคิดแบบเดิม ไม่คำนวณให้ (กันสับสน)
+  if(month<pyCalc.rules.start.slice(0,7)){
+    const rs=new Date(pyCalc.rules.start+'T00:00:00');
+    document.getElementById('py-stats').innerHTML='';
+    document.getElementById('py-body').innerHTML='<tr><td colspan="9" class="empty">🗓️ '+TH_MONTHS[m-1]+' '+(y+543)+' อยู่ก่อนวันเริ่มใช้ระบบค่าคอมใหม่ ('+rs.getDate()+' '+TH_MONTHS[rs.getMonth()]+' '+(rs.getFullYear()+543)+')<br><span style="font-size:12.5px">เดือนก่อนหน้านั้นคิดค่าคอมแบบเดิม ไม่ได้คำนวณในหน้านี้ · กด ▶ ไปเดือนที่เริ่มใช้ระบบ</span></td></tr>';
+    document.getElementById('py-foot').innerHTML='';
+    return;
+  }
   const rl=pyCalc.rules;const rs=new Date(rl.start+'T00:00:00');
   document.getElementById('py-month-lbl').title='นับบิลที่ออกตั้งแต่ '+rs.getDate()+' '+TH_MONTHS[rs.getMonth()]+' '+(rs.getFullYear()+543);
   const list=Object.values(pyCalc.bySale).filter(g=>g.sale.active!==false||g.rows.length||g.adjRows.length)
