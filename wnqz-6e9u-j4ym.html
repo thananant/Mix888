@@ -4660,7 +4660,7 @@ function readPayTerms(rec){
 const CUST_REQUIRED=[
   {key:'contact_name',id:'c-contact',label:'ชื่อลูกค้า (ผู้ติดต่อ)'},
   {key:'phone',id:'c-phone',label:'เบอร์โทร (บิล)'},
-  {key:'bill_addr_name',id:'cb-name',label:'ชื่อสถานที่/อาคาร (บิล)'},
+  {key:'bill_addr_name',id:'cb-name',label:'ชื่อสถานที่/อาคาร (บิล)',fallback:c=>c.name},          // ว่าง = ใช้ชื่อร้าน
   {key:'bill_no',id:'cb-no',label:'เลขที่ (บิล)'},
   {key:'bill_postcode',id:'cb-postcode',label:'รหัสไปรษณีย์ (บิล)'},
   {key:'bill_subdistrict',id:'cb-subdistrict',label:'ตำบล/แขวง (บิล)'},
@@ -4669,7 +4669,7 @@ const CUST_REQUIRED=[
   {key:'ship_shop_name',id:'c-shipshop',label:'ชื่อร้าน (จุดส่ง)'},
   {key:'ship_receiver',id:'c-receiver',label:'ชื่อผู้รับของ'},
   {key:'ship_phone',id:'c-shipphone',label:'เบอร์ผู้รับ'},
-  {key:'ship_addr_name',id:'cs-name',label:'ชื่อสถานที่/อาคาร (จัดส่ง)'},
+  {key:'ship_addr_name',id:'cs-name',label:'ชื่อสถานที่/อาคาร (จัดส่ง)',fallback:c=>c.ship_shop_name||c.name},   // ว่าง = ใช้ชื่อร้านจุดส่ง/ชื่อร้าน
   {key:'ship_no',id:'cs-no',label:'เลขที่ (จัดส่ง)'},
   {key:'ship_postcode',id:'cs-postcode',label:'รหัสไปรษณีย์ (จัดส่ง)'},
   {key:'ship_subdistrict',id:'cs-subdistrict',label:'ตำบล/แขวง (จัดส่ง)'},
@@ -4679,7 +4679,17 @@ const CUST_REQUIRED=[
   {key:'receive_time',id:'c-rtime',ids:['c-rt-fh','c-rt-fm','c-rt-th','c-rt-tm'],label:'เวลารับของ'}];
 // รายการช่องที่ยังว่างของลูกค้า (ใช้ได้ทั้ง rec จากฟอร์ม และแถวจากฐานข้อมูล)
 function custMissing(c){
-  return CUST_REQUIRED.filter(f=>!String(c[f.key]??'').trim());
+  const has=v=>!!String(v??'').trim();
+  return CUST_REQUIRED.filter(f=>!has(c[f.key])&&!(f.fallback&&has(f.fallback(c))));
+}
+// เติมค่าสำรองให้ช่องที่เว้นว่างได้ (ชื่อสถานที่/อาคาร = ชื่อร้าน) ทั้งใน rec และในฟอร์ม
+function custApplyFallbacks(rec){
+  CUST_REQUIRED.forEach(f=>{
+    if(!f.fallback||String(rec[f.key]??'').trim())return;
+    const v=String(f.fallback(rec)??'').trim();if(!v)return;
+    rec[f.key]=v;
+    const el=document.getElementById(f.id);if(el&&!el.value.trim())el.value=v;
+  });
 }
 function custReqEls(f){return (f.ids||[f.id]).map(id=>document.getElementById(id)).filter(Boolean);}
 // ใส่ * แดงหลังป้ายชื่อช่องที่บังคับ + ล้างกรอบแดงทันทีที่กรอกครบ (ทำครั้งเดียว)
@@ -4688,7 +4698,7 @@ function custReqInit(){
   CUST_REQUIRED.forEach(f=>{
     const el=document.getElementById(f.id);if(!el)return;
     const lb=el.parentElement&&el.parentElement.querySelector('label');
-    if(lb&&!lb.querySelector('.req-star'))lb.insertAdjacentHTML('beforeend',' <span class="req-star">*</span>');
+    if(lb&&!lb.querySelector('.req-star'))lb.insertAdjacentHTML('beforeend',f.fallback?' <span style="color:var(--muted);font-weight:400">(ว่าง = ใช้ชื่อร้าน)</span>':' <span class="req-star">*</span>');
     const clear=()=>{if(el.value.trim())custReqEls(f).forEach(e=>e.classList.remove('req-miss'));};
     custReqEls(f).forEach(e=>{e.addEventListener('input',clear);e.addEventListener('change',()=>setTimeout(clear,0));});
   });
@@ -4706,7 +4716,8 @@ function custMarkMissing(rec,scroll){
 }
 // ค่าที่กรอกในฟอร์มตอนนี้ (สำหรับไฮไลต์ตอนเปิดแก้ไขลูกค้าเก่า)
 function custFormValues(){
-  const r={};CUST_REQUIRED.forEach(f=>{const el=document.getElementById(f.id);r[f.key]=el?el.value:'';});return r;
+  const r={name:document.getElementById('c-name').value};
+  CUST_REQUIRED.forEach(f=>{const el=document.getElementById(f.id);r[f.key]=el?el.value:'';});return r;
 }
 let custIncompleteOnly=false;
 function toggleIncompleteFilter(){custIncompleteOnly=!custIncompleteOnly;if(custIncompleteOnly)custNoLineOnly=false;renderCustomers();}
@@ -4781,6 +4792,8 @@ async function saveCustomer(){
     rec.slug=slugRaw;
   }else rec.slug=null;
   if(!rec.name){toast('กรอกชื่อร้านก่อน');return;}
+  custApplyFallbacks(rec);
+  rec.billing_address=composeAddr('cb');rec.ship_address=composeAddr('cs');   // ประกอบใหม่หลังเติมชื่อสถานที่
   const miss=custMarkMissing(rec,true);
   if(miss.length){toast('⚠️ กรอกข้อมูลออกบิล/จัดส่งให้ครบก่อน — ยังว่าง '+miss.length+' ช่อง: '+miss.slice(0,4).map(f=>f.label).join(', ')+(miss.length>4?' …':''));return;}
   const payErr=readPayTerms(rec);
