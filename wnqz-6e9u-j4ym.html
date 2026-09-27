@@ -673,8 +673,9 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div class="row">
       <div id="c-prefix-wrap"><label>รหัสลูกค้า (รันจากรหัสเซลล์)</label><input id="c-prefix" style="width:150px;background:#f5f0ea" readonly placeholder="เลือกเซลล์ก่อน"></div>
       <div id="c-code-wrap" style="display:none"><label>รหัสลูกค้า</label><input id="c-code" style="width:130px;background:#f5f0ea" readonly></div>
+      <div id="c-recode-wrap" style="display:none;align-self:flex-end"><button class="btn-s mini" id="c-recode-btn" onclick="recodeCustomer()" title="รหัสขึ้นต้นไม่ตรงกับเซลล์ที่ดูแล — ออกรหัสใหม่ต่อจากเลขล่าสุดของเซลล์ปลายทาง">🔁 ออกรหัสใหม่ตามเซลล์</button><div id="c-recode-note" style="font-size:11.5px;color:var(--warn);margin-top:3px"></div></div>
       <div style="flex:1;min-width:170px"><label>ชื่อร้าน</label><input id="c-name" style="width:100%"></div>
-      <div style="min-width:170px"><label>เซลล์ที่ดูแล</label><select id="c-sale" style="width:100%" onchange="updateCodePreview()"><option value="">— เลือกเซลล์ —</option></select></div>
+      <div style="min-width:170px"><label>เซลล์ที่ดูแล</label><select id="c-sale" style="width:100%" onchange="updateCodePreview();checkCodeMismatch()"><option value="">— เลือกเซลล์ —</option></select></div>
       <div style="flex:1;min-width:200px"><label>LINE Group ID (ไว้ส่งบิล)</label><input id="c-line" style="width:100%" placeholder="ใส่ทีหลังได้"><input id="c-line-copy-q" placeholder="🔎 หากลุ่มร่วม: พิมพ์ชื่อร้าน/รหัส/สาขา…" style="width:100%;margin-top:4px;font-size:12.5px" oninput="fillLineCopySelect()"><select id="c-line-copy" onchange="copyLineFrom(this)" style="width:100%;margin-top:4px;font-size:12.5px;color:var(--muted)"><option value="">📎 ใช้กลุ่มเดียวกับร้านอื่น…</option></select></div>
       <div><label>กลุ่มราคา</label><select id="c-pgroup"><option value="base">ราคากลาง</option><option value="r20">เรท 20 ลัง</option><option value="r50">เรท 50 ลัง</option><option value="upc">รวมส่งตจว</option></select></div>
     </div>
@@ -4329,6 +4330,8 @@ function renderCustomers(){
         :(customers.some(x=>x.parent_id===c.id)?' <span class="tag tag-ov">ร้านแม่ '+customers.filter(x=>x.parent_id===c.id).length+' สาขา</span>':'')
     }<div style="margin-top:3px;display:flex;gap:4px;flex-wrap:wrap"><span class="tag ${(c.pay_type||'prepay')==='credit'?'tag-low':(c.pay_type==='postpay'?'tag-ov':'tag-ok')}" style="font-size:11px">💳 ${esc(payTypeLabel(c))}</span>${
       (()=>{const m=custMissing(c);return m.length?`<span class="tag tag-out" style="font-size:11px;cursor:pointer" onclick="editCustomer(${c.id})" title="ยังว่าง: ${esc(m.map(f=>f.label).join(', '))} — คลิกเพื่อกรอก">⚠️ ข้อมูลไม่ครบ ${m.length} ช่อง</span>`:''})()
+    }${
+      (()=>{const mm=codeMismatch(c);return mm?`<span class="tag tag-low" style="font-size:11px;cursor:pointer" onclick="editCustomer(${c.id})" title="รหัสขึ้นต้น ${esc(mm.code.slice(0,3))} แต่เซลล์ที่ดูแลคือ ${esc(mm.saleCode)} — คลิกแก้ไขแล้วกด 🔁 ออกรหัสใหม่ตามเซลล์">🔁 รหัส ${esc(mm.code.slice(0,3))} ≠ เซลล์ ${esc(mm.saleCode)}</span>`:''})()
     }</div></td>
     <td>${sname?esc(sname):'<span style="color:var(--muted)">—</span>'}</td>
     <td style="font-variant-numeric:tabular-nums">${c.phone?esc(c.phone):'<span style="color:var(--muted)">—</span>'}</td>
@@ -4412,6 +4415,7 @@ function editCustomer(id){
   fillAddr('cs',{name:c.ship_addr_name,no:c.ship_no,soi:c.ship_soi,road:c.ship_road,
     postcode:c.ship_postcode,subdistrict:c.ship_subdistrict,district:c.ship_district,province:c.ship_province});
   custReqInit();
+  pendingRecode=false;document.getElementById('c-recode-btn').onclick=recodeCustomer;checkCodeMismatch();
   const missNow=custMarkMissing(custFormValues(),false);
   if(missNow.length)toast('⚠️ ลูกค้ารายนี้ข้อมูลยังไม่ครบ '+missNow.length+' ช่อง (กรอบแดง) — กรอกให้ครบก่อนบันทึก');
   showPage('customers');
@@ -4494,6 +4498,7 @@ function resetCustomerForm(){
   document.getElementById('c-branch').value='';
   cParentUI();
   setPayTerms(null);
+  pendingRecode=false;document.getElementById('c-recode-wrap').style.display='none';
   CUST_REQUIRED.forEach(f=>custReqEls(f).forEach(e=>e.classList.remove('req-miss')));
 }
 /* ---------- ประเภทการชำระเงิน / เครดิต ---------- */
@@ -4735,6 +4740,50 @@ function copyBillToShip(){
   });
   if(document.getElementById('cb-postcode').value) postcodeLookup('cs'); // เติม datalist ให้ฝั่งจัดส่ง
 }
+/* ---------- รหัสลูกค้า vs เซลล์ที่ดูแล ---------- */
+// รหัสถัดไปของเซลล์ (prefix 3 ตัว) — ต่อจากเลขสูงสุดในฐานข้อมูล
+async function nextCustomerCode(prefix){
+  const {data,error}=await db.from('customers').select('code')
+    .like('code',prefix+'%').order('code',{ascending:false}).limit(1);
+  if(error)throw new Error('เช็ครหัสไม่ได้: '+error.message);
+  let n=1;
+  if(data&&data.length){const last=parseInt(String(data[0].code).slice(3),10);if(!isNaN(last))n=last+1;}
+  return prefix+String(n).padStart(5,'0');
+}
+// รหัสเซลล์ที่ควรเป็น (จาก sale_id) เทียบกับ 3 ตัวหน้าของรหัสลูกค้า — คืน {code,saleCode} ถ้าไม่ตรง
+function codeMismatch(c){
+  if(!c||!c.code||!c.sale_id)return null;
+  const s=sales.find(x=>x.id===Number(c.sale_id));
+  if(!s||!/^[A-Z]{3}$/.test(s.code||''))return null;
+  const pre=String(c.code).slice(0,3).toUpperCase();
+  return pre===s.code?null:{code:c.code,saleCode:s.code,saleName:s.name};
+}
+let pendingRecode=false;   // ผู้ใช้กดขอรหัสใหม่แล้ว → ตอนบันทึกจะออกรหัสจริงอีกครั้ง (กันชนกับคนอื่นที่เพิ่มพร้อมกัน)
+function checkCodeMismatch(){
+  const wrap=document.getElementById('c-recode-wrap');if(!wrap)return;
+  const note=document.getElementById('c-recode-note');
+  if(!editCustomerId){wrap.style.display='none';pendingRecode=false;return;}
+  const c=customers.find(x=>x.id===editCustomerId);
+  const mm=codeMismatch({code:c?c.code:'',sale_id:document.getElementById('c-sale').value});
+  if(!mm){wrap.style.display='none';pendingRecode=false;document.getElementById('c-code').value=c?c.code:'';return;}
+  wrap.style.display='';
+  if(pendingRecode){note.textContent='';return;}
+  document.getElementById('c-code').value=c.code;
+  document.getElementById('c-recode-btn').textContent='🔁 ออกรหัสใหม่เป็น '+mm.saleCode+'xxxxx';
+  note.textContent='รหัสขึ้นต้น '+mm.code.slice(0,3)+' แต่เซลล์ที่ดูแลคือ '+mm.saleCode+' · '+mm.saleName;
+}
+async function recodeCustomer(){
+  const c=customers.find(x=>x.id===editCustomerId);if(!c)return;
+  const mm=codeMismatch({code:c.code,sale_id:document.getElementById('c-sale').value});if(!mm)return;
+  let preview;
+  try{preview=await nextCustomerCode(mm.saleCode);}catch(e){toast(e.message);return;}
+  if(!confirm('เปลี่ยนรหัสลูกค้า "'+c.name+'"\n'+c.code+' → '+preview+'\n\nรหัสเดิมจะเลิกใช้ บิล/ออเดอร์เก่าจะแสดงรหัสใหม่ (ผูกด้วย id ไม่หาย)\nมีผลเมื่อกด "บันทึก"'))return;
+  pendingRecode=true;
+  document.getElementById('c-code').value=preview;
+  document.getElementById('c-recode-btn').textContent='↩ ใช้รหัสเดิม '+c.code;
+  document.getElementById('c-recode-btn').onclick=()=>{pendingRecode=false;document.getElementById('c-recode-btn').onclick=recodeCustomer;checkCodeMismatch();};
+  document.getElementById('c-recode-note').textContent='จะเปลี่ยนเป็น '+preview+' เมื่อกดบันทึก (เลขจริงอาจขยับถ้ามีคนเพิ่มลูกค้าเซลล์นี้พร้อมกัน)';
+}
 function updateCodePreview(){
   const el=document.getElementById('c-prefix'); if(!el)return;
   const sid=Number(document.getElementById('c-sale').value);
@@ -4810,16 +4859,15 @@ async function saveCustomer(){
     if(!rec.sale_id){toast('เลือกเซลล์ก่อน — รหัสลูกค้ารันจากรหัสเซลล์');return;}
     const sale=sales.find(x=>x.id===rec.sale_id);
     if(!sale||!/^[A-Z]{3}$/.test(sale.code||'')){toast('เซลล์คนนี้ยังไม่มีรหัส 3 ตัว ไปตั้งในแท็บเซลล์ก่อน');return;}
-    const prefix=sale.code;
-    const {data,error:e1}=await db.from('customers').select('code')
-      .like('code',prefix+'%').order('code',{ascending:false}).limit(1);
-    if(e1){toast('เช็ครหัสไม่ได้: '+e1.message);return;}
-    let n=1;
-    if(data&&data.length){
-      const last=parseInt(data[0].code.slice(3),10);
-      if(!isNaN(last)) n=last+1;
+    try{rec.code=await nextCustomerCode(sale.code);}catch(e){toast(e.message);return;}
+  }else if(pendingRecode){
+    // ย้ายรหัสไปเซลล์ปลายทาง: ออกเลขจริง ณ ตอนบันทึก ต่อจากเลขล่าสุดของเซลล์นั้น
+    const cur=customers.find(x=>x.id===editCustomerId);
+    const mm=codeMismatch({code:cur?cur.code:'',sale_id:rec.sale_id});
+    if(mm){
+      try{rec.code=await nextCustomerCode(mm.saleCode);}catch(e){toast(e.message);return;}
+      if(!confirm('ยืนยันเปลี่ยนรหัส '+cur.code+' → '+rec.code+' ?'))return;
     }
-    rec.code=prefix+String(n).padStart(5,'0');
   }
 
   // ---------- เช็คข้อมูลซ้ำกับลูกค้าของทุกเซลล์ (เฉพาะตอนเพิ่มใหม่) ----------
@@ -4856,7 +4904,7 @@ async function saveCustomer(){
                         :db.from('customers').insert(rec);
   const {error}=await q;
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
-  toast((editCustomerId?'อัพเดตลูกค้าแล้ว':'เพิ่มลูกค้า '+rec.code+' แล้ว')+(ml?' · 📍 ปักหมุดตามลิงก์แผนที่แล้ว':''));
+  toast((editCustomerId?'อัพเดตลูกค้าแล้ว'+(rec.code?' · รหัสใหม่ '+rec.code:''):'เพิ่มลูกค้า '+rec.code+' แล้ว')+(ml?' · 📍 ปักหมุดตามลิงก์แผนที่แล้ว':''));
   closeCustomerForm(); loadCustomers();
 }
 async function deleteCustomer(id){
