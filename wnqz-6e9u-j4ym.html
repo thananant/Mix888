@@ -269,7 +269,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div class="mhead" onclick="toggleGroup('prod')"><span class="ic">📦</span>สินค้า<span class="badge" id="grp-prod-badge" style="display:none">0</span><span class="chev">▾</span></div>
       <div class="msub">
         <div class="mi" data-page="products" onclick="showPage('products')"><span class="ic">📦</span>สินค้า</div>
-        <div class="mi" data-page="moves" onclick="showPage('moves')"><span class="ic">📊</span>เดินรายการสินค้า</div>
+        <div class="mi" data-page="moves" onclick="showPage('moves')"><span class="ic">📊</span>รายการเดินสินค้า</div>
         <div class="mi" data-page="transfer" onclick="showPage('transfer')"><span class="ic">🚛</span>โอนโกดัง<span class="badge" id="tf-badge" style="display:none">0</span></div>
         <div class="mi" data-page="receive" onclick="showPage('receive')"><span class="ic">📥</span>รับสินค้า<span class="badge" id="rc-badge" style="display:none">0</span></div>
         <div class="mi" data-page="warehouse" onclick="showPage('warehouse')"><span class="ic">🏭</span>คลังสินค้า</div>
@@ -546,7 +546,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <!-- ============ สินค้า ============ -->
 <div class="page" id="page-moves">
-  <div class="pagehead"><h2>เดินรายการสินค้า</h2></div>
+  <div class="pagehead"><h2>รายการเดินสินค้า</h2></div>
   <div class="card">
     <div class="row" style="flex-wrap:wrap;align-items:flex-end;gap:10px">
       <div style="flex:1;min-width:200px"><label>สินค้า</label>
@@ -12713,7 +12713,7 @@ async function pcImage(btn){
   btn.disabled=false;btn.textContent=t0;
 }
 
-/* ==================== หน้าเดินรายการสินค้า ==================== */
+/* ==================== หน้ารายการเดินสินค้า ==================== */
 let mvRows=[], mvLimit=500;
 function mvInit(){
   const wh=document.getElementById('mv-wh');
@@ -12793,7 +12793,7 @@ function mvExport(){
   const lines=[head.map(esc2).join(',')].concat(mvRows.map(r=>[
     new Date(r.at).toLocaleString('th-TH'),r.sku,r.name,r.label,r.qty,r.unit,r.wh,r.ref||r.note,r.by].map(esc2).join(',')));
   const url=URL.createObjectURL(new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv;charset=utf-8'}));
-  const a=document.createElement('a');a.href=url;a.download='เดินรายการสินค้า-'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+  const a=document.createElement('a');a.href=url;a.download='รายการเดินสินค้า-'+new Date().toISOString().slice(0,10)+'.csv';a.click();
   setTimeout(()=>URL.revokeObjectURL(url),4000);
   toast('ส่งออก '+mvRows.length+' รายการแล้ว ✓');
 }
