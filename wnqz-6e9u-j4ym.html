@@ -4689,11 +4689,11 @@ function cPayUI(){
   if(t==='credit')cdRender();
 }
 /* ---------- เอกสารขอใช้เครดิต + อนุมัติโดย admin (ตาราง credit_docs / credit_reviews · bucket credit-docs) ----------
-   บุคคลธรรมดา: สำเนาบัตรประชาชน + สำเนาทะเบียนบ้าน · บริษัท: ภพ.20 + สำเนาบัตร ปชช. กรรมการ + สำเนาทะเบียนบ้านกรรมการ (ทุกใบต้องมีตราประทับบริษัท)
+   บุคคลธรรมดา: สำเนาบัตรประชาชน + สำเนาทะเบียนบ้าน · บริษัท: ภพ.20 + หนังสือรับรองบริษัท + สำเนาบัตร ปชช. กรรมการ + สำเนาทะเบียนบ้านกรรมการ (ทุกใบต้องมีตราประทับบริษัท)
    ขาดอย่างใดอย่างหนึ่ง = อนุมัติไม่ได้ · เพิ่ม/แก้เครดิตทุกครั้ง → สถานะกลับเป็น "รออนุมัติ" · ตีกลับ = แจ้งกลุ่มรีพอร์ต */
 const CD_TYPES={
   person:[{k:'id_card',l:'สำเนาบัตรประชาชน'},{k:'house_reg',l:'สำเนาทะเบียนบ้าน'}],
-  company:[{k:'pp20',l:'ใบ ภ.พ.20'},{k:'dir_id_card',l:'สำเนาบัตรประชาชนกรรมการ (1 ท่าน)'},{k:'dir_house_reg',l:'สำเนาทะเบียนบ้านกรรมการ (1 ท่าน)'}]};
+  company:[{k:'pp20',l:'ใบ ภ.พ.20'},{k:'company_cert',l:'หนังสือรับรองบริษัท'},{k:'dir_id_card',l:'สำเนาบัตรประชาชนกรรมการ (1 ท่าน)'},{k:'dir_house_reg',l:'สำเนาทะเบียนบ้านกรรมการ (1 ท่าน)'}]};
 const CD_STATUS={pending:['⏳ รอ admin อนุมัติ','tag-low'],approved:['✅ อนุมัติเครดิตแล้ว','tag-ok'],rejected:['❌ ตีกลับ','tag-out']};
 let cdDocs=[];   // เอกสารของลูกค้าที่กำลังแก้ไข
 function cdIsAdmin(){return !!(currentUser&&currentUser.role==='admin');}
@@ -4728,7 +4728,7 @@ function cdRender(){
       ${d&&d.file_path?`<button class="btn-d mini" onclick="cdDelete('${t.k}')" title="ลบไฟล์">✕</button>`:''}
     </div>`;}).join('');
   const complete=cdComplete(c,cdDocs,entity);
-  document.getElementById('cd-hint').innerHTML=(entity==='company'?'บริษัท: ต้องมีทั้ง 3 ใบ และ admin ติ๊กยืนยันว่าทุกใบมีตราประทับบริษัท ':'บุคคลธรรมดา: ต้องมีทั้ง 2 ใบ ')+'· ขาดอย่างใดอย่างหนึ่งอนุมัติไม่ได้ · เพิ่ม/แก้เงื่อนไขเครดิตแล้วต้องให้ admin อนุมัติใหม่ทุกครั้ง'
+  document.getElementById('cd-hint').innerHTML=(entity==='company'?'บริษัท: ต้องมีทั้ง 4 ใบ และ admin ติ๊กยืนยันว่าทุกใบมีตราประทับบริษัท ':'บุคคลธรรมดา: ต้องมีทั้ง 2 ใบ ')+'· ขาดอย่างใดอย่างหนึ่งอนุมัติไม่ได้ · เพิ่ม/แก้เงื่อนไขเครดิตแล้วต้องให้ admin อนุมัติใหม่ทุกครั้ง'
     +(complete?' · <b style="color:var(--ok)">เอกสารครบแล้ว</b>':' · <b style="color:var(--danger)">เอกสารยังไม่ครบ</b>');
   document.getElementById('cd-admin-btns').innerHTML=admin?`<button class="btn-p mini" ${complete&&st!=='approved'?'':'disabled'} onclick="cdReview('approved')" title="${complete?'อนุมัติให้ใช้เครดิต':'เอกสารยังไม่ครบ อนุมัติไม่ได้'}">✅ อนุมัติเครดิต</button><button class="btn-d mini" ${st==='rejected'?'disabled':''} onclick="cdReview('rejected')">❌ ตีกลับเอกสาร</button>`:'<span style="font-size:12px;color:var(--muted)">เฉพาะ admin อนุมัติ/ตีกลับ</span>';
 }

@@ -31,7 +31,7 @@ declare r jsonb := '{}'::jsonb; t text; part jsonb;
 begin
   if p_key is null or p_key <> 'PASTE_NAS_EXPORT_KEY_HERE' then raise exception 'BAD_KEY'; end if;
   foreach t in array array['customers','products','sales','orders','order_items','bills','payments','petty_cash','expense_categories',
-                           'customer_prices','warehouses','settings','sale_comp','sale_pay_adj','credit_statements','credit_docs','credit_reviews','line_groups'] loop
+                           'customer_prices','warehouses','settings','sale_comp','sale_pay_adj','credit_statements','credit_docs','credit_reviews','line_groups','price_log','price_adjust_batches','holidays'] loop
     begin
       execute format('select coalesce(jsonb_agg(to_jsonb(x)), ''[]''::jsonb) from %I x', t) into part;
     exception when undefined_table then part := '[]'::jsonb;

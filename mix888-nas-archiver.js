@@ -10,9 +10,13 @@
         IV2607090001_บิลหน้า1_v1.png  ← หน้า A4 (ถ้าบิลยาวหลายหน้า)
         IV2607090001_สลิป1.jpg        ← สลิปโอนที่ใช้ตัดบิลนี้
      <NAS_ROOT>\2026\07\09072026\สรุปบิล_09072026.csv  ← สรุปรายวัน (เปิดด้วย Excel)
-     <NAS_ROOT>\ข้อมูลลูกค้า\BAM00006\                ← ลูกค้าเครดิตที่ admin อนุมัติแล้ว (โฟลเดอร์ตามรหัสลูกค้า)
+     <NAS_ROOT>\ข้อมูลลูกค้า\รายชื่อลูกค้า.csv            ← ลูกค้าทุกราย (รหัส ชื่อ เซลล์ ประเภทจ่าย เครดิต ติดต่อ ยอดซื้อ ฯลฯ)
+     <NAS_ROOT>\ข้อมูลลูกค้า\BAM00006\                ← ทุกลูกค้า 1 โฟลเดอร์ (ตามรหัสลูกค้า)
         ข้อมูลลูกค้า_BAM00006.txt                        ← ชื่อ/ที่อยู่/เงื่อนไขเครดิต/ผู้อนุมัติ (เขียนทับให้เป็นปัจจุบัน)
-        BAM00006_สำเนาบัตรประชาชน_20261001-1030.jpg       ← เอกสารขอใช้เครดิต (ไฟล์ใหม่เมื่อมีการเปลี่ยนเอกสาร)
+        จัดสินค้า_BAM00006.csv                          ← สินค้าที่จัดให้ + ราคาที่ตั้งให้ลูกค้ารายนี้ (ปัจจุบัน)
+        ประวัติราคา_BAM00006.csv                        ← ทุกครั้งที่แก้ราคาให้ลูกค้ารายนี้ (เก่า → ใหม่ ใครแก้ เมื่อไหร่)
+        ประวัติสั่งซื้อ_BAM00006.csv                    ← ลูกค้าเคยสั่งอะไร ราคาเท่าไร เมื่อไหร่ (ย้อนหลัง 2 ปี)
+        BAM00006_สำเนาบัตรประชาชน_20261001-1030.jpg       ← เอกสารขอใช้เครดิต (เฉพาะเครดิตที่อนุมัติแล้ว · ไฟล์ใหม่เมื่อเปลี่ยนเอกสาร)
         (เปลี่ยนรหัสลูกค้าในหลังบ้าน → โฟลเดอร์ถูกเปลี่ยนชื่อตามให้เอง ดูจากไฟล์ .customer_id ข้างใน)
      <NAS_ROOT>\ใบวางบิล\BAM00006\ใบวางบิล_2026-11-01.png  ← รูปใบวางบิลที่ระบบส่งให้ลูกค้า
      <NAS_ROOT>\สื่อสินค้า\สินค้า\<SKU>_<ชื่อ>_<รหัสไฟล์>.jpg   ← รูปสินค้า (เปลี่ยนรูป = ไฟล์ใหม่ ของเก่าไม่ลบ)
@@ -46,6 +50,7 @@ const PRUNE_PAID_AFTER_DAYS  = 30;    // ลบหลังจ่ายครบ
 const PRUNE_DAYS_BACK        = 400;   // มองหาบิลที่ควรลบย้อนหลังกี่วัน
 const PRUNE_BROADCAST_DAYS   = 7;     // สื่อบรอดแคสต์ (รูป/วิดีโอที่ส่งไลน์แล้ว) ลบออกจาก Supabase หลังเก็บลง NAS และเก่ากว่ากี่วัน (รูปสินค้าไม่ลบ — หน้าสั่งของยังใช้)
 const BACKUP_EVERY_DAYS      = 7;     // สำรองตารางข้อมูล (ลูกค้า สินค้า ออเดอร์ บิล การชำระ รายจ่าย …) เป็น CSV+JSON ทุกกี่วัน
+const ORDER_HISTORY_DAYS     = 730;   // ประวัติสั่งซื้อรายลูกค้า (ใน ข้อมูลลูกค้า/<รหัส>/) ย้อนหลังกี่วัน
 /* =========================================== */
 
 const fs   = require('fs');
@@ -169,7 +174,7 @@ async function download(url, dest){
 
 /* ================= ข้อมูลลูกค้าเครดิต + ใบวางบิล ================= */
 const CUST_DIR = 'ข้อมูลลูกค้า', STMT_DIR = 'ใบวางบิล', ID_FILE = '.customer_id';
-const DOC_LABEL = {id_card:'สำเนาบัตรประชาชน', house_reg:'สำเนาทะเบียนบ้าน', pp20:'ใบภพ20', dir_id_card:'สำเนาบัตรประชาชนกรรมการ', dir_house_reg:'สำเนาทะเบียนบ้านกรรมการ'};
+const DOC_LABEL = {id_card:'สำเนาบัตรประชาชน', house_reg:'สำเนาทะเบียนบ้าน', pp20:'ใบภพ20', company_cert:'หนังสือรับรองบริษัท', dir_id_card:'สำเนาบัตรประชาชนกรรมการ', dir_house_reg:'สำเนาทะเบียนบ้านกรรมการ'};
 function stampOf(iso){ const d = new Date(new Date(iso || Date.now()).getTime() + 7*3600*1000); return d.toISOString().slice(0,16).replace('T','-').replace(':',''); }
 // ไฟล์ใน bucket ส่วนตัว (credit-docs): ขอลิงก์ชั่วคราวก่อนแล้วค่อยโหลด
 async function downloadPrivate(bucket, objPath, dest){
@@ -181,6 +186,20 @@ async function downloadPrivate(bucket, objPath, dest){
   if(!d || !d.signedURL) throw new Error('ไม่ได้ลิงก์ไฟล์');
   await download(SUPABASE_URL + '/storage/v1' + d.signedURL, dest);
 }
+async function apiAll(pathAndQuery, pageSize = 1000){   // อ่านทีละหน้า (PostgREST) จนหมด
+  const out = [];
+  for(let off = 0; ; off += pageSize){
+    const page = await api(pathAndQuery + '&limit=' + pageSize + '&offset=' + off);
+    out.push(...page); if(page.length < pageSize) break;
+  }
+  return out;
+}
+function writeIfChanged(file, content){   // ไม่เขียนทับถ้าเนื้อหาเหมือนเดิม (ลดการเขียน NAS ทุก 30 นาที)
+  try{ if(fs.existsSync(file) && fs.readFileSync(file, 'utf8') === content) return false; }catch(e){}
+  fs.writeFileSync(file, content); return true;
+}
+const PAY_TH = {prepay: 'จ่ายก่อนส่ง', postpay: 'จ่ายหลังส่ง', credit: 'เครดิต'};
+const CR_TH  = {pending: 'รออนุมัติ', approved: 'อนุมัติแล้ว', rejected: 'ตีกลับ'};
 function readIdFile(dir){ try{ return fs.readFileSync(path.join(dir, ID_FILE), 'utf8').trim(); }catch(e){ return null; } }
 // โฟลเดอร์ลูกค้าตามรหัสปัจจุบัน — ถ้ารหัสเปลี่ยน (โฟลเดอร์เก่ามี .customer_id ตรงกัน) ให้เปลี่ยนชื่อโฟลเดอร์ตาม
 // โฟลเดอร์ตามรหัสลูกค้า (จำตัวตนด้วยไฟล์ .customer_id) — รหัสเปลี่ยน → เปลี่ยนชื่อโฟลเดอร์ + ไฟล์ข้างในที่ขึ้นต้นด้วยรหัสเดิม
@@ -227,33 +246,104 @@ function custInfoText(c){
   L.push('ที่อยู่จัดส่ง: ' + (c.ship_address || '-'));
   L.push('เลขผู้เสียภาษี: ' + (c.tax_id || '-') + '   เซลล์: ' + (c.sale_name || '-'));
   L.push('');
-  L.push('ประเภทการชำระ: เครดิต (' + (c.credit_entity === 'company' ? 'บริษัท/นิติบุคคล' : 'บุคคลธรรมดา') + ')');
-  L.push('เงื่อนไข: ' + (c.credit_mode === 'schedule' ? 'ตามรอบวางบิล' : 'เครดิต ' + (c.credit_days || 0) + ' วัน'));
-  if(sched.length){
-    L.push('ตารางรอบวางบิล:');
-    sched.forEach((p, i) => L.push('  งวด ' + (i+1) + ': ยอด ' + p.from + ' ถึง ' + p.to + ' · วางบิล ' + p.bill + ' · ชำระ ' + p.due));
-  }
-  L.push('สถานะเครดิต: ' + (c.credit_status === 'approved' ? 'อนุมัติแล้ว' : c.credit_status) + ' โดย ' + (c.credit_reviewed_by || '-') + ' เมื่อ ' + (c.credit_reviewed_at ? thDateTimeStr(c.credit_reviewed_at) : '-'));
-  L.push('กลุ่ม LINE: ' + (c.line_group_id || '-'));
+  const pt = c.pay_type || 'prepay';
+  if(pt === 'credit'){
+    L.push('ประเภทการชำระ: เครดิต (' + (c.credit_entity === 'company' ? 'บริษัท/นิติบุคคล' : 'บุคคลธรรมดา') + ')');
+    L.push('เงื่อนไข: ' + (c.credit_mode === 'schedule' ? 'ตามรอบวางบิล' : 'เครดิต ' + (c.credit_days || 0) + ' วัน'));
+    if(sched.length){
+      L.push('ตารางรอบวางบิล:');
+      sched.forEach((p, i) => L.push('  งวด ' + (i+1) + ': ยอด ' + p.from + ' ถึง ' + p.to + ' · วางบิล ' + p.bill + ' · ชำระ ' + p.due));
+    }
+    L.push('สถานะเครดิต: ' + (CR_TH[c.credit_status] || c.credit_status || '-') + ' โดย ' + (c.credit_reviewed_by || '-') + ' เมื่อ ' + (c.credit_reviewed_at ? thDateTimeStr(c.credit_reviewed_at) : '-'));
+  }else L.push('ประเภทการชำระ: ' + (PAY_TH[pt] || pt));
+  L.push('กลุ่มราคา: ' + ({base:'ราคากลาง', r20:'เรท 20 ลัง', r50:'เรท 50 ลัง', upc:'รวมส่งตจว'}[c.price_group] || c.price_group || 'ราคากลาง') + '   วิธีส่ง: ' + (c.delivery_method || '-') + '   เวลารับของ: ' + (c.receive_time || '-'));
+  L.push('ประเภทบิล: ' + (c.doc_type || '-') + (c.hide_prices ? '   (ซ่อนราคาจากหน้าสั่งของ)' : ''));
+  L.push('Google Map: ' + (c.map_link || '-'));
+  L.push('กลุ่ม LINE: ' + (c.line_group_name ? c.line_group_name + ' (' + c.line_group_id + ')' : (c.line_group_id || '-')));
+  if(c.parent_code) L.push('เป็นสาขาของ: ' + c.parent_code + (c.branch_name ? ' (' + c.branch_name + ')' : ''));
+  if(c.note) L.push('หมายเหตุ: ' + c.note);
+  if(c.crm_note) L.push('โน้ต CRM: ' + c.crm_note);
+  L.push('สถานะ: ' + (c.active === false ? 'ปิดใช้งาน' : 'ใช้งาน') + '   เพิ่มเมื่อ: ' + (c.created_at ? thDateTimeStr(c.created_at) : '-'));
+  if(c._stats) L.push('ยอดซื้อ (ย้อนหลัง ' + ORDER_HISTORY_DAYS + ' วัน): ' + c._stats.orders + ' ออเดอร์ · ' + Number(c._stats.total).toLocaleString('th-TH') + ' บาท · ล่าสุด ' + (c._stats.last ? thDateTimeStr(c._stats.last) : '-'));
   return '\uFEFF' + L.join('\r\n') + '\r\n';
 }
 async function syncCustomers(ROOT){
   let saved = 0, skipped = 0, failed = 0;
   const base = path.join(ROOT, CUST_DIR);
   fs.mkdirSync(base, {recursive: true});
-  const custs = await api('/rest/v1/customers?select=id,code,name,branch_name,contact_name,phone,tax_id,billing_address,ship_address,sale_name,pay_type,credit_mode,credit_days,credit_schedule,credit_entity,credit_status,credit_reviewed_by,credit_reviewed_at,line_group_id&pay_type=eq.credit&credit_status=eq.approved&order=code.asc&limit=5000');
-  const docs  = await api('/rest/v1/credit_docs?select=customer_id,doc_type,file_path,file_name,uploaded_at&limit=20000');
-  log('ลูกค้าเครดิตที่อนุมัติแล้ว ' + custs.length + ' ราย · เอกสาร ' + docs.length + ' ไฟล์');
-  const idToDir = readIdMap(base);
+  const custs = await apiAll('/rest/v1/customers?select=*&order=code.asc');
+  const docs  = await apiAll('/rest/v1/credit_docs?select=customer_id,doc_type,file_path,file_name,uploaded_at');
+  const prods = await apiAll('/rest/v1/products?select=id,sku,name,unit,base_price,price_r20,price_r50,price_upc,active');
+  const cps   = await apiAll('/rest/v1/customer_prices?select=customer_id,product_id,price');
+  let plog = []; try{ plog = await apiAll('/rest/v1/price_log?select=id,customer_id,product_id,field,old_price,new_price,action,source,changed_by,changed_at&order=id.asc'); }catch(e){ log('  ⚠️ อ่านประวัติราคาไม่ได้ (รัน mix888-price-log.sql หรือยัง?): ' + e.message); }
+  let lgroups = {}; try{ (await apiAll('/rest/v1/line_groups?select=group_id,name')).forEach(g => lgroups[g.group_id] = g.name); }catch(e){}
+  const since = new Date(Date.now() - ORDER_HISTORY_DAYS * 24 * 3600 * 1000).toISOString();
+  let orders = []; try{ orders = await apiAll('/rest/v1/orders?select=id,order_no,customer_id,created_at,status,total,created_by,order_items(product_id,qty,price,amount)&created_at=gte.' + encodeURIComponent(since) + '&order=created_at.asc'); }
+  catch(e){ log('  ⚠️ อ่านประวัติสั่งซื้อไม่ได้: ' + e.message); }
+  log('ลูกค้า ' + custs.length + ' ราย · จัดสินค้า ' + cps.length + ' แถว · ประวัติราคา ' + plog.length + ' · ออเดอร์ ' + orders.length);
+  const P = {}; prods.forEach(p => P[p.id] = p);
+  const codeOf = {}; custs.forEach(c => codeOf[c.id] = c.code);
+  const effPrice = (p, grp) => { const v = grp === 'r20' ? p.price_r20 : grp === 'r50' ? p.price_r50 : grp === 'upc' ? p.price_upc : null; return (v != null && v !== '') ? Number(v) : Number(p.base_price || 0); };
+  const priceName = grp => ({base:'ราคากลาง', r20:'เรท 20 ลัง', r50:'เรท 50 ลัง', upc:'รวมส่งตจว'}[grp] || 'ราคากลาง');
+  const fieldTh = f => ({price:'ราคาลูกค้า', base_price:'ราคากลาง', price_r20:'เรท 20 ลัง', price_r50:'เรท 50 ลัง', price_upc:'รวมส่งตจว'}[f] || f || '');
+  // สถิติซื้อต่อลูกค้า
+  const stats = {};
+  orders.forEach(o => { if((o.status || '') === 'cancelled') return; const st = stats[o.customer_id] || (stats[o.customer_id] = {orders: 0, total: 0, last: null}); st.orders++; st.total += Number(o.total || 0); if(!st.last || o.created_at > st.last) st.last = o.created_at; });
+  // รายชื่อลูกค้ารวม
+  const head = ['รหัส','ชื่อร้าน','สาขา','สาขาของ','เซลล์','ประเภทจ่าย','เครดิต','สถานะเครดิต','ผู้ติดต่อ','โทร','ที่อยู่ออกบิล','ผู้รับของ','โทรผู้รับ','ที่อยู่จัดส่ง','วิธีส่ง','เวลารับของ','กลุ่มราคา','ประเภทบิล','ซ่อนราคา','กลุ่ม LINE','ชื่อกลุ่ม LINE','โน้ต CRM','หมายเหตุ','สถานะ','เพิ่มเมื่อ','ออเดอร์ (' + ORDER_HISTORY_DAYS + ' วัน)','ยอดซื้อ','สั่งล่าสุด'];
+  const lines = [head.map(csvCell).join(',')];
   for(const c of custs){
+    const st = stats[c.id] || {orders: 0, total: 0, last: null};
+    lines.push([c.code, c.name, c.branch_name || '', c.parent_id ? (codeOf[c.parent_id] || '') : '', c.sale_name || '', PAY_TH[c.pay_type || 'prepay'] || c.pay_type,
+      c.pay_type === 'credit' ? (c.credit_mode === 'schedule' ? 'ตามรอบวางบิล' : (c.credit_days || 0) + ' วัน') : '', c.pay_type === 'credit' ? (CR_TH[c.credit_status] || '') : '',
+      c.contact_name || '', c.phone || '', c.billing_address || '', c.ship_receiver || '', c.ship_phone || '', c.ship_address || '', c.delivery_method || '', c.receive_time || '',
+      priceName(c.price_group), c.doc_type || '', c.hide_prices ? 'ใช่' : '', c.line_group_id || '', lgroups[c.line_group_id] || '', c.crm_note || '', c.note || '',
+      c.active === false ? 'ปิดใช้งาน' : 'ใช้งาน', c.created_at ? thDateTimeStr(c.created_at) : '', st.orders, st.total, st.last ? thDateTimeStr(st.last) : ''].map(csvCell).join(','));
+  }
+  writeIfChanged(path.join(base, 'รายชื่อลูกค้า.csv'), '\uFEFF' + lines.join('\r\n'));
+  // รายลูกค้า
+  const idToDir = readIdMap(base);
+  const cpBy = {}; cps.forEach(r => (cpBy[r.customer_id] = cpBy[r.customer_id] || []).push(r));
+  const plBy = {}; plog.forEach(r => { if(r.customer_id != null) (plBy[r.customer_id] = plBy[r.customer_id] || []).push(r); });
+  const plCentral = plog.filter(r => r.customer_id == null);
+  const oBy = {}; orders.forEach(o => (oBy[o.customer_id] = oBy[o.customer_id] || []).push(o));
+  for(const c of custs){
+    c.line_group_name = lgroups[c.line_group_id] || ''; c.parent_code = c.parent_id ? codeOf[c.parent_id] : ''; c._stats = stats[c.id] || null;
     const dir = ensureDirById(base, c.id, c.code, idToDir);
-    try{ fs.writeFileSync(path.join(dir, 'ข้อมูลลูกค้า_' + safeName(c.code) + '.txt'), custInfoText(c)); }catch(e){}
-    for(const d of docs.filter(x => x.customer_id === c.id)){
-      const name = safeName(c.code) + '_' + (DOC_LABEL[d.doc_type] || d.doc_type) + '_' + stampOf(d.uploaded_at) + extOf(d.file_name || d.file_path);
-      const dest = path.join(dir, name);
-      if(fs.existsSync(dest)){ skipped++; continue; }
-      try{ await downloadPrivate('credit-docs', d.file_path, dest); saved++; log('  💾 ' + path.join(CUST_DIR, safeName(c.code), name)); }
-      catch(e){ failed++; log('  ⚠️ โหลดเอกสาร ' + c.code + ' ' + name + ' ไม่ได้ — ' + e.message); }
+    writeIfChanged(path.join(dir, 'ข้อมูลลูกค้า_' + safeName(c.code) + '.txt'), custInfoText(c));
+    // จัดสินค้า (ปัจจุบัน)
+    const rows = (cpBy[c.id] || []).map(r => ({r, p: P[r.product_id]})).filter(x => x.p).sort((a, b) => String(a.p.sku || '').localeCompare(String(b.p.sku || '')));
+    const L1 = [['SKU','สินค้า','หน่วย','ราคาที่ตั้งให้ลูกค้า','ราคาตามกลุ่ม (' + priceName(c.price_group) + ')','ราคากลาง','ต่างจากราคากลาง','ราคาที่ใช้จริง'].map(csvCell).join(',')];
+    rows.forEach(({r, p}) => { const grp = effPrice(p, c.price_group); const use = (r.price != null && r.price !== '') ? Number(r.price) : grp;
+      L1.push([p.sku || '', p.name || '', p.unit || '', r.price != null ? Number(r.price) : '', grp, Number(p.base_price || 0), (use - Number(p.base_price || 0)).toFixed(2), use].map(csvCell).join(',')); });
+    L1.push('', ['', 'สินค้าที่จัดให้ ' + rows.length + ' รายการ · อัปเดต ' + thDateTimeStr(new Date().toISOString())].map(csvCell).join(','));
+    if(rows.length) writeIfChanged(path.join(dir, 'จัดสินค้า_' + safeName(c.code) + '.csv'), '\uFEFF' + L1.join('\r\n'));
+    // ประวัติราคา (ของลูกค้ารายนี้ + ราคากลางเฉพาะสินค้าที่จัดให้)
+    const assignedIds = new Set(rows.map(x => x.p.id));
+    const hist = [...(plBy[c.id] || []), ...plCentral.filter(r => assignedIds.has(r.product_id))].sort((a, b) => a.id - b.id);
+    if(hist.length){
+      const L2 = [['วันเวลา','SKU','สินค้า','รายการ','ราคาเก่า','ราคาใหม่','เปลี่ยน','โดย','ที่มา'].map(csvCell).join(',')];
+      hist.forEach(r => { const p = P[r.product_id] || {}; L2.push([thDateTimeStr(r.changed_at), p.sku || '', p.name || '', (r.customer_id == null ? 'ราคากลาง: ' : '') + fieldTh(r.field) + (r.action ? ' (' + r.action + ')' : ''),
+        r.old_price ?? '', r.new_price ?? '', (r.old_price != null && r.new_price != null) ? (Number(r.new_price) - Number(r.old_price)).toFixed(2) : '', r.changed_by || '', r.source || ''].map(csvCell).join(',')); });
+      writeIfChanged(path.join(dir, 'ประวัติราคา_' + safeName(c.code) + '.csv'), '\uFEFF' + L2.join('\r\n'));
+    }
+    // ประวัติสั่งซื้อ (รายบรรทัดสินค้า)
+    const os = oBy[c.id] || [];
+    if(os.length){
+      const L3 = [['วันเวลา','เลขออเดอร์','สถานะ','ผู้สั่ง','SKU','สินค้า','จำนวน','หน่วย','ราคา/หน่วย','จำนวนเงิน','ยอดออเดอร์'].map(csvCell).join(',')];
+      os.forEach(o => (Array.isArray(o.order_items) ? o.order_items : []).forEach(it => { const p = P[it.product_id] || {};
+        L3.push([thDateTimeStr(o.created_at), o.order_no || '', o.status === 'cancelled' ? 'ยกเลิก' : (o.status || ''), o.created_by || 'ลูกค้าสั่งเอง', p.sku || '', p.name || '', Number(it.qty || 0), p.unit || '', Number(it.price || 0), Number(it.amount || 0), Number(o.total || 0)].map(csvCell).join(',')); }));
+      writeIfChanged(path.join(dir, 'ประวัติสั่งซื้อ_' + safeName(c.code) + '.csv'), '\uFEFF' + L3.join('\r\n'));
+    }
+    // เอกสารเครดิต (เฉพาะอนุมัติแล้ว)
+    if(c.pay_type === 'credit' && c.credit_status === 'approved'){
+      for(const d of docs.filter(x => x.customer_id === c.id)){
+        const name = safeName(c.code) + '_' + (DOC_LABEL[d.doc_type] || d.doc_type) + '_' + stampOf(d.uploaded_at) + extOf(d.file_name || d.file_path);
+        const dest = path.join(dir, name);
+        if(fs.existsSync(dest)){ skipped++; continue; }
+        try{ await downloadPrivate('credit-docs', d.file_path, dest); saved++; log('  💾 ' + path.join(CUST_DIR, safeName(c.code), name)); }
+        catch(e){ failed++; log('  ⚠️ โหลดเอกสาร ' + c.code + ' ' + name + ' ไม่ได้ — ' + e.message); }
+      }
     }
   }
   return {saved, skipped, failed};

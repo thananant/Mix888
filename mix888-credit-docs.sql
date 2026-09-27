@@ -15,7 +15,7 @@ update customers set credit_status = 'pending' where pay_type = 'credit' and cre
 create table if not exists credit_docs (
   id          bigserial primary key,
   customer_id integer not null references customers(id) on delete cascade,
-  doc_type    text    not null,   -- id_card | house_reg | pp20 | dir_id_card | dir_house_reg
+  doc_type    text    not null,   -- id_card | house_reg | pp20 | company_cert | dir_id_card | dir_house_reg
   file_path   text    not null,   -- path ใน bucket credit-docs
   file_name   text,
   stamped     boolean not null default false,   -- admin ตรวจแล้วว่ามีตราประทับบริษัท (เฉพาะบริษัท)
