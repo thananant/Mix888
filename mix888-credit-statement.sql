@@ -32,6 +32,7 @@ grant usage, select on sequence credit_statements_id_seq to anon, authenticated;
 
 -- กลุ่มไลน์รีพอร์ต (ตั้งในหลังบ้านได้เช่นกัน)
 insert into settings(key, value) values ('line_report_group', '') on conflict (key) do nothing;
+insert into settings(key, value) values ('unpaid_report_last', '') on conflict (key) do nothing;   -- วันที่ส่งสรุปค้างชำระล่าสุด (กันส่งซ้ำในวัน)
 
 -- ตั้งเวลา: ทุกวัน 10:00 น. เวลาไทย (= 03:00 UTC) ให้เรียก Edge Function credit-statement
 create extension if not exists pg_cron;

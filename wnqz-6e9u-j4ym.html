@@ -1585,8 +1585,10 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-g mini" style="margin-left:8px;vertical-align:middle" onclick="stmtLoad()">🔄</button>
       <button class="btn-g mini" style="vertical-align:middle" onclick="stmtCopyCode(this)" title="คัดลอกโค้ด Edge Function credit-statement ไปวางใน Supabase Dashboard">📋 คัดลอกโค้ดฟังก์ชัน</button>
       <button class="btn-g mini" style="vertical-align:middle" onclick="stmtRunNow(this)" title="สั่งให้ระบบตรวจรอบของวันนี้ทันที (เหมือนที่ cron ทำตอน 10:00)">▶️ รันรอบวันนี้</button>
+      <button class="btn-s mini" style="vertical-align:middle" onclick="stmtReportNow(this)" title="ส่งสรุปบิลค้างชำระ (ส่งของแล้ว) เข้ากลุ่มรีพอร์ตเดี๋ยวนี้">📊 ส่งสรุปค้างจ่ายตอนนี้</button>
     </h3>
-    <p class="hint" style="margin-top:0">ทุกวัน 10:00 น. ระบบส่งใบวางบิล (รูป) + บิลที่ยังไม่จ่าย เข้ากลุ่มไลน์ของร้านที่ถึงวันวางบิล และส่งสำเนาเข้ากลุ่มรีพอร์ต · เลยวันครบกำหนด 3 วันแล้วยังค้าง → ส่งข้อความขอสลิป ·
+    <p class="hint" style="margin-top:0">ทุกวัน 10:00 น. ระบบ (1) ส่ง<b>สรุปบิลค้างชำระ</b>เข้ากลุ่มรีพอร์ต — เฉพาะบิลที่ส่งของแล้ว: ลูกค้าจ่ายก่อนส่ง/จ่ายหลังส่งทุกบิลค้าง + ลูกค้าเครดิตที่เลยกำหนดเกิน 3 วัน (ร้าน · ประเภท · กี่บิล · ยอดรวม) ·
+      (2) ส่งใบวางบิล (รูป) + บิลที่ยังไม่จ่าย เข้ากลุ่มไลน์ของร้านที่ถึงวันวางบิล และส่งสำเนาเข้ากลุ่มรีพอร์ต · (3) เลยวันครบกำหนด 3 วันแล้วยังค้าง → ส่งข้อความขอสลิป · ร้านที่ติ๊ก 🙈 ซ่อนราคา จะไม่ส่งให้ลูกค้า แต่ส่งใบวางบิล/ทวงสลิปเข้ากลุ่มรีพอร์ตแทน ·
       ติดตั้งครั้งเดียว: รัน <b>mix888-credit-statement.sql</b> + deploy Edge Function <b>credit-statement</b> (ปิด Verify JWT) ด้วยโค้ดจากปุ่มคัดลอก</p>
     <div id="stmt-status" class="hint" style="margin:0 0 8px"></div>
     <h4 style="font-size:14px;margin:8px 0 6px">🗓️ งวดที่จะถึงใน 14 วัน / ถึงแล้ว</h4>
@@ -13109,7 +13111,7 @@ async function stmtLoad(){
     const sSent=sentKey.has(c.id+'|'+p.bill+'|statement'),rSent=sentKey.has(c.id+'|'+p.bill+'|reminder');
     const status=sSent?'<span class="tag tag-ok">ส่งใบวางบิลแล้ว</span>':(p.bill<=today?'<span class="tag tag-out">ถึงวันวางบิลแล้ว ยังไม่ส่ง</span>':'<span class="tag tag-low">รอ '+stmtFd(p.bill)+'</span>');
     const rstat=rSent?' <span class="tag tag-ok">ทวงสลิปแล้ว</span>':(rd<=today?' <span class="tag tag-low">ครบกำหนด+3 แล้ว</span>':'');
-    const noLine=!c.line_group_id?' <span class="tag tag-out" title="ร้านนี้ยังไม่ผูกกลุ่มไลน์ ส่งไม่ได้">ไม่มีกลุ่มไลน์</span>':'';
+    const noLine=c.hide_prices?' <span class="tag tag-low" title="ร้านซ่อนราคา — ใบวางบิล/ทวงสลิปจะส่งเข้ากลุ่มรีพอร์ตแทน">🙈 ส่งเข้ารีพอร์ตแทน</span>':(!c.line_group_id?' <span class="tag tag-out" title="ร้านนี้ยังไม่ผูกกลุ่มไลน์ ส่งไม่ได้">ไม่มีกลุ่มไลน์</span>':'');
     return `<tr><td><b>${esc(c.code)}</b> ${esc(c.name)}${c.branch_name?' • '+esc(c.branch_name):''}${noLine}</td><td style="white-space:nowrap">${stmtFd(p.from)} – ${stmtFd(p.to)}</td><td style="white-space:nowrap">${stmtFd(p.bill)}</td><td style="white-space:nowrap">${stmtFd(p.due)}</td><td>${status}${rstat}</td>
       <td style="white-space:nowrap"><button class="btn-g mini" onclick="stmtPreview(${c.id},'${p.bill}')">👁️ ตัวอย่าง</button> <button class="btn-s mini" onclick="stmtSend(${c.id},'${p.bill}','statement',this)">📤 ส่ง${sSent?'ซ้ำ':'ตอนนี้'}</button> <button class="btn-g mini" onclick="stmtSend(${c.id},'${p.bill}','reminder',this)">⏰ ทวงสลิป</button></td></tr>`;
   }).join(''):'<tr><td colspan="6" class="empty">ไม่มีงวดใน 14 วันข้างหน้า (ลูกค้าเครดิตแบบตารางรอบวางบิล)</td></tr>';
@@ -13154,6 +13156,15 @@ async function stmtRunNow(btn){
     if(d.error)toast('❌ '+d.error);else toast('เสร็จ: ใบวางบิล '+(d.statements||[]).length+' · ทวงสลิป '+(d.reminders||[]).length+(d.errors&&d.errors.length?' · ผิดพลาด '+d.errors.length:''));
   }catch(e){toast('เรียกฟังก์ชันไม่ได้: '+(e.message||e));}
   btn.disabled=false;stmtLoad();
+}
+async function stmtReportNow(btn){
+  if(!appSettings.line_report_group){toast('ตั้ง LINE Group ID กลุ่มรีพอร์ตก่อน แล้วกดบันทึกตั้งค่า');return;}
+  if(!confirm('ส่งสรุปบิลค้างชำระ (ส่งของแล้ว) เข้ากลุ่มรีพอร์ตตอนนี้?'))return;
+  btn.disabled=true;
+  try{const r=await fetch(STMT_FN+'?report=1',{headers:stmtHdr()});const d=await r.json();
+    const x=d.report||{};if(d.error)toast('❌ '+d.error);else if(!x.ok)toast('❌ ส่งไม่สำเร็จ: '+(x.err||''));else toast('✅ ส่งสรุปแล้ว — ค้าง '+x.shops+' ร้าน '+x.bills+' บิล '+fmt(x.sum)+' บาท');
+  }catch(e){toast('เรียกฟังก์ชันไม่ได้: '+(e.message||e)+' — deploy credit-statement แล้วหรือยัง?');}
+  btn.disabled=false;
 }
 async function stmtCopyCode(btn){
   const code=document.getElementById('stmtFnCode');if(!code)return;
@@ -13256,8 +13267,14 @@ async function startApp(){
 //    ?preview=1&customer=<id>&bill=YYYY-MM-DD   → คืนรูป PNG ใบวางบิลงวดนั้น ไม่ส่ง ไม่บันทึก
 //    ?force=1&customer=<id>&bill=YYYY-MM-DD     → ส่งใบวางบิลงวดนั้นทันที (ส่งซ้ำได้)
 //    ?force=1&kind=reminder&customer=<id>&bill=YYYY-MM-DD → ส่งข้อความทวงสลิปงวดนั้นทันที
+//    ?report=1                                   → ส่ง "สรุปบิลค้างชำระรายวัน" เข้ากลุ่มรีพอร์ตทันที (ส่งซ้ำได้)
 //    ?date=YYYY-MM-DD                            → จำลองว่าวันนี้คือวันไหน (ทดสอบ)
-//    ไม่มีพารามิเตอร์ = รอบอัตโนมัติ (cron เรียกทุกวัน 10:00)
+//    ไม่มีพารามิเตอร์ = รอบอัตโนมัติ (cron เรียกทุกวัน 10:00) = ใบวางบิล + ทวงสลิป + สรุปค้างชำระรายวัน
+//
+//  สรุปค้างชำระรายวัน (กลุ่มรีพอร์ต): บิลที่ "ส่งของแล้ว" (ship_status=shipped) และยังไม่ชำระ
+//    - ลูกค้าจ่ายก่อนส่ง / จ่ายหลังส่ง: ทุกบิลค้าง → ร้าน · ประเภท · กี่บิล · ยอดรวม
+//    - ลูกค้าเครดิต: เฉพาะที่เลยวันครบกำหนดมาแล้ว 3 วันขึ้นไป (ตามตารางรอบวางบิล หรือ วันบิล + จำนวนวันเครดิต)
+//  ร้านที่ติ๊ก "ซ่อนราคาจากหน้าสั่งของ" (hide_prices) → ใบวางบิล/ทวงสลิป ไม่ส่งเข้ากลุ่มลูกค้า ส่งเข้ากลุ่มรีพอร์ตแทน
 // ============================================================
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { initWasm, Resvg } from "https://esm.sh/@resvg/resvg-wasm@2.6.2";
@@ -13416,13 +13433,74 @@ async function linePush(to: string, messages: unknown[]) {
   return { ok: true };
 }
 const imgMsg = (url: string) => ({ type: "image", originalContentUrl: url, previewImageUrl: url });
+const PAY_LABEL: Record<string, string> = { prepay: "จ่ายก่อนส่ง", postpay: "จ่ายหลังส่ง", credit: "เครดิต" };
+function dayDiff(a: string, b: string) { return Math.round((new Date(b + "T00:00:00Z").getTime() - new Date(a + "T00:00:00Z").getTime()) / 86400000); }
+function chunkText(lines: string[], max = 4500) {   // LINE รับข้อความได้ 5000 ตัวอักษร → แบ่งเป็นหลายข้อความ
+  const out: string[] = []; let cur = "";
+  for (const l of lines) { if ((cur + "\n" + l).length > max && cur) { out.push(cur); cur = l; } else cur = cur ? cur + "\n" + l : l; }
+  if (cur) out.push(cur);
+  return out;
+}
+// สรุปบิลค้างชำระรายวัน → กลุ่มรีพอร์ต
+async function dailyUnpaidReport(db: any, reportGid: string, today: string) {
+  if (!reportGid) return { ok: false, err: "ยังไม่ได้ตั้งกลุ่มรีพอร์ต" };
+  const { data: custs, error: ce } = await db.from("customers").select("id,code,name,branch_name,sale_name,pay_type,credit_mode,credit_days,credit_schedule,active");
+  if (ce) return { ok: false, err: ce.message };
+  const cmap: Record<number, any> = {}; (custs || []).forEach((c: any) => cmap[c.id] = c);
+  // บิลที่ส่งของแล้วและยังไม่ชำระ (ดึงทีละหน้า)
+  const bills: any[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db.from("bills").select("id,bill_no,customer_id,total,paid_amount,created_at,payment_status,ship_status")
+      .eq("ship_status", "shipped").neq("payment_status", "paid").order("created_at").range(from, from + 999);
+    if (error) return { ok: false, err: error.message };
+    bills.push(...(data || [])); if (!data || data.length < 1000) break;
+  }
+  const byCust: Record<number, { c: any; n: number; sum: number; oldest: string; overdue: string | null; overdueDays: number }> = {};
+  for (const b of bills) {
+    const c = cmap[b.customer_id]; if (!c) continue;
+    const d = thDate(b.created_at);
+    const owed = Math.max(0, (Number(b.total) || 0) - (Number(b.paid_amount) || 0));
+    if (owed <= 0) continue;
+    const pt = c.pay_type || "prepay";
+    let due: string | null = null;
+    if (pt === "credit") {
+      if (c.credit_mode === "schedule" && Array.isArray(c.credit_schedule)) {
+        const p = c.credit_schedule.find((x: any) => x && x.from && x.to && d >= x.from && d <= x.to);
+        due = p ? p.due : null;
+      } else if (c.credit_days) due = addDays(d, Number(c.credit_days));
+      if (!due) continue;                                   // เครดิตแต่หาวันครบกำหนดไม่ได้ (ยังไม่ตั้งตาราง) → ข้าม
+      if (dayDiff(due, today) < REMIND_AFTER_DAYS) continue; // ยังไม่เลยกำหนด 3 วัน → ยังไม่ต้องแจ้ง
+    }
+    const g = byCust[c.id] || (byCust[c.id] = { c, n: 0, sum: 0, oldest: d, overdue: null, overdueDays: 0 });
+    g.n++; g.sum += owed; if (d < g.oldest) g.oldest = d;
+    if (due && (!g.overdue || due < g.overdue)) { g.overdue = due; g.overdueDays = dayDiff(due, today); }
+  }
+  const label = (c: any) => c.code + " " + c.name + (c.branch_name ? " • " + c.branch_name : "");
+  const list = Object.values(byCust).sort((a, b) => b.sum - a.sum);
+  const normal = list.filter((g) => (g.c.pay_type || "prepay") !== "credit"), credit = list.filter((g) => g.c.pay_type === "credit");
+  const sumOf = (arr: any[]) => arr.reduce((s, g) => s + g.sum, 0), nOf = (arr: any[]) => arr.reduce((s, g) => s + g.n, 0);
+  const lines: string[] = ["📊 สรุปบิลค้างชำระ (เฉพาะส่งของแล้ว) — " + fdLong(today), ""];
+  lines.push("💵 จ่ายก่อนส่ง / จ่ายหลังส่ง: " + normal.length + " ร้าน · " + nOf(normal) + " บิล · " + money(sumOf(normal)) + " บาท");
+  if (!normal.length) lines.push("   ✅ ไม่มีค้าง");
+  normal.forEach((g, i) => lines.push((i + 1) + ". " + label(g.c) + " (" + (PAY_LABEL[g.c.pay_type || "prepay"]) + ")" + (g.c.sale_name ? " · เซลล์ " + g.c.sale_name : "")
+    + "\n   ค้าง " + g.n + " บิล · " + money(g.sum) + " บาท · เก่าสุด " + fdShort(g.oldest) + " (" + dayDiff(g.oldest, today) + " วัน)"));
+  lines.push("");
+  lines.push("⏰ เครดิตเลยกำหนดชำระเกิน " + REMIND_AFTER_DAYS + " วัน: " + credit.length + " ร้าน · " + nOf(credit) + " บิล · " + money(sumOf(credit)) + " บาท");
+  if (!credit.length) lines.push("   ✅ ไม่มี");
+  credit.forEach((g, i) => lines.push((i + 1) + ". " + label(g.c) + " (" + (g.c.credit_mode === "schedule" ? "เครดิตรอบวางบิล" : "เครดิต " + (g.c.credit_days || 0) + " วัน") + ")" + (g.c.sale_name ? " · เซลล์ " + g.c.sale_name : "")
+    + "\n   ค้าง " + g.n + " บิล · " + money(g.sum) + " บาท · ครบกำหนด " + fdShort(g.overdue || "") + " (เลยมา " + g.overdueDays + " วัน)"));
+  lines.push("", "รวมค้างทั้งหมด " + money(sumOf(list)) + " บาท · " + list.length + " ร้าน");
+  const msgs = chunkText(lines).map((t) => ({ type: "text", text: t }));
+  const r = await linePush(reportGid, msgs);
+  return { ok: r.ok, err: r.err, shops: list.length, bills: nOf(list), sum: sumOf(list), normal: normal.length, credit: credit.length };
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   const q = new URL(req.url).searchParams;
   const gate = Deno.env.get("STATEMENT_KEY");
   if (gate && q.get("key") !== gate && req.headers.get("x-statement-key") !== gate) return json({ error: "key ไม่ถูกต้อง" }, 401);
-  const preview = q.get("preview") === "1", force = q.get("force") === "1";
+  const preview = q.get("preview") === "1", force = q.get("force") === "1", reportOnly = q.get("report") === "1";
   const onlyCust = Number(q.get("customer")) || null, onlyBill = q.get("bill") || null, kindParam = q.get("kind") || "";
   const today = q.get("date") || todayTh();
   const db = createClient(SUPABASE_URL, SERVICE_KEY);
@@ -13432,7 +13510,13 @@ Deno.serve(async (req) => {
     const S: Record<string, string> = {}; (stRows || []).forEach((r: any) => S[r.key] = r.value);
     const shop = { name: S.shop_name || "Mix Fresh 168", address: S.shop_address || "", phone: S.shop_phone || "", taxid: S.shop_taxid || "" };
     const reportGid = S.line_report_group || "";
-    let cq = db.from("customers").select("id,code,name,branch_name,contact_name,phone,billing_address,line_group_id,credit_mode,credit_schedule,active,sale_name").eq("pay_type", "credit").eq("credit_mode", "schedule");
+    // ---- สรุปค้างชำระรายวัน → กลุ่มรีพอร์ต (รอบอัตโนมัติวันละครั้ง หรือ ?report=1 สั่งเอง)
+    if (reportOnly || (!preview && !force && S.unpaid_report_last !== today)) {
+      out.report = await dailyUnpaidReport(db, reportGid, today);
+      if (out.report.ok && !reportOnly) await db.from("settings").upsert({ key: "unpaid_report_last", value: today }, { onConflict: "key" });
+      if (reportOnly) return json(out);
+    }
+    let cq = db.from("customers").select("id,code,name,branch_name,contact_name,phone,billing_address,line_group_id,credit_mode,credit_schedule,active,sale_name,hide_prices").eq("pay_type", "credit").eq("credit_mode", "schedule");
     if (onlyCust) cq = cq.eq("id", onlyCust);
     const { data: custs, error: ce } = await cq;
     if (ce) throw new Error("อ่านลูกค้าไม่ได้: " + ce.message);
@@ -13459,6 +13543,10 @@ Deno.serve(async (req) => {
         const custInfo = { code: c.code, name: c.name, branch: c.branch_name, contact: c.contact_name, phone: c.phone, address: c.billing_address };
         const built = buildStatementSvg({ shop, cust: custInfo, period: p, rows, issued: today });
         const label = c.code + " " + c.name + (c.branch_name ? " • " + c.branch_name : "");
+        // ร้านที่ "ซ่อนราคาจากหน้าสั่งของ" → ไม่ส่งใบวางบิล/ทวงสลิปเข้ากลุ่มลูกค้า ส่งเข้ากลุ่มรีพอร์ตแทน (ให้ทีมงานติดต่อเอง)
+        const hidden = !!c.hide_prices;
+        const target = hidden ? reportGid : c.line_group_id;
+        const hiddenNote = hidden ? "\n🙈 ร้านนี้ซ่อนราคา — ไม่ได้ส่งให้ลูกค้า ส่งเข้ากลุ่มรีพอร์ตแทน" : "";
 
         if (preview) { const png = await svgToPng(built.svg); return new Response(png, { headers: { ...CORS, "Content-Type": "image/png" } }); }
 
@@ -13475,11 +13563,12 @@ Deno.serve(async (req) => {
               + "\nชำระแล้ว " + money(built.paid) + " · ยอดค้าง " + money(built.unpaid) + " บาท"
               + "\n📅 ครบกำหนดชำระ " + fdLong(p.due)
               + (built.nUnpaid ? "\n\nแนบบิลที่ยังไม่ชำระ " + built.nUnpaid + " ใบ ด้านล่างค่ะ 🙏" : "\n\nยอดรอบนี้ชำระครบแล้ว ขอบคุณค่ะ 🙏");
-            const msgs: unknown[] = [{ type: "text", text: intro }, imgMsg(rec.image_url)];
+            const msgs: unknown[] = [{ type: "text", text: intro + hiddenNote }, imgMsg(rec.image_url)];
             rows.filter((r: any) => !r.paid).forEach((r: any) => r.images.forEach((u: string) => msgs.push(imgMsg(u))));
-            const r1 = await linePush(c.line_group_id, msgs);
+            const r1 = await linePush(target, msgs);
             rec.line_ok = r1.ok; if (!r1.ok) rec.error = r1.err;
-            if (reportGid) {
+            if (hidden) { rec.report_ok = r1.ok; rec.error = r1.ok ? "ซ่อนราคา → ส่งเข้ากลุ่มรีพอร์ตแทน" : rec.error; }
+            else if (reportGid) {
               const r2 = await linePush(reportGid, [{ type: "text", text: "📤 ส่งใบวางบิลแล้ว" + (r1.ok ? " ✅" : " ❌ (" + r1.err + ")") + "\nร้าน " + label + (c.sale_name ? " · เซลล์ " + c.sale_name : "") + "\nรอบ " + fdShort(p.from) + " – " + fdShort(p.to) + " · " + rows.length + " บิล\nยอดรวม " + money(built.total) + " · ค้าง " + money(built.unpaid) + " บาท\nครบกำหนด " + fdLong(p.due) }, imgMsg(rec.image_url)]);
               rec.report_ok = r2.ok;
             }
@@ -13496,9 +13585,10 @@ Deno.serve(async (req) => {
             const txt = "สวัสดีค่ะ ร้าน " + (c.name || "") + " 🙏\nรอบยอด " + fdShort(p.from) + " – " + fdShort(p.to) + " ครบกำหนดชำระ " + fdLong(p.due) + " แล้ว\nยังมีบิลค้างชำระ " + unpaidRows.length + " ใบ รวม " + money(built.unpaid) + " บาท\n"
               + unpaidRows.map((r: any) => "• " + r.bill_no + " (" + fdShort(r.date) + ") " + money(r.total)).join("\n")
               + "\n\nรบกวนขอสลิปการโอนเงินด้วยค่ะ หากชำระสินค้าเข้ามาแล้ว ขอบคุณค่ะ 🙏";
-            const r1 = await linePush(c.line_group_id, [{ type: "text", text: txt }]);
+            const r1 = await linePush(target, [{ type: "text", text: txt + hiddenNote }]);
             rec.line_ok = r1.ok; if (!r1.ok) rec.error = r1.err;
-            if (reportGid) { const r2 = await linePush(reportGid, [{ type: "text", text: "⏰ ทวงสลิป" + (r1.ok ? " ✅" : " ❌ (" + r1.err + ")") + "\nร้าน " + label + (c.sale_name ? " · เซลล์ " + c.sale_name : "") + "\nเลยกำหนด " + fdLong(p.due) + " มา " + REMIND_AFTER_DAYS + " วัน\nค้าง " + unpaidRows.length + " บิล รวม " + money(built.unpaid) + " บาท" }]); rec.report_ok = r2.ok; }
+            if (hidden) { rec.report_ok = r1.ok; rec.error = r1.ok ? "ซ่อนราคา → ส่งเข้ากลุ่มรีพอร์ตแทน" : rec.error; }
+            else if (reportGid) { const r2 = await linePush(reportGid, [{ type: "text", text: "⏰ ทวงสลิป" + (r1.ok ? " ✅" : " ❌ (" + r1.err + ")") + "\nร้าน " + label + (c.sale_name ? " · เซลล์ " + c.sale_name : "") + "\nเลยกำหนด " + fdLong(p.due) + " มา " + REMIND_AFTER_DAYS + " วัน\nค้าง " + unpaidRows.length + " บิล รวม " + money(built.unpaid) + " บาท" }]); rec.report_ok = r2.ok; }
           }
           await db.from("credit_statements").insert(rec);
           out.reminders.push({ customer: label, bill: p.bill, ok: rec.line_ok, unpaid: rec.unpaid, note: rec.error });
