@@ -757,13 +757,24 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div class="row" style="margin-top:10px">
       <div style="flex:2;min-width:240px"><label>Google Map Link</label><input id="c-map" style="width:100%" placeholder="https://maps.app.goo.gl/…"></div>
-      <div style="min-width:320px"><label>เวลารับของ (ตั้งแต่ – ถึง)</label>
-        <div style="display:flex;align-items:center;gap:5px">
-          <select id="c-rt-fh" onchange="composeRtime()" style="width:70px"></select><b>:</b>
-          <select id="c-rt-fm" onchange="composeRtime()" style="width:64px"></select>
-          <span style="color:var(--muted)">ถึง</span>
-          <select id="c-rt-th" onchange="composeRtime()" style="width:70px"></select><b>:</b>
-          <select id="c-rt-tm" onchange="composeRtime()" style="width:64px"></select>
+      <div style="min-width:320px"><label>เวลารับของ</label>
+        <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+          <select id="c-rt-mode" onchange="rtModeUI();composeRtime()" style="min-width:150px">
+            <option value="">— เลือก —</option>
+            <option value="none">1. ไม่ระบุเวลาจัดส่ง</option>
+            <option value="before">2. จัดส่งก่อน…</option>
+            <option value="range">3. ส่งได้ตั้งแต่…ถึง…</option>
+          </select>
+          <span id="c-rt-from" style="display:none;align-items:center;gap:5px">
+            <span id="c-rt-lbl-from" style="color:var(--muted)">ตั้งแต่</span>
+            <select id="c-rt-fh" onchange="composeRtime()" style="width:70px"></select><b>:</b>
+            <select id="c-rt-fm" onchange="composeRtime()" style="width:64px"></select>
+          </span>
+          <span id="c-rt-to" style="display:none;align-items:center;gap:5px">
+            <span style="color:var(--muted)">ถึง</span>
+            <select id="c-rt-th" onchange="composeRtime()" style="width:70px"></select><b>:</b>
+            <select id="c-rt-tm" onchange="composeRtime()" style="width:64px"></select>
+          </span>
         </div>
         <input id="c-rtime" type="hidden">
       </div>
@@ -4449,24 +4460,44 @@ function initRtimeSelects(){
   document.getElementById('c-rt-fm').innerHTML=mOpts;
   document.getElementById('c-rt-tm').innerHTML=mOpts;
 }
+// เวลารับของ 3 แบบ (เก็บเป็นข้อความใน receive_time ให้บิล/ไลน์แสดงได้เหมือนเดิม):
+//   none  → "ไม่ระบุเวลา" · before → "ก่อน 10.00" · range → "10.00-20.00"
+const RT_NONE='ไม่ระบุเวลา';
+function rtModeUI(){
+  const m=document.getElementById('c-rt-mode').value;
+  document.getElementById('c-rt-from').style.display=(m==='before'||m==='range')?'inline-flex':'none';
+  document.getElementById('c-rt-to').style.display=m==='range'?'inline-flex':'none';
+  document.getElementById('c-rt-lbl-from').textContent=m==='before'?'ก่อน':'ตั้งแต่';
+}
 function composeRtime(){
+  const m=document.getElementById('c-rt-mode').value;
   const fh=document.getElementById('c-rt-fh').value, fm=document.getElementById('c-rt-fm').value;
   const th=document.getElementById('c-rt-th').value, tm=document.getElementById('c-rt-tm').value;
-  document.getElementById('c-rtime').value=(fh&&th)?`${fh}.${fm||'00'}-${th}.${tm||'00'}`:'';
+  let v='';
+  if(m==='none')v=RT_NONE;
+  else if(m==='before')v=fh?`ก่อน ${fh}.${fm||'00'}`:'';
+  else if(m==='range')v=(fh&&th)?`${fh}.${fm||'00'}-${th}.${tm||'00'}`:'';
+  document.getElementById('c-rtime').value=v;
 }
 function setRtime(val){
-  // รองรับค่าเดิมที่พิมพ์มือ เช่น "08.00-19.00", "8:30 - 17.45"
-  const ids=['c-rt-fh','c-rt-fm','c-rt-th','c-rt-tm'];
-  ids.forEach(id=>document.getElementById(id).value='');
+  // รองรับค่าเดิมที่พิมพ์มือ เช่น "08.00-19.00", "8:30 - 17.45", "ก่อน 10.00", "ไม่ระบุเวลา"
+  ['c-rt-fh','c-rt-fm','c-rt-th','c-rt-tm','c-rt-mode'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('c-rtime').value=val||'';
-  const m=String(val||'').match(/(\d{1,2})[.:](\d{2})\s*[-–]\s*(\d{1,2})[.:](\d{2})/);
-  if(!m)return;
+  const str=String(val||'').trim();
   const snap=x=>['00','15','30','45'].includes(x)?x:String(Math.round(parseInt(x,10)/15)*15%60).padStart(2,'0');
-  document.getElementById('c-rt-fh').value=String(parseInt(m[1],10)).padStart(2,'0');
-  document.getElementById('c-rt-fm').value=snap(m[2]);
-  document.getElementById('c-rt-th').value=String(parseInt(m[3],10)).padStart(2,'0');
-  document.getElementById('c-rt-tm').value=snap(m[4]);
-  composeRtime();
+  const hh=x=>String(parseInt(x,10)).padStart(2,'0');
+  let m;
+  if(!str){rtModeUI();return;}
+  if(/ไม่ระบุ/.test(str)){document.getElementById('c-rt-mode').value='none';}
+  else if((m=str.match(/ก่อน\s*(\d{1,2})[.:](\d{2})/))){
+    document.getElementById('c-rt-mode').value='before';
+    document.getElementById('c-rt-fh').value=hh(m[1]);document.getElementById('c-rt-fm').value=snap(m[2]);
+  }else if((m=str.match(/(\d{1,2})[.:](\d{2})\s*[-–]\s*(\d{1,2})[.:](\d{2})/))){
+    document.getElementById('c-rt-mode').value='range';
+    document.getElementById('c-rt-fh').value=hh(m[1]);document.getElementById('c-rt-fm').value=snap(m[2]);
+    document.getElementById('c-rt-th').value=hh(m[3]);document.getElementById('c-rt-tm').value=snap(m[4]);
+  }else{rtModeUI();return;}   // ข้อความรูปแบบอื่นที่พิมพ์มือไว้ — คงค่าเดิม ไม่แปลง
+  rtModeUI();composeRtime();
 }
 function openCustomerForm(){
   custReqInit();
@@ -4489,6 +4520,7 @@ function resetCustomerForm(){
    'cs-name','cs-no','cs-soi','cs-road','cs-postcode','cs-subdistrict','cs-district','cs-province'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('cb-sub-dl').innerHTML='';
   document.getElementById('cs-sub-dl').innerHTML='';
+  setRtime('');
   document.getElementById('c-pgroup').value='base';
   document.getElementById('c-delivery').value='Lalamove';
   document.getElementById('c-doctype').value='บิลเงินสด';
@@ -4685,7 +4717,7 @@ const CUST_REQUIRED=[
   {key:'ship_district',id:'cs-district',label:'อำเภอ/เขต (จัดส่ง)'},
   {key:'ship_province',id:'cs-province',label:'จังหวัด (จัดส่ง)'},
   {key:'map_link',id:'c-map',label:'Google Map Link'},
-  {key:'receive_time',id:'c-rtime',ids:['c-rt-fh','c-rt-fm','c-rt-th','c-rt-tm'],label:'เวลารับของ'}];
+  {key:'receive_time',id:'c-rtime',ids:['c-rt-mode','c-rt-fh','c-rt-fm','c-rt-th','c-rt-tm'],label:'เวลารับของ'}];
 // รายการช่องที่ยังว่างของลูกค้า (ใช้ได้ทั้ง rec จากฟอร์ม และแถวจากฐานข้อมูล)
 function custMissing(c){
   const has=v=>!!String(v??'').trim();
