@@ -55,6 +55,8 @@ function fdShort(ymd) { if (!ymd) return "-"; const [y, m, d] = ymd.split("-").m
 function fdLong(ymd)  { if (!ymd) return "-"; const [y, m, d] = ymd.split("-").map(Number); return d + " " + TH_MONTHS_FULL[m - 1] + " " + (y + 543); }
 function money(n) { return Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function esc(s) { return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+// resvg วาด "สระอำ" (U+0E33) ผิด (นิคหิตลอย + สระอาหาย เช่น จำนวน → จํนวน) → แยกเป็น นิคหิต (U+0E4D) + สระอา (U+0E32) ก่อนวาด ถูกต้องทุกกรณี
+function fixAm(s) { return String(s ?? "").replace(/\u0E33/g, "\u0E4D\u0E32"); }
 function wrap(s, max) {                       // ตัดบรรทัดง่าย ๆ ตามจำนวนตัวอักษร (เว้นวรรคก่อน ถ้าไม่มีก็หั่น)
   const out = []; let cur = "";
   for (const w of String(s || "").split(/\s+/).filter(Boolean)) {
@@ -67,15 +69,22 @@ function wrap(s, max) {                       // ตัดบรรทัดง�
 // data = {shop:{name,address,phone,taxid}, cust:{code,name,branch,contact,phone,address},
 //         period:{from,to,bill,due}, rows:[{bill_no,date,deliver,total,paid,paid_amount}]}
 function buildStatementSvg(data) {
-  const W = 1240, PAD = 64, RED = "#C62127", INK = "#2E2119", MUT = "#8A7A66", LINE = "#E8DFCC";
+  const W = 1240, H = 1754, PAD = 64, RED = "#C62127", INK = "#2E2119", MUT = "#8A7A66", LINE = "#E8DFCC";   // A4 @150dpi — จบใน 1 หน้าเสมอ
   const rows = data.rows || [];
   const total = rows.reduce((s, r) => s + Number(r.total || 0), 0);
   const paid = rows.filter((r) => r.paid).reduce((s, r) => s + Number(r.total || 0), 0);
   const unpaid = total - paid;
   const nUnpaid = rows.filter((r) => !r.paid).length;
-  const shopAddr = wrap(data.shop.address, 62), custAddr = wrap(data.cust.address, 58);
+  const custAddr = wrap(data.cust.address, 58);
+  // พื้นที่ตารางที่เหลือ = ความสูงหน้า − หัว/ลูกค้า (~430) − สรุปยอด+ท้าย (~330) → ย่อแถวให้พอดีเมื่อบิลเยอะ (ต่ำสุด 22px)
+  const custLines = 2 + (data.cust.contact || data.cust.phone ? 1 : 0) + custAddr.length;
+  const headerH = 70 + 44 + 26 + 14 + 40 + Math.max(30 + 32 + 28 * (custLines - 2), 170 - 22) + 40 + 40;
+  const footerH = 36 + 36 + 40 + 50 + 16 + (unpaid > 0 ? 2 : 1) * 30 + 28 + 24 + 30 + 50;
+  const availRows = H - headerH - footerH - 20;
+  const RH = Math.max(22, Math.min(42, Math.floor(availRows / Math.max(rows.length, 1))));
+  const fs = RH >= 40 ? 20 : RH >= 32 ? 17 : RH >= 26 ? 15 : 13;   // ขนาดตัวอักษรในแถว ย่อตามความสูงแถว
   let y = 0; const parts = [];
-  const T = (x, yy, txt, o = {}) => parts.push(`<text x="${x}" y="${yy}" font-size="${o.size || 22}" fill="${o.fill || INK}" font-weight="${o.bold ? 700 : 400}" text-anchor="${o.anchor || "start"}">${esc(txt)}</text>`);
+  const T = (x, yy, txt, o = {}) => parts.push(`<text x="${x}" y="${yy}" font-size="${o.size || 22}" fill="${o.fill || INK}" font-weight="${o.bold ? 700 : 400}" text-anchor="${o.anchor || "start"}">${esc(fixAm(txt))}</text>`);
   // ---- หัวกระดาษ
   y = 70;
   parts.push(`<rect x="0" y="0" width="${W}" height="14" fill="${RED}"/>`);
@@ -83,8 +92,7 @@ function buildStatementSvg(data) {
   T(W - PAD, y - 2, "ใบวางบิล", { size: 40, bold: true, anchor: "end", fill: INK });
   T(W - PAD, y + 30, "STATEMENT OF ACCOUNT", { size: 16, anchor: "end", fill: MUT });
   y += 44;
-  shopAddr.forEach((l) => { T(PAD, y, l, { size: 18, fill: MUT }); y += 26; });
-  const contactBits = [data.shop.phone ? "โทร " + data.shop.phone : "", data.shop.taxid ? "เลขผู้เสียภาษี " + data.shop.taxid : ""].filter(Boolean).join("   ");
+  const contactBits = [data.shop.phone ? "โทร " + data.shop.phone : "", data.shop.taxid ? "เลขประจำตัวผู้เสียภาษี " + data.shop.taxid : ""].filter(Boolean).join("   ");
   if (contactBits) { T(PAD, y, contactBits, { size: 18, fill: MUT }); y += 26; }
   y += 14;
   parts.push(`<line x1="${PAD}" y1="${y}" x2="${W - PAD}" y2="${y}" stroke="${LINE}" stroke-width="2"/>`);
@@ -111,23 +119,25 @@ function buildStatementSvg(data) {
                 { x: PAD + 510, w: 200, t: "วันที่ส่ง", a: "start" }, { x: PAD + 710, w: 220, t: "จำนวนเงิน", a: "end" }, { x: PAD + 930, w: 182, t: "สถานะ", a: "end" }];
   parts.push(`<rect x="${PAD}" y="${y - 30}" width="${W - PAD * 2}" height="44" rx="8" fill="${RED}"/>`);
   cols.forEach((c) => T(c.a === "end" ? c.x + c.w : c.x + 14, y, c.t, { size: 18, bold: true, fill: "#fff", anchor: c.a }));
-  y += 40;
-  if (!rows.length) { T(W / 2, y + 10, "ไม่มีบิลในรอบนี้", { size: 20, fill: MUT, anchor: "middle" }); y += 40; }
+  y += 18;   // y = ขอบบนของแถวแรก (หัวตารางจบที่ y+14 ของบรรทัดหัว → เว้น 4px)
+  if (!rows.length) { T(W / 2, y + 30, "ไม่มีบิลในรอบนี้", { size: 20, fill: MUT, anchor: "middle" }); y += 44; }
   rows.forEach((r, i) => {
-    if (i % 2 === 1) parts.push(`<rect x="${PAD}" y="${y - 28}" width="${W - PAD * 2}" height="42" fill="#FBF8F3"/>`);
-    T(cols[0].x + 14, y, String(i + 1), { size: 19, fill: MUT });
-    T(cols[1].x + 14, y, r.bill_no || "-", { size: 20, bold: true });
-    T(cols[2].x + 14, y, fdShort(r.date), { size: 19 });
-    T(cols[3].x + 14, y, r.deliver ? fdShort(r.deliver) : "-", { size: 19, fill: r.deliver ? INK : MUT });
-    T(cols[4].x + cols[4].w, y, money(r.total), { size: 20, anchor: "end" });
+    const yb = y + Math.round(RH * 0.68);   // baseline กลางแถว (y = ขอบบนแถว)
+    if (i % 2 === 1) parts.push(`<rect x="${PAD}" y="${y}" width="${W - PAD * 2}" height="${RH}" fill="#FBF8F3"/>`);
+    T(cols[0].x + 14, yb, String(i + 1), { size: fs - 1, fill: MUT });
+    T(cols[1].x + 14, yb, r.bill_no || "-", { size: fs, bold: true });
+    T(cols[2].x + 14, yb, fdShort(r.date), { size: fs - 1 });
+    T(cols[3].x + 14, yb, r.deliver ? fdShort(r.deliver) : "-", { size: fs - 1, fill: r.deliver ? INK : MUT });
+    T(cols[4].x + cols[4].w, yb, money(r.total), { size: fs, anchor: "end" });
     const st = r.paid ? "จ่ายแล้ว" : "ยังไม่จ่าย";
-    const sw = r.paid ? 118 : 138, sx = cols[5].x + cols[5].w - sw;
-    parts.push(`<rect x="${sx}" y="${y - 22}" width="${sw}" height="30" rx="15" fill="${r.paid ? "#E8F6EF" : "#FDECEC"}"/>`);
-    T(sx + sw / 2, y, st, { size: 17, bold: true, fill: r.paid ? "#1F7A43" : RED, anchor: "middle" });
-    y += 42;
+    const ph = Math.min(30, RH - 4), sw = (r.paid ? 118 : 138) * (fs / 20), sx = cols[5].x + cols[5].w - sw;
+    parts.push(`<rect x="${sx}" y="${yb - ph * 0.72}" width="${sw}" height="${ph}" rx="${ph / 2}" fill="${r.paid ? "#E8F6EF" : "#FDECEC"}"/>`);
+    T(sx + sw / 2, yb, st, { size: Math.max(11, fs - 3), bold: true, fill: r.paid ? "#1F7A43" : RED, anchor: "middle" });
+    y += RH;
   });
-  parts.push(`<line x1="${PAD}" y1="${y - 20}" x2="${W - PAD}" y2="${y - 20}" stroke="${LINE}" stroke-width="2"/>`);
-  y += 20;
+  y += 6;
+  parts.push(`<line x1="${PAD}" y1="${y}" x2="${W - PAD}" y2="${y}" stroke="${LINE}" stroke-width="2"/>`);
+  y += 44;
   // ---- สรุปยอด
   const sx0 = W - PAD - 480;
   const SUM = (k, v, big, color) => { T(sx0, y, k, { size: big ? 22 : 19, fill: big ? INK : MUT, bold: !!big }); T(W - PAD, y, money(v), { size: big ? 34 : 22, bold: !!big, anchor: "end", fill: color || INK }); y += big ? 50 : 36; };
@@ -143,9 +153,9 @@ function buildStatementSvg(data) {
   parts.push(`<rect x="${PAD}" y="${y - 8}" width="${W - PAD * 2}" height="${notes.length * 30 + 28}" rx="12" fill="#FAF5F1"/>`);
   y += 24; notes.forEach((n) => { T(PAD + 20, y, n, { size: 19 }); y += 30; });
   y += 30;
-  T(PAD, y, "ออกเมื่อ " + fdLong(data.issued || data.period.bill) + " · เอกสารนี้สร้างโดยระบบอัตโนมัติ", { size: 15, fill: MUT });
-  T(W - PAD, y, data.shop.name || "", { size: 15, fill: MUT, anchor: "end" });
-  const H = y + 50;
+  const yFoot = H - 40;   // บรรทัดท้ายชิดขอบล่างของหน้า A4 เสมอ
+  T(PAD, yFoot, "ออกเมื่อ " + fdLong(data.issued || data.period.bill) + " · เอกสารนี้สร้างโดยระบบอัตโนมัติ", { size: 15, fill: MUT });
+  T(W - PAD, yFoot, data.shop.name || "", { size: 15, fill: MUT, anchor: "end" });
   return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Sarabun"><rect width="${W}" height="${H}" fill="#fff"/>${parts.join("")}</svg>`, total, paid, unpaid, nUnpaid };
 }
 // ---- render:end

@@ -677,7 +677,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div id="c-recode-wrap" style="display:none;align-self:flex-end"><button class="btn-s mini" id="c-recode-btn" onclick="recodeCustomer()" title="รหัสขึ้นต้นไม่ตรงกับเซลล์ที่ดูแล — ออกรหัสใหม่ต่อจากเลขล่าสุดของเซลล์ปลายทาง">🔁 ออกรหัสใหม่ตามเซลล์</button><div id="c-recode-note" style="font-size:11.5px;color:var(--warn);margin-top:3px"></div></div>
       <div style="flex:1;min-width:170px"><label>ชื่อร้าน</label><input id="c-name" style="width:100%"></div>
       <div style="min-width:170px"><label>เซลล์ที่ดูแล</label><select id="c-sale" style="width:100%" onchange="updateCodePreview();checkCodeMismatch()"><option value="">— เลือกเซลล์ —</option></select></div>
-      <div style="flex:1;min-width:200px"><label>LINE Group ID (ไว้ส่งบิล)</label><input id="c-line" style="width:100%" placeholder="ใส่ทีหลังได้"><input id="c-line-copy-q" placeholder="🔎 หากลุ่มร่วม: พิมพ์ชื่อร้าน/รหัส/สาขา…" style="width:100%;margin-top:4px;font-size:12.5px" oninput="fillLineCopySelect()"><select id="c-line-copy" onchange="copyLineFrom(this)" style="width:100%;margin-top:4px;font-size:12.5px;color:var(--muted)"><option value="">📎 ใช้กลุ่มเดียวกับร้านอื่น…</option></select></div>
+      <div style="flex:1;min-width:200px"><label>LINE Group ID (ไว้ส่งบิล)</label><input id="c-line" style="width:100%" placeholder="ใส่ทีหลังได้" oninput="cLineNameHint()"><div id="c-line-name" style="font-size:12.5px;margin-top:3px"></div><input id="c-line-copy-q" placeholder="🔎 หากลุ่มร่วม: พิมพ์ชื่อร้าน/รหัส/สาขา…" style="width:100%;margin-top:4px;font-size:12.5px" oninput="fillLineCopySelect()"><select id="c-line-copy" onchange="copyLineFrom(this)" style="width:100%;margin-top:4px;font-size:12.5px;color:var(--muted)"><option value="">📎 ใช้กลุ่มเดียวกับร้านอื่น…</option></select></div>
       <div><label>กลุ่มราคา</label><select id="c-pgroup"><option value="base">ราคากลาง</option><option value="r20">เรท 20 ลัง</option><option value="r50">เรท 50 ลัง</option><option value="upc">รวมส่งตจว</option></select></div>
     </div>
     <p class="hint">เลือกเซลล์ก่อน → รหัสลูกค้าจะรันต่อจากรหัสเซลล์อัตโนมัติ เช่น เซลล์รหัส AAA → ลูกค้าได้ AAA00001, AAA00002 …</p>
@@ -801,6 +801,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <input id="c-search" placeholder="ค้นหาลูกค้า…" style="flex:1;min-width:200px" oninput="renderCustomers()">
       <select id="c-sale-filter" style="min-width:170px" onchange="renderCustomers()" title="กรองลูกค้าตามรหัสเซลล์ที่ดูแล"><option value="">เซลล์: ทั้งหมด</option></select>
       <button class="btn-s mini" id="c-noline-btn" onclick="openNoLineModal()" title="กดดูรายชื่อร้านที่ยังไม่ผูกกลุ่มไลน์ แยกตามเซลล์">🔗 ยังไม่ผูกกลุ่ม</button>
+      <button class="btn-g mini" onclick="refreshLineGroupNames(this)" title="ถามชื่อกลุ่มจาก LINE (เฉพาะกลุ่มที่ยังไม่มีชื่อหรือเก่ากว่า 7 วัน)">🔄 ดึงชื่อกลุ่ม</button>
       <button class="btn-d mini" id="c-incomplete-btn" onclick="toggleIncompleteFilter()" title="ลูกค้าที่ข้อมูลออกบิล/จัดส่งยังกรอกไม่ครบ — กดเพื่อกรองดูเฉพาะรายการนี้">⚠️ ข้อมูลไม่ครบ</button>
       <span class="count" id="c-count"></span>
     </div>
@@ -1579,6 +1580,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div style="flex:1;min-width:260px"><label>LINE Group ID กลุ่มกลาง (แจ้งออเดอร์ใหม่ + สรุปประจำวัน)</label><input id="st-central" style="width:100%" placeholder="Cxxxxxxxx… (พิมพ์ id ในกลุ่มกลางให้บอทตอบ)"></div>
       <div style="flex:1;min-width:260px"><label>LINE Group ID กลุ่มรีพอร์ต (สำเนาใบวางบิล + ทวงสลิป)</label><input id="st-report" style="width:100%" placeholder="Cxxxxxxxx… (สร้างกลุ่มใหม่ เชิญบอทเข้า แล้วพิมพ์ id)"></div>
       <button class="btn-p" onclick="saveSettings()">บันทึกตั้งค่า</button>
+      <button class="btn-g" onclick="refreshLineGroupNames(this)" title="ถามชื่อกลุ่มจาก LINE">🔄 ดึงชื่อกลุ่ม</button>
     </div>
     <p class="hint">กลุ่มกลาง = กลุ่มทีมภายใน (ต่างจากกลุ่มลูกค้าแต่ละราย) ไว้รับแจ้งเตือนออเดอร์ใหม่และสรุปออเดอร์รายวันสำหรับจัดส่ง · กลุ่มรีพอร์ต = รับสำเนาใบวางบิลอัตโนมัติและข้อความทวงสลิปทุกฉบับ</p>
     <h3 class="ct" style="margin-top:18px">📄 ใบวางบิลอัตโนมัติ (ลูกค้าเครดิตตามรอบวางบิล)
@@ -3803,6 +3805,7 @@ function exportCSV(){
 
 /* ==================== ลูกค้า ==================== */
 async function loadCustomers(){
+  if(!Object.keys(lineGroupNames).length)await loadLineGroupNames().catch(()=>{});
   const data=await fetchAllPages(()=>db.from('customers').select('*').order('code'));
   customers=data||[];
   qtInit(); shcInit(); fillParentSelect(editCustomerId||null);
@@ -4445,6 +4448,43 @@ function openNoLineModal(){
     :'<div class="empty">ทุกร้านผูกกลุ่มไลน์ครบแล้ว 🎉</div>';
   document.getElementById('noline-modal').style.display='flex';
 }
+/* ---------- ชื่อกลุ่มไลน์ (ตาราง line_groups ← Edge Function line-group-name) ---------- */
+let lineGroupNames={};   // group_id → {name,error,updated_at}
+async function loadLineGroupNames(){
+  const {data,error}=await db.from('line_groups').select('group_id,name,error,updated_at');
+  if(error)return;   // ยังไม่ได้รัน SQL → โชว์รหัสตามเดิม
+  lineGroupNames={};(data||[]).forEach(r=>lineGroupNames[r.group_id]=r);
+}
+function lgName(id){const r=id&&lineGroupNames[id];return r&&r.name?r.name:'';}
+function lgLabel(id,short){ // ชื่อกลุ่ม (ถ้ามี) · ไม่มี = รหัสย่อ
+  if(!id)return '';const n=lgName(id);
+  if(n)return '<span title="'+esc(id)+'">👥 '+esc(n)+'</span>';
+  const r=lineGroupNames[id];
+  return '<span style="color:var(--muted)" title="'+esc(id)+(r&&r.error?' · ดึงชื่อไม่ได้: '+esc(r.error):' · ยังไม่ได้ดึงชื่อ — กด 🔄 ดึงชื่อกลุ่ม')+'">'+esc(short?id.slice(0,10)+'…':id)+'</span>';
+}
+async function refreshLineGroupNames(btn,ids){
+  const all=ids||[...new Set([...customers.map(c=>c.line_group_id),appSettings.line_central_group,appSettings.line_report_group,appSettings.line_summary_group,appSettings.line_supplier_group].filter(Boolean))];
+  const week=Date.now()-7*86400000;
+  const need=ids?all:all.filter(id=>{const r=lineGroupNames[id];return !r||!r.name||new Date(r.updated_at).getTime()<week;});
+  if(!need.length){toast('ชื่อกลุ่มครบแล้ว (อัปเดตภายใน 7 วัน)');return;}
+  const t0=btn?btn.textContent:'';if(btn){btn.disabled=true;btn.textContent='กำลังดึง '+need.length+' กลุ่ม…';}
+  try{
+    const {data,error}=await db.functions.invoke('line-group-name',{body:{ids:need}});
+    if(error||!data||!data.ok)throw new Error((data&&data.error)||(error&&error.message)||'ไม่ทราบสาเหตุ — deploy line-group-name แล้วหรือยัง?');
+    await loadLineGroupNames();renderCustomers();fillLineCopySelect();renderGroupNameHints();
+    toast('ดึงชื่อกลุ่มแล้ว '+Object.keys(data.groups||{}).length+' กลุ่ม'+(data.missing&&data.missing.length?' · ดึงไม่ได้ '+data.missing.length+' (บอทอาจไม่อยู่ในกลุ่มแล้ว)':''));
+  }catch(e){toast('ดึงชื่อกลุ่มไม่ได้: '+(e.message||e));}
+  if(btn){btn.disabled=false;btn.textContent=t0;}
+}
+function renderGroupNameHints(){
+  [['st-central','line_central_group'],['st-report','line_report_group']].forEach(([id,key])=>{
+    const el=document.getElementById(id);if(!el)return;
+    let h=document.getElementById(id+'-name');
+    if(!h){h=document.createElement('div');h.id=id+'-name';h.style.cssText='font-size:12.5px;margin-top:4px';el.insertAdjacentElement('afterend',h);}
+    const gid=el.value.trim()||appSettings[key]||'';
+    h.innerHTML=gid?(lgName(gid)?'👥 <b>'+esc(lgName(gid))+'</b>':'<span style="color:var(--muted)">ยังไม่รู้ชื่อกลุ่ม — บันทึกแล้วกด 🔄 ดึงชื่อกลุ่ม</span>'):'';
+  });
+}
 function renderCustomers(){
   const q=(document.getElementById('c-search').value||'').toLowerCase();
   const sf=document.getElementById('c-sale-filter');const saleF=sf?sf.value:'';
@@ -4478,7 +4518,7 @@ function renderCustomers(){
     }</div></td>
     <td>${sname?esc(sname):'<span style="color:var(--muted)">—</span>'}</td>
     <td style="font-variant-numeric:tabular-nums">${c.phone?esc(c.phone):'<span style="color:var(--muted)">—</span>'}</td>
-    <td style="font-size:12.5px;color:var(--muted)">${c.line_group_id?esc(c.line_group_id.slice(0,14))+'…':'<span class="tag tag-low">ยังไม่ผูก</span>'}</td>
+    <td style="font-size:12.5px">${c.line_group_id?lgLabel(c.line_group_id,true):'<span class="tag tag-low">ยังไม่ผูก</span>'}</td>
     <td class="num">${pc[c.id]?'<span class="tag tag-ov">'+pc[c.id]+' รายการ</span>':window._priceCounts===undefined?'<span style="color:var(--muted)">…</span>':'<span class="tag tag-out">ยังไม่จัด</span>'}</td>
     <td style="white-space:nowrap">
       <button class="btn-s mini" onclick="editCustomer(${c.id})">แก้ไข</button>
@@ -4506,7 +4546,7 @@ function fillLineCopySelect(reset){
       ||String(c.contact_name||'').toLowerCase().includes(q);
   }).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'th'));
   el.innerHTML='<option value="">📎 ใช้กลุ่มเดียวกับร้านอื่น… ('+(q?list.length+' จาก '+all.length:all.length+' ร้านที่ผูกแล้ว')+')</option>'
-    +list.map(c=>'<option value="'+esc(c.line_group_id)+'">'+esc(lcLabel(c))+'</option>').join('');
+    +list.map(c=>'<option value="'+esc(c.line_group_id)+'">'+esc(lcLabel(c))+(lgName(c.line_group_id)?' — 👥 '+esc(lgName(c.line_group_id)):'')+'</option>').join('');
   if(cur&&list.some(c=>c.line_group_id===cur))el.value=cur;
   else if(q&&list.length===1){ // ค้นแล้วเหลือรายเดียว → เลือก+เติมให้เลย (แบบเดียวกับหน้าจัดสินค้า)
     el.value=list[0].line_group_id;
@@ -4514,9 +4554,14 @@ function fillLineCopySelect(reset){
     toast('ใช้กลุ่มเดียวกับ '+lcLabel(list[0])+' — อย่าลืมกด 💾 บันทึก');
   }
 }
+function cLineNameHint(){
+  const el=document.getElementById('c-line-name');if(!el)return;
+  const gid=document.getElementById('c-line').value.trim();
+  el.innerHTML=gid?(lgName(gid)?'👥 <b>'+esc(lgName(gid))+'</b>':'<span style="color:var(--muted)">ยังไม่รู้ชื่อกลุ่ม (บันทึกแล้วกด 🔄 ดึงชื่อกลุ่ม)</span>'):'';
+}
 function copyLineFrom(sel){
   if(!sel.value)return;
-  document.getElementById('c-line').value=sel.value;
+  document.getElementById('c-line').value=sel.value;cLineNameHint();
   const label=(sel.options&&sel.options[sel.selectedIndex])?sel.options[sel.selectedIndex].text:'';
   toast('ใช้กลุ่มเดียวกับ '+label+' — อย่าลืมกด 💾 บันทึก');
 }
@@ -4530,7 +4575,7 @@ function editCustomer(id){
   document.getElementById('c-code').value=c.code;
   document.getElementById('c-name').value=c.name;
   document.getElementById('c-sale').value=c.sale_id||'';
-  document.getElementById('c-line').value=c.line_group_id||'';
+  document.getElementById('c-line').value=c.line_group_id||'';cLineNameHint();
   document.getElementById('c-contact').value=c.contact_name||'';
   document.getElementById('c-phone').value=c.phone||'';
   document.getElementById('c-shipshop').value=c.ship_shop_name||'';
@@ -4652,7 +4697,7 @@ function resetCustomerForm(){
    'cs-name','cs-no','cs-soi','cs-road','cs-postcode','cs-subdistrict','cs-district','cs-province'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('cb-sub-dl').innerHTML='';
   document.getElementById('cs-sub-dl').innerHTML='';
-  setRtime('');
+  setRtime('');cLineNameHint();
   document.getElementById('c-pgroup').value='base';
   document.getElementById('c-delivery').value='Lalamove';
   document.getElementById('c-doctype').value='บิลเงินสด';
@@ -13025,6 +13070,7 @@ async function loadSettings(){
   if(el)el.value=appSettings.line_central_group||'';
   const rp=document.getElementById('st-report');
   if(rp&&document.activeElement!==rp)rp.value=appSettings.line_report_group||'';
+  if(typeof renderGroupNameHints==='function')renderGroupNameHints();
   const gm=document.getElementById('st-gmaps');
   if(gm&&document.activeElement!==gm)gm.value=appSettings.google_maps_key||'';
   const map={'st-shopname':'shop_name','st-taxid':'shop_taxid','st-address':'shop_address','st-phone':'shop_phone','st-email':'shop_email'};
@@ -13079,6 +13125,7 @@ async function saveSettings(){
   const {error}=await db.from('settings').upsert([{key:'line_central_group',value:val},{key:'line_report_group',value:rep}],{onConflict:'key'});
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
   appSettings.line_central_group=val;appSettings.line_report_group=rep;
+  renderGroupNameHints();
   toast('บันทึกตั้งค่าแล้ว');
 }
 /* ================= ใบวางบิลอัตโนมัติ (หน้าผู้ใช้ระบบ · admin) ================= */
@@ -13112,7 +13159,7 @@ async function stmtLoad(){
     const status=sSent?'<span class="tag tag-ok">ส่งใบวางบิลแล้ว</span>':(p.bill<=today?'<span class="tag tag-out">ถึงวันวางบิลแล้ว ยังไม่ส่ง</span>':'<span class="tag tag-low">รอ '+stmtFd(p.bill)+'</span>');
     const rstat=rSent?' <span class="tag tag-ok">ทวงสลิปแล้ว</span>':(rd<=today?' <span class="tag tag-low">ครบกำหนด+3 แล้ว</span>':'');
     const noLine=c.hide_prices?' <span class="tag tag-low" title="ร้านซ่อนราคา — ใบวางบิล/ทวงสลิปจะส่งเข้ากลุ่มรีพอร์ตแทน">🙈 ส่งเข้ารีพอร์ตแทน</span>':(!c.line_group_id?' <span class="tag tag-out" title="ร้านนี้ยังไม่ผูกกลุ่มไลน์ ส่งไม่ได้">ไม่มีกลุ่มไลน์</span>':'');
-    return `<tr><td><b>${esc(c.code)}</b> ${esc(c.name)}${c.branch_name?' • '+esc(c.branch_name):''}${noLine}</td><td style="white-space:nowrap">${stmtFd(p.from)} – ${stmtFd(p.to)}</td><td style="white-space:nowrap">${stmtFd(p.bill)}</td><td style="white-space:nowrap">${stmtFd(p.due)}</td><td>${status}${rstat}</td>
+    return `<tr><td><b>${esc(c.code)}</b> ${esc(c.name)}${c.branch_name?' • '+esc(c.branch_name):''}${noLine}${c.line_group_id&&lgName(c.line_group_id)?'<div style="font-size:11.5px;color:var(--muted)">👥 '+esc(lgName(c.line_group_id))+'</div>':''}</td><td style="white-space:nowrap">${stmtFd(p.from)} – ${stmtFd(p.to)}</td><td style="white-space:nowrap">${stmtFd(p.bill)}</td><td style="white-space:nowrap">${stmtFd(p.due)}</td><td>${status}${rstat}</td>
       <td style="white-space:nowrap"><button class="btn-g mini" onclick="stmtPreview(${c.id},'${p.bill}')">👁️ ตัวอย่าง</button> <button class="btn-s mini" onclick="stmtSend(${c.id},'${p.bill}','statement',this)">📤 ส่ง${sSent?'ซ้ำ':'ตอนนี้'}</button> <button class="btn-g mini" onclick="stmtSend(${c.id},'${p.bill}','reminder',this)">⏰ ทวงสลิป</button></td></tr>`;
   }).join(''):'<tr><td colspan="6" class="empty">ไม่มีงวดใน 14 วันข้างหน้า (ลูกค้าเครดิตแบบตารางรอบวางบิล)</td></tr>';
   if(hist){
@@ -13306,6 +13353,8 @@ function fdShort(ymd) { if (!ymd) return "-"; const [y, m, d] = ymd.split("-").m
 function fdLong(ymd)  { if (!ymd) return "-"; const [y, m, d] = ymd.split("-").map(Number); return d + " " + TH_MONTHS_FULL[m - 1] + " " + (y + 543); }
 function money(n) { return Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function esc(s) { return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+// resvg วาด "สระอำ" (U+0E33) ผิด (นิคหิตลอย + สระอาหาย เช่น จำนวน → จํนวน) → แยกเป็น นิคหิต (U+0E4D) + สระอา (U+0E32) ก่อนวาด ถูกต้องทุกกรณี
+function fixAm(s) { return String(s ?? "").replace(/\u0E33/g, "\u0E4D\u0E32"); }
 function wrap(s, max) {                       // ตัดบรรทัดง่าย ๆ ตามจำนวนตัวอักษร (เว้นวรรคก่อน ถ้าไม่มีก็หั่น)
   const out = []; let cur = "";
   for (const w of String(s || "").split(/\s+/).filter(Boolean)) {
@@ -13318,15 +13367,22 @@ function wrap(s, max) {                       // ตัดบรรทัดง�
 // data = {shop:{name,address,phone,taxid}, cust:{code,name,branch,contact,phone,address},
 //         period:{from,to,bill,due}, rows:[{bill_no,date,deliver,total,paid,paid_amount}]}
 function buildStatementSvg(data) {
-  const W = 1240, PAD = 64, RED = "#C62127", INK = "#2E2119", MUT = "#8A7A66", LINE = "#E8DFCC";
+  const W = 1240, H = 1754, PAD = 64, RED = "#C62127", INK = "#2E2119", MUT = "#8A7A66", LINE = "#E8DFCC";   // A4 @150dpi — จบใน 1 หน้าเสมอ
   const rows = data.rows || [];
   const total = rows.reduce((s, r) => s + Number(r.total || 0), 0);
   const paid = rows.filter((r) => r.paid).reduce((s, r) => s + Number(r.total || 0), 0);
   const unpaid = total - paid;
   const nUnpaid = rows.filter((r) => !r.paid).length;
-  const shopAddr = wrap(data.shop.address, 62), custAddr = wrap(data.cust.address, 58);
+  const custAddr = wrap(data.cust.address, 58);
+  // พื้นที่ตารางที่เหลือ = ความสูงหน้า − หัว/ลูกค้า (~430) − สรุปยอด+ท้าย (~330) → ย่อแถวให้พอดีเมื่อบิลเยอะ (ต่ำสุด 22px)
+  const custLines = 2 + (data.cust.contact || data.cust.phone ? 1 : 0) + custAddr.length;
+  const headerH = 70 + 44 + 26 + 14 + 40 + Math.max(30 + 32 + 28 * (custLines - 2), 170 - 22) + 40 + 40;
+  const footerH = 36 + 36 + 40 + 50 + 16 + (unpaid > 0 ? 2 : 1) * 30 + 28 + 24 + 30 + 50;
+  const availRows = H - headerH - footerH - 20;
+  const RH = Math.max(22, Math.min(42, Math.floor(availRows / Math.max(rows.length, 1))));
+  const fs = RH >= 40 ? 20 : RH >= 32 ? 17 : RH >= 26 ? 15 : 13;   // ขนาดตัวอักษรในแถว ย่อตามความสูงแถว
   let y = 0; const parts = [];
-  const T = (x, yy, txt, o = {}) => parts.push(`<text x="${x}" y="${yy}" font-size="${o.size || 22}" fill="${o.fill || INK}" font-weight="${o.bold ? 700 : 400}" text-anchor="${o.anchor || "start"}">${esc(txt)}</text>`);
+  const T = (x, yy, txt, o = {}) => parts.push(`<text x="${x}" y="${yy}" font-size="${o.size || 22}" fill="${o.fill || INK}" font-weight="${o.bold ? 700 : 400}" text-anchor="${o.anchor || "start"}">${esc(fixAm(txt))}</text>`);
   // ---- หัวกระดาษ
   y = 70;
   parts.push(`<rect x="0" y="0" width="${W}" height="14" fill="${RED}"/>`);
@@ -13334,8 +13390,7 @@ function buildStatementSvg(data) {
   T(W - PAD, y - 2, "ใบวางบิล", { size: 40, bold: true, anchor: "end", fill: INK });
   T(W - PAD, y + 30, "STATEMENT OF ACCOUNT", { size: 16, anchor: "end", fill: MUT });
   y += 44;
-  shopAddr.forEach((l) => { T(PAD, y, l, { size: 18, fill: MUT }); y += 26; });
-  const contactBits = [data.shop.phone ? "โทร " + data.shop.phone : "", data.shop.taxid ? "เลขผู้เสียภาษี " + data.shop.taxid : ""].filter(Boolean).join("   ");
+  const contactBits = [data.shop.phone ? "โทร " + data.shop.phone : "", data.shop.taxid ? "เลขประจำตัวผู้เสียภาษี " + data.shop.taxid : ""].filter(Boolean).join("   ");
   if (contactBits) { T(PAD, y, contactBits, { size: 18, fill: MUT }); y += 26; }
   y += 14;
   parts.push(`<line x1="${PAD}" y1="${y}" x2="${W - PAD}" y2="${y}" stroke="${LINE}" stroke-width="2"/>`);
@@ -13362,23 +13417,25 @@ function buildStatementSvg(data) {
                 { x: PAD + 510, w: 200, t: "วันที่ส่ง", a: "start" }, { x: PAD + 710, w: 220, t: "จำนวนเงิน", a: "end" }, { x: PAD + 930, w: 182, t: "สถานะ", a: "end" }];
   parts.push(`<rect x="${PAD}" y="${y - 30}" width="${W - PAD * 2}" height="44" rx="8" fill="${RED}"/>`);
   cols.forEach((c) => T(c.a === "end" ? c.x + c.w : c.x + 14, y, c.t, { size: 18, bold: true, fill: "#fff", anchor: c.a }));
-  y += 40;
-  if (!rows.length) { T(W / 2, y + 10, "ไม่มีบิลในรอบนี้", { size: 20, fill: MUT, anchor: "middle" }); y += 40; }
+  y += 18;   // y = ขอบบนของแถวแรก (หัวตารางจบที่ y+14 ของบรรทัดหัว → เว้น 4px)
+  if (!rows.length) { T(W / 2, y + 30, "ไม่มีบิลในรอบนี้", { size: 20, fill: MUT, anchor: "middle" }); y += 44; }
   rows.forEach((r, i) => {
-    if (i % 2 === 1) parts.push(`<rect x="${PAD}" y="${y - 28}" width="${W - PAD * 2}" height="42" fill="#FBF8F3"/>`);
-    T(cols[0].x + 14, y, String(i + 1), { size: 19, fill: MUT });
-    T(cols[1].x + 14, y, r.bill_no || "-", { size: 20, bold: true });
-    T(cols[2].x + 14, y, fdShort(r.date), { size: 19 });
-    T(cols[3].x + 14, y, r.deliver ? fdShort(r.deliver) : "-", { size: 19, fill: r.deliver ? INK : MUT });
-    T(cols[4].x + cols[4].w, y, money(r.total), { size: 20, anchor: "end" });
+    const yb = y + Math.round(RH * 0.68);   // baseline กลางแถว (y = ขอบบนแถว)
+    if (i % 2 === 1) parts.push(`<rect x="${PAD}" y="${y}" width="${W - PAD * 2}" height="${RH}" fill="#FBF8F3"/>`);
+    T(cols[0].x + 14, yb, String(i + 1), { size: fs - 1, fill: MUT });
+    T(cols[1].x + 14, yb, r.bill_no || "-", { size: fs, bold: true });
+    T(cols[2].x + 14, yb, fdShort(r.date), { size: fs - 1 });
+    T(cols[3].x + 14, yb, r.deliver ? fdShort(r.deliver) : "-", { size: fs - 1, fill: r.deliver ? INK : MUT });
+    T(cols[4].x + cols[4].w, yb, money(r.total), { size: fs, anchor: "end" });
     const st = r.paid ? "จ่ายแล้ว" : "ยังไม่จ่าย";
-    const sw = r.paid ? 118 : 138, sx = cols[5].x + cols[5].w - sw;
-    parts.push(`<rect x="${sx}" y="${y - 22}" width="${sw}" height="30" rx="15" fill="${r.paid ? "#E8F6EF" : "#FDECEC"}"/>`);
-    T(sx + sw / 2, y, st, { size: 17, bold: true, fill: r.paid ? "#1F7A43" : RED, anchor: "middle" });
-    y += 42;
+    const ph = Math.min(30, RH - 4), sw = (r.paid ? 118 : 138) * (fs / 20), sx = cols[5].x + cols[5].w - sw;
+    parts.push(`<rect x="${sx}" y="${yb - ph * 0.72}" width="${sw}" height="${ph}" rx="${ph / 2}" fill="${r.paid ? "#E8F6EF" : "#FDECEC"}"/>`);
+    T(sx + sw / 2, yb, st, { size: Math.max(11, fs - 3), bold: true, fill: r.paid ? "#1F7A43" : RED, anchor: "middle" });
+    y += RH;
   });
-  parts.push(`<line x1="${PAD}" y1="${y - 20}" x2="${W - PAD}" y2="${y - 20}" stroke="${LINE}" stroke-width="2"/>`);
-  y += 20;
+  y += 6;
+  parts.push(`<line x1="${PAD}" y1="${y}" x2="${W - PAD}" y2="${y}" stroke="${LINE}" stroke-width="2"/>`);
+  y += 44;
   // ---- สรุปยอด
   const sx0 = W - PAD - 480;
   const SUM = (k, v, big, color) => { T(sx0, y, k, { size: big ? 22 : 19, fill: big ? INK : MUT, bold: !!big }); T(W - PAD, y, money(v), { size: big ? 34 : 22, bold: !!big, anchor: "end", fill: color || INK }); y += big ? 50 : 36; };
@@ -13394,9 +13451,9 @@ function buildStatementSvg(data) {
   parts.push(`<rect x="${PAD}" y="${y - 8}" width="${W - PAD * 2}" height="${notes.length * 30 + 28}" rx="12" fill="#FAF5F1"/>`);
   y += 24; notes.forEach((n) => { T(PAD + 20, y, n, { size: 19 }); y += 30; });
   y += 30;
-  T(PAD, y, "ออกเมื่อ " + fdLong(data.issued || data.period.bill) + " · เอกสารนี้สร้างโดยระบบอัตโนมัติ", { size: 15, fill: MUT });
-  T(W - PAD, y, data.shop.name || "", { size: 15, fill: MUT, anchor: "end" });
-  const H = y + 50;
+  const yFoot = H - 40;   // บรรทัดท้ายชิดขอบล่างของหน้า A4 เสมอ
+  T(PAD, yFoot, "ออกเมื่อ " + fdLong(data.issued || data.period.bill) + " · เอกสารนี้สร้างโดยระบบอัตโนมัติ", { size: 15, fill: MUT });
+  T(W - PAD, yFoot, data.shop.name || "", { size: 15, fill: MUT, anchor: "end" });
   return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Sarabun"><rect width="${W}" height="${H}" fill="#fff"/>${parts.join("")}</svg>`, total, paid, unpaid, nUnpaid };
 }
 // ---- render:end
