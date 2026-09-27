@@ -31,6 +31,7 @@
    ① บน Synology NAS: ลงแพ็กเกจ Node.js จาก Package Center แล้วตั้ง
       Task Scheduler รันทุกชั่วโมง:  node /volume1/.../mix888-nas-archiver.js --once
       (--once = ซิงก์ครั้งเดียวแล้วจบ ให้ Task Scheduler เป็นคนเรียกซ้ำ)
+      ลองก่อน:  node archiver.js --once --dry-run   = เก็บลง NAS จริง แต่ "ไม่ลบ/ไม่แก้อะไรใน Supabase" แล้วสรุปท้ายรอบว่าเก็บอะไรบ้าง
    ② บนคอม Windows: ติดตั้ง Node.js แล้วดับเบิลคลิก mix888-nas-archiver.bat
       เปิดทิ้งไว้ โปรแกรมจะซิงก์ทุก ๆ 30 นาทีอัตโนมัติ
    ============================================================ */
@@ -55,6 +56,9 @@ const ORDER_HISTORY_DAYS     = 730;   // ประวัติสั่งซื
 
 const fs   = require('fs');
 const path = require('path');
+const DRY_RUN = process.argv.includes('--dry-run');   // เก็บลง NAS ตามปกติ แต่ไม่ลบไฟล์/ไม่แก้ข้อมูลใน Supabase
+const REPORT = {};                                    // สรุปท้ายรอบ: หมวด → {new, have, fail, pruned}
+function tally(section, key, n = 1){ const r = REPORT[section] || (REPORT[section] = {new: 0, have: 0, fail: 0, pruned: 0}); r[key] += n; }
 
 const logLines = [];
 const log = (...a) => {
@@ -310,14 +314,14 @@ async function syncCustomers(ROOT){
   for(const c of custs){
     c.line_group_name = lgroups[c.line_group_id] || ''; c.parent_code = c.parent_id ? codeOf[c.parent_id] : ''; c._stats = stats[c.id] || null;
     const dir = ensureDirById(base, c.id, c.code, idToDir);
-    writeIfChanged(path.join(dir, 'ข้อมูลลูกค้า_' + safeName(c.code) + '.txt'), custInfoText(c));
+    if(writeIfChanged(path.join(dir, 'ข้อมูลลูกค้า_' + safeName(c.code) + '.txt'), custInfoText(c))) tally('ไฟล์สรุปลูกค้า (txt/csv)', 'new'); else tally('ไฟล์สรุปลูกค้า (txt/csv)', 'have');
     // จัดสินค้า (ปัจจุบัน)
     const rows = (cpBy[c.id] || []).map(r => ({r, p: P[r.product_id]})).filter(x => x.p).sort((a, b) => String(a.p.sku || '').localeCompare(String(b.p.sku || '')));
     const L1 = [['SKU','สินค้า','หน่วย','ราคาที่ตั้งให้ลูกค้า','ราคาตามกลุ่ม (' + priceName(c.price_group) + ')','ราคากลาง','ต่างจากราคากลาง','ราคาที่ใช้จริง'].map(csvCell).join(',')];
     rows.forEach(({r, p}) => { const grp = effPrice(p, c.price_group); const use = (r.price != null && r.price !== '') ? Number(r.price) : grp;
       L1.push([p.sku || '', p.name || '', p.unit || '', r.price != null ? Number(r.price) : '', grp, Number(p.base_price || 0), (use - Number(p.base_price || 0)).toFixed(2), use].map(csvCell).join(',')); });
     L1.push('', ['', 'สินค้าที่จัดให้ ' + rows.length + ' รายการ · อัปเดต ' + thDateTimeStr(new Date().toISOString())].map(csvCell).join(','));
-    if(rows.length) writeIfChanged(path.join(dir, 'จัดสินค้า_' + safeName(c.code) + '.csv'), '\uFEFF' + L1.join('\r\n'));
+    if(rows.length){ if(writeIfChanged(path.join(dir, 'จัดสินค้า_' + safeName(c.code) + '.csv'), '\uFEFF' + L1.join('\r\n'))) tally('ไฟล์สรุปลูกค้า (txt/csv)', 'new'); else tally('ไฟล์สรุปลูกค้า (txt/csv)', 'have'); }
     // ประวัติราคา (ของลูกค้ารายนี้ + ราคากลางเฉพาะสินค้าที่จัดให้)
     const assignedIds = new Set(rows.map(x => x.p.id));
     const hist = [...(plBy[c.id] || []), ...plCentral.filter(r => assignedIds.has(r.product_id))].sort((a, b) => a.id - b.id);
@@ -325,7 +329,7 @@ async function syncCustomers(ROOT){
       const L2 = [['วันเวลา','SKU','สินค้า','รายการ','ราคาเก่า','ราคาใหม่','เปลี่ยน','โดย','ที่มา'].map(csvCell).join(',')];
       hist.forEach(r => { const p = P[r.product_id] || {}; L2.push([thDateTimeStr(r.changed_at), p.sku || '', p.name || '', (r.customer_id == null ? 'ราคากลาง: ' : '') + fieldTh(r.field) + (r.action ? ' (' + r.action + ')' : ''),
         r.old_price ?? '', r.new_price ?? '', (r.old_price != null && r.new_price != null) ? (Number(r.new_price) - Number(r.old_price)).toFixed(2) : '', r.changed_by || '', r.source || ''].map(csvCell).join(',')); });
-      writeIfChanged(path.join(dir, 'ประวัติราคา_' + safeName(c.code) + '.csv'), '\uFEFF' + L2.join('\r\n'));
+      if(writeIfChanged(path.join(dir, 'ประวัติราคา_' + safeName(c.code) + '.csv'), '\uFEFF' + L2.join('\r\n'))) tally('ไฟล์สรุปลูกค้า (txt/csv)', 'new'); else tally('ไฟล์สรุปลูกค้า (txt/csv)', 'have');
     }
     // ประวัติสั่งซื้อ (รายบรรทัดสินค้า)
     const os = oBy[c.id] || [];
@@ -333,16 +337,16 @@ async function syncCustomers(ROOT){
       const L3 = [['วันเวลา','เลขออเดอร์','สถานะ','ผู้สั่ง','SKU','สินค้า','จำนวน','หน่วย','ราคา/หน่วย','จำนวนเงิน','ยอดออเดอร์'].map(csvCell).join(',')];
       os.forEach(o => (Array.isArray(o.order_items) ? o.order_items : []).forEach(it => { const p = P[it.product_id] || {};
         L3.push([thDateTimeStr(o.created_at), o.order_no || '', o.status === 'cancelled' ? 'ยกเลิก' : (o.status || ''), o.created_by || 'ลูกค้าสั่งเอง', p.sku || '', p.name || '', Number(it.qty || 0), p.unit || '', Number(it.price || 0), Number(it.amount || 0), Number(o.total || 0)].map(csvCell).join(',')); }));
-      writeIfChanged(path.join(dir, 'ประวัติสั่งซื้อ_' + safeName(c.code) + '.csv'), '\uFEFF' + L3.join('\r\n'));
+      if(writeIfChanged(path.join(dir, 'ประวัติสั่งซื้อ_' + safeName(c.code) + '.csv'), '\uFEFF' + L3.join('\r\n'))) tally('ไฟล์สรุปลูกค้า (txt/csv)', 'new'); else tally('ไฟล์สรุปลูกค้า (txt/csv)', 'have');
     }
     // เอกสารเครดิต (เฉพาะอนุมัติแล้ว)
     if(c.pay_type === 'credit' && c.credit_status === 'approved'){
       for(const d of docs.filter(x => x.customer_id === c.id)){
         const name = safeName(c.code) + '_' + (DOC_LABEL[d.doc_type] || d.doc_type) + '_' + stampOf(d.uploaded_at) + extOf(d.file_name || d.file_path);
         const dest = path.join(dir, name);
-        if(fs.existsSync(dest)){ skipped++; continue; }
-        try{ await downloadPrivate('credit-docs', d.file_path, dest); saved++; log('  💾 ' + path.join(CUST_DIR, safeName(c.code), name)); }
-        catch(e){ failed++; log('  ⚠️ โหลดเอกสาร ' + c.code + ' ' + name + ' ไม่ได้ — ' + e.message); }
+        if(fs.existsSync(dest)){ skipped++; tally('เอกสารเครดิต (ข้อมูลลูกค้า)', 'have'); continue; }
+        try{ await downloadPrivate('credit-docs', d.file_path, dest); saved++; tally('เอกสารเครดิต (ข้อมูลลูกค้า)', 'new'); log('  💾 ' + path.join(CUST_DIR, safeName(c.code), name)); }
+        catch(e){ failed++; tally('เอกสารเครดิต (ข้อมูลลูกค้า)', 'fail'); log('  ⚠️ โหลดเอกสาร ' + c.code + ' ' + name + ' ไม่ได้ — ' + e.message); }
       }
     }
   }
@@ -359,9 +363,9 @@ async function syncStatements(ROOT){
     const code = r.customers && r.customers.code; if(!code) continue;
     const dir = ensureDirById(base, r.customer_id, code, idToDir);
     const dest = path.join(dir, 'ใบวางบิล_' + r.bill_date + extOf(r.image_url));
-    if(fs.existsSync(dest)){ skipped++; continue; }
-    try{ await download(r.image_url, dest); saved++; log('  💾 ' + path.join(STMT_DIR, safeName(code), path.basename(dest))); }
-    catch(e){ failed++; log('  ⚠️ โหลดใบวางบิล ' + code + ' ' + r.bill_date + ' ไม่ได้ — ' + e.message); }
+    if(fs.existsSync(dest)){ skipped++; tally('ใบวางบิล', 'have'); continue; }
+    try{ await download(r.image_url, dest); saved++; tally('ใบวางบิล', 'new'); log('  💾 ' + path.join(STMT_DIR, safeName(code), path.basename(dest))); }
+    catch(e){ failed++; tally('ใบวางบิล', 'fail'); log('  ⚠️ โหลดใบวางบิล ' + code + ' ' + r.bill_date + ' ไม่ได้ — ' + e.message); }
   }
   return {saved, skipped, failed};
 }
@@ -381,6 +385,7 @@ async function rpc(name, body){
   return r.json();
 }
 async function deleteObject(bucket, objPath){
+  if(DRY_RUN){ log('  (ทดลอง) จะลบใน Supabase: ' + bucket + '/' + objPath); return; }
   const r = await fetch(SUPABASE_URL + '/storage/v1/object/' + bucket + '/' + objPath.split('/').map(encodeURIComponent).join('/'), {
     method: 'DELETE', headers: {apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY}});
   if(!r.ok) throw new Error('ลบไฟล์ ' + bucket + '/' + objPath + ' ไม่ได้ (' + r.status + ') — รัน mix888-nas-archiver-v2.sql หรือยัง?');
@@ -422,7 +427,8 @@ async function pruneBills(ROOT){
       try{ await deleteObject(bucket, op); }catch(e){ okAll = false; log('  ⚠️ ' + e.message); break; }
     }
     if(!okAll){ kept++; continue; }
-    try{ await rpc('nas_mark_pruned', {p_bill_id: b.id, p_nas_path: path.relative(ROOT, billDir)}); pruned++; log('  🧹 ลบไฟล์ใน Supabase ของบิล ' + b.bill_no + ' (จ่ายครบ · สำเนาอยู่ ' + path.relative(ROOT, billDir) + ')'); }
+    if(DRY_RUN){ pruned++; tally('ลบไฟล์บิลจ่ายครบออกจาก Supabase', 'pruned'); continue; }
+    try{ await rpc('nas_mark_pruned', {p_bill_id: b.id, p_nas_path: path.relative(ROOT, billDir)}); pruned++; tally('ลบไฟล์บิลจ่ายครบออกจาก Supabase', 'pruned'); log('  🧹 ลบไฟล์ใน Supabase ของบิล ' + b.bill_no + ' (จ่ายครบ · สำเนาอยู่ ' + path.relative(ROOT, billDir) + ')'); }
     catch(e){ log('  ⚠️ บันทึกสถานะบิล ' + b.bill_no + ' ไม่ได้: ' + e.message); }
   }
   if(pruned || kept) log('ประหยัดพื้นที่: ลบไฟล์บิลจ่ายครบแล้ว ' + pruned + ' ใบ' + (kept ? ' · รอ ' + kept + ' ใบ (ยังไม่ครบ/ยังไม่ถึงเวลา)' : ''));
@@ -440,8 +446,8 @@ async function syncMedia(ROOT){
     const op = objPathOf(p.image_url, 'products'); if(op) referenced.add(op);
     const name = safeName((p.sku || p.id) + '_' + (p.name || '')).slice(0, 60) + '_' + shortHash(p.image_url) + extOf(p.image_url);
     const dest = path.join(pdir, name);
-    if(fs.existsSync(dest)){ skipped++; continue; }
-    try{ await download(p.image_url, dest); saved++; }catch(e){ failed++; log('  ⚠️ โหลดรูปสินค้า ' + (p.sku || p.id) + ' ไม่ได้ — ' + e.message); }
+    if(fs.existsSync(dest)){ skipped++; tally('รูปสินค้า', 'have'); continue; }
+    try{ await download(p.image_url, dest); saved++; tally('รูปสินค้า', 'new'); }catch(e){ failed++; tally('รูปสินค้า', 'fail'); log('  ⚠️ โหลดรูปสินค้า ' + (p.sku || p.id) + ' ไม่ได้ — ' + e.message); }
   }
   // ไฟล์อื่นใน bucket products = สื่อบรอดแคสต์/โปรโมชั่น (ชื่อขึ้นต้น broadcast-/media-/promo-…)
   let objs = [];
@@ -454,11 +460,11 @@ async function syncMedia(ROOT){
     const dir = path.join(base, 'บรอดแคสต์', y + '-' + m); fs.mkdirSync(dir, {recursive: true});
     const dest = path.join(dir, safeName(o.name.replace(/\//g, '_')));
     if(!fs.existsSync(dest)){
-      try{ await download(url, dest); saved++; log('  💾 ' + path.join(MEDIA_DIR, 'บรอดแคสต์', y + '-' + m, path.basename(dest))); }
-      catch(e){ failed++; log('  ⚠️ โหลดสื่อ ' + o.name + ' ไม่ได้ — ' + e.message); continue; }
-    }else skipped++;
+      try{ await download(url, dest); saved++; tally('สื่อบรอดแคสต์', 'new'); log('  💾 ' + path.join(MEDIA_DIR, 'บรอดแคสต์', y + '-' + m, path.basename(dest))); }
+      catch(e){ failed++; tally('สื่อบรอดแคสต์', 'fail'); log('  ⚠️ โหลดสื่อ ' + o.name + ' ไม่ได้ — ' + e.message); continue; }
+    }else{ skipped++; tally('สื่อบรอดแคสต์', 'have'); }
     if(new Date(o.created_at).getTime() < cutoff && onNas(dest)){
-      try{ await deleteObject('products', o.name); pruned++; log('  🧹 ลบสื่อบรอดแคสต์ออกจาก Supabase: ' + o.name); }
+      try{ await deleteObject('products', o.name); pruned++; tally('สื่อบรอดแคสต์', 'pruned'); log('  🧹 ลบสื่อบรอดแคสต์ออกจาก Supabase: ' + o.name); }
       catch(e){ log('  ⚠️ ' + e.message); }
     }
   }
@@ -487,7 +493,7 @@ async function syncExpenses(ROOT){
       if(r.receipt_url){
         rname = safeName(String(r.spent_at || '').slice(0, 10) + '_' + (cats[r.category_id] || 'ไม่ระบุหมวด') + '_' + Number(r.amount || 0) + '_' + r.id) + extOf(r.receipt_url);
         const dest = path.join(dir, rname);
-        if(!fs.existsSync(dest)){ try{ await download(r.receipt_url, dest); saved++; }catch(e){ failed++; rname = '(โหลดไม่ได้)'; } }
+        if(!fs.existsSync(dest)){ try{ await download(r.receipt_url, dest); saved++; tally('ใบเสร็จรายจ่าย', 'new'); }catch(e){ failed++; tally('ใบเสร็จรายจ่าย', 'fail'); rname = '(โหลดไม่ได้)'; } } else tally('ใบเสร็จรายจ่าย', 'have');
       }
       total += Number(r.amount || 0);
       lines.push([String(r.spent_at || '').slice(0, 10), cats[r.category_id] || '', r.description || '', r.vendor || '', Number(r.amount || 0),
@@ -521,6 +527,7 @@ async function backupTables(ROOT){
     fs.writeFileSync(path.join(dir, table + '.csv'), toCsv(rows));
     n++;
   }
+  tally('สำรองตารางข้อมูล', 'new', n);
   log('💽 สำรองข้อมูล ' + n + ' ตาราง → ' + path.join(BACKUP_DIR, todayStr));
   return {done: true, tables: n};
 }
@@ -573,9 +580,9 @@ async function syncOnce(){
       fs.mkdirSync(billDir, {recursive: true});
       for(const [url, name] of files){
         const dest = path.join(billDir, name);
-        if(fs.existsSync(dest)){ skipped++; continue; }
-        try{ await download(url, dest); saved++; log('  💾 ' + path.join(ddmmyyyy, safeName(b.bill_no), name)); }
-        catch(e){ failed++; log('  ⚠️ โหลดไม่ได้ ' + b.bill_no + ' ' + name + ' — ' + e.message); }
+        if(fs.existsSync(dest)){ skipped++; tally('บิล+สลิป (โฟลเดอร์รายวัน)', 'have'); continue; }
+        try{ await download(url, dest); saved++; tally('บิล+สลิป (โฟลเดอร์รายวัน)', 'new'); log('  💾 ' + path.join(ddmmyyyy, safeName(b.bill_no), name)); }
+        catch(e){ failed++; tally('บิล+สลิป (โฟลเดอร์รายวัน)', 'fail'); log('  ⚠️ โหลดไม่ได้ ' + b.bill_no + ' ' + name + ' — ' + e.message); }
       }
     }
 
@@ -626,6 +633,11 @@ async function syncOnce(){
 
     log('✅ ซิงก์เสร็จใน ' + Math.round((Date.now()-t0)/1000) + ' วิ — ไฟล์ใหม่ ' + saved
         + ' · มีอยู่แล้ว ' + skipped + (failed ? ' · โหลดพลาด ' + failed + ' (จะลองใหม่รอบหน้า)' : ''));
+    log('────────── สรุปสิ่งที่เก็บลง NAS รอบนี้' + (DRY_RUN ? ' (โหมดทดลอง: ไม่ได้ลบ/แก้อะไรใน Supabase)' : '') + ' ──────────');
+    for(const [sec, r] of Object.entries(REPORT))
+      log('  ' + sec.padEnd(34, ' ') + ' ใหม่ ' + String(r.new).padStart(5) + ' · มีอยู่แล้ว ' + String(r.have).padStart(5) + (r.fail ? ' · พลาด ' + r.fail : '') + (r.pruned ? ' · ' + (DRY_RUN ? 'จะลบใน Supabase ' : 'ลบใน Supabase แล้ว ') + r.pruned : ''));
+    log('  ปลายทาง: ' + ROOT);
+    for(const k of Object.keys(REPORT)) delete REPORT[k];
   }catch(e){
     log('❌ ซิงก์ไม่สำเร็จ: ' + (e.message || e));
     ok = false;
@@ -638,7 +650,7 @@ async function syncOnce(){
 console.log('==========================================================');
 console.log('  Mix Fresh 168 — เก็บบิล + สลิปเข้า NAS อัตโนมัติ');
 console.log('  ปลายทาง: ' + NAS_ROOT);
-console.log('  ซิงก์ย้อนหลัง ' + DAYS_BACK + ' วัน · ทำซ้ำทุก ' + EVERY_MIN + ' นาที');
+console.log('  ซิงก์ย้อนหลัง ' + DAYS_BACK + ' วัน · ทำซ้ำทุก ' + EVERY_MIN + ' นาที' + (DRY_RUN ? '  [โหมดทดลอง --dry-run: ไม่ลบ/ไม่แก้อะไรใน Supabase]' : ''));
 console.log('  เปิดหน้าต่างนี้ทิ้งไว้ (ย่อได้ อย่าปิด) — ปิดแล้วเปิดใหม่ก็ซิงก์ต่อจากเดิมได้');
 console.log('==========================================================');
 if(process.argv.includes('--once')){
