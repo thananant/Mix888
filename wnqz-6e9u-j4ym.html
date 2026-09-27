@@ -1540,8 +1540,12 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <input type="hidden" id="pys-sale">
     <div class="row" style="margin-top:12px">
-      <div><label>เงินเดือนพื้นฐาน (บาท/เดือน)</label><input id="pys-base" type="number" step="1" min="0" class="num" style="width:150px" placeholder="0"></div>
+      <div><label>ตำแหน่ง</label><select id="pys-position" style="min-width:190px">
+        <option value="sale">1. เซลล์</option><option value="cosale">2. Co-Sale</option><option value="cs">3. Customer Service</option><option value="admin">4. ธุรการ</option></select></div>
+      <div><label>ฐานเงินเดือน (บาท/เดือน)</label><input id="pys-base" type="number" step="1" min="0" class="num" style="width:150px" placeholder="0"></div>
+      <div style="align-self:flex-end"><label style="cursor:pointer;user-select:none;font-size:14px;color:var(--ink)"><input type="checkbox" id="pys-nocomm" style="width:16px;height:16px;vertical-align:-3px" onchange="pySetNoCommUI()"> 🚫 คนนี้ไม่รับค่าคอม/โบนัส</label><div style="font-size:11.5px;color:var(--muted)">ได้เงินเดือน + เพิ่ม/หัก เท่านั้น · ยอดขายยังแสดงไว้ให้ดู</div></div>
     </div>
+    <div id="pys-comm-wrap">
     <h4 style="margin:14px 0 6px;font-size:14px">ค่าคอมตามอายุลูกค้า (นับจากบิลแรก)</h4>
     <div class="row">
       <div><label>ช่วงที่ 1: กี่วันแรก</label><input id="pys-days1" type="number" min="1" step="1" class="num" style="width:100px" value="90"></div>
@@ -1560,6 +1564,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div><label>ได้ (บาท)</label><input id="pys-b3a" type="number" min="0" step="1" class="num" style="width:110px" value="7000"></div>
     </div>
     <p class="hint">โบนัสให้ขั้นสูงสุดขั้นเดียว (ไม่บวกซ้อน) · ค่าที่ตั้งมีผลกับทุกเดือนที่เปิดดู (ไม่ได้ล็อกย้อนหลัง)</p>
+    </div>
     <div class="row" style="margin-top:12px">
       <button class="btn-p" onclick="pySaveSet()">💾 บันทึก</button>
       <button class="btn-g" onclick="pyFillSet(PY_DEF)">คืนค่าเริ่มต้น</button>
@@ -11015,7 +11020,8 @@ function enterApp(user){
    ค่าคอม: บิลของลูกค้าที่เซลล์ดูแล นับอายุจาก "บิลแรกของลูกค้า" (ไม่ใช่วันเพิ่มลูกค้า)
      วัน 0..days1-1 → rate1% · ถัดไป days2 วัน → rate2% · หลังจากนั้น rate3%
    โบนัส: จำนวนลูกค้าที่ออกบิลแรกในเดือน ครบขั้นไหนได้ขั้นนั้น (ขั้นสูงสุดขั้นเดียว) */
-const PY_DEF={base_salary:0,days1:90,rate1:1,days2:90,rate2:0.5,rate3:0.25,bonus:[{n:10,amt:2000},{n:20,amt:5000},{n:30,amt:7000}]};
+const PY_POS={sale:'เซลล์',cosale:'Co-Sale',cs:'Customer Service',admin:'ธุรการ'};
+const PY_DEF={base_salary:0,position:'sale',comm_enabled:true,days1:90,rate1:1,days2:90,rate2:0.5,rate3:0.25,bonus:[{n:10,amt:2000},{n:20,amt:5000},{n:30,amt:7000}]};
 let pyBills=null, pyComp={}, pyAdj=[], pyLoading=false, pyCalc={};
 function pyIsAdmin(){return !!(currentUser&&currentUser.role==='admin');}
 const PY_START_DEF='2026-10-01';
@@ -11099,6 +11105,8 @@ function pyCompute(){
     const tiersB=[...g.cfg.bonus].filter(t=>t&&Number(t.n)>0).sort((a,b)=>Number(b.n)-Number(a.n));
     const hit=tiersB.find(t=>g.newCust.length>=Number(t.n));
     g.bonus=hit?Number(hit.amt)||0:0;g.bonusTier=hit||null;
+    g.noComm=g.cfg.comm_enabled===false;
+    if(g.noComm){g.comm=0;g.tierAmt=[0,0,0];g.bonus=0;g.bonusTier=null;}   // ไม่รับค่าคอม: เก็บยอดขายไว้ดู แต่ไม่คิดเงิน
     g.adjRows=pyAdj.filter(a=>Number(a.sale_id)===Number(g.sale.id)&&a.month===month);
     g.adj=g.adjRows.reduce((s,a)=>s+(Number(a.amount)||0),0);
     g.total=Number(g.cfg.base_salary||0)+g.comm+g.bonus+g.adj;
@@ -11128,12 +11136,12 @@ function pyRender(){
     tot.base+=Number(g.cfg.base_salary||0);tot.sales+=g.sales;tot.comm+=g.comm;tot.nc+=g.newCust.length;tot.bonus+=g.bonus;tot.adj+=g.adj;tot.total+=g.total;
     const custom=!!pyComp[g.sale.id];
     return `<tr${g.sale.active===false?' style="opacity:.55"':''}>
-      <td><b>${esc(g.sale.code||'???')}</b> · ${esc(g.sale.name)}${g.sale.active===false?' <span class="tag tag-out">ปิดใช้</span>':''}${custom?'':' <span class="tag tag-low" title="ยังไม่ได้ตั้งค่ารายคน ใช้ค่าเริ่มต้น">ค่าเริ่มต้น</span>'}</td>
+      <td><b>${esc(g.sale.code||'???')}</b> · ${esc(g.sale.name)}${g.sale.active===false?' <span class="tag tag-out">ปิดใช้</span>':''}${g.noComm?' <span class="tag tag-out" title="ตั้งไว้ว่าไม่รับค่าคอม/โบนัส">🚫 ไม่รับค่าคอม</span>':(custom?'':' <span class="tag tag-low" title="ยังไม่ได้ตั้งค่ารายคน ใช้ค่าเริ่มต้น">ค่าเริ่มต้น</span>')}<div style="font-size:11.5px;color:var(--muted)">${esc(PY_POS[g.cfg.position]||PY_POS.sale)}</div></td>
       <td class="num">${fmt(g.cfg.base_salary||0)}</td>
       <td class="num">${fmt(g.sales)}<div style="font-size:11px;color:var(--muted)">${g.rows.length} บิล${g.unpaid.length?' · <span style="color:var(--warn)" title="ออกบิลเดือนนี้แต่ยังไม่ชำระ — ยังไม่นับ">รอชำระ '+g.unpaid.length+' บิล '+fmt(g.unpaidSum)+'</span>':''}</div></td>
-      <td class="num"><b>${fmt(g.comm)}</b><div style="font-size:11px;color:var(--muted)" title="แยกตามช่วง: ${g.cfg.rate1}% / ${g.cfg.rate2}% / ${g.cfg.rate3}%">${g.cfg.rate1}%: ${fmt(g.tierAmt[0])} · ${g.cfg.rate2}%: ${fmt(g.tierAmt[1])} · ${g.cfg.rate3}%: ${fmt(g.tierAmt[2])}</div></td>
+      <td class="num">${g.noComm?'<span style="color:var(--muted)">—</span>':`<b>${fmt(g.comm)}</b><div style="font-size:11px;color:var(--muted)" title="แยกตามช่วง: ${g.cfg.rate1}% / ${g.cfg.rate2}% / ${g.cfg.rate3}%">${g.cfg.rate1}%: ${fmt(g.tierAmt[0])} · ${g.cfg.rate2}%: ${fmt(g.tierAmt[1])} · ${g.cfg.rate3}%: ${fmt(g.tierAmt[2])}</div>`}</td>
       <td class="num">${g.newCust.length}</td>
-      <td class="num">${g.bonus?'<span class="tag tag-ok">'+fmt(g.bonus)+'</span>':'<span style="color:var(--muted)">—</span>'}${g.bonusTier?'<div style="font-size:11px;color:var(--muted)">ครบ '+g.bonusTier.n+' คน</div>':''}</td>
+      <td class="num">${g.noComm?'<span style="color:var(--muted)">—</span>':(g.bonus?'<span class="tag tag-ok">'+fmt(g.bonus)+'</span>':'<span style="color:var(--muted)">—</span>')}${g.bonusTier?'<div style="font-size:11px;color:var(--muted)">ครบ '+g.bonusTier.n+' คน</div>':''}</td>
       <td class="num">${g.adj?(g.adj<0?'<span style="color:var(--danger)">':'<span style="color:var(--ok)">')+fmt(g.adj)+'</span>':'<span style="color:var(--muted)">—</span>'}</td>
       <td class="num"><b style="font-size:15px">${fmt(g.total)}</b></td>
       <td style="white-space:nowrap"><button class="btn-s mini" onclick="pyOpenDetail(${g.sale.id})">🔍 รายละเอียด</button> <button class="btn-g mini" onclick="pyOpenSet(${g.sale.id})">⚙️</button></td></tr>`;
@@ -11148,7 +11156,7 @@ function pyOpenDetail(saleId){
   const [y,m]=pyCalc.month.split('-').map(Number);
   document.getElementById('pyd-head').textContent='🔍 '+(g.sale.code||'')+' · '+g.sale.name+' — '+TH_MONTHS[m-1]+' '+(y+543);
   document.getElementById('pyd-head').dataset.sale=saleId;
-  document.getElementById('pyd-sum').innerHTML='เงินเดือน <b>'+fmt(g.cfg.base_salary||0)+'</b> + ค่าคอม <b>'+fmt(g.comm)+'</b> ('+g.rows.length+' บิล · ยอด '+fmt(g.sales)+') + โบนัส <b>'+fmt(g.bonus)+'</b> ('+g.newCust.length+' ลูกค้าใหม่) '+(g.adj?'± เพิ่ม/หัก <b>'+fmt(g.adj)+'</b> ':'')+'= <b style="font-size:15px">'+fmt(g.total)+'</b> บาท';
+  document.getElementById('pyd-sum').innerHTML=(g.noComm?'<span class="tag tag-out">🚫 ไม่รับค่าคอม/โบนัส</span> ':'')+'เงินเดือน <b>'+fmt(g.cfg.base_salary||0)+'</b>'+(g.noComm?' (ยอดขาย '+fmt(g.sales)+' · '+g.rows.length+' บิล แสดงไว้ดูเฉย ๆ)':' + ค่าคอม <b>'+fmt(g.comm)+'</b> ('+g.rows.length+' บิล · ยอด '+fmt(g.sales)+') + โบนัส <b>'+fmt(g.bonus)+'</b> ('+g.newCust.length+' ลูกค้าใหม่)')+' '+(g.adj?'± เพิ่ม/หัก <b>'+fmt(g.adj)+'</b> ':'')+'= <b style="font-size:15px">'+fmt(g.total)+'</b> บาท';
   document.getElementById('pyd-adj-amt').value='';document.getElementById('pyd-adj-note').value='';
   pyRenderAdj(g);
   const fd=d=>{const x=new Date(d);return x.getDate()+' '+TH_MONTHS[x.getMonth()]+' '+(x.getFullYear()+543).toString().slice(2);};
@@ -11186,23 +11194,24 @@ async function pyDelAdj(id){
 }
 function pyFillSet(c){
   const g=id=>document.getElementById(id);
-  g('pys-base').value=c.base_salary||0;g('pys-days1').value=c.days1;g('pys-rate1').value=c.rate1;g('pys-days2').value=c.days2;g('pys-rate2').value=c.rate2;g('pys-rate3').value=c.rate3;
+  g('pys-position').value=PY_POS[c.position]?c.position:'sale';g('pys-base').value=c.base_salary||0;g('pys-nocomm').checked=c.comm_enabled===false;pySetNoCommUI();g('pys-days1').value=c.days1;g('pys-rate1').value=c.rate1;g('pys-days2').value=c.days2;g('pys-rate2').value=c.rate2;g('pys-rate3').value=c.rate3;
   const b=c.bonus||[];[1,2,3].forEach(i=>{g('pys-b'+i+'n').value=b[i-1]?b[i-1].n:'';g('pys-b'+i+'a').value=b[i-1]?b[i-1].amt:'';});
 }
+function pySetNoCommUI(){const off=document.getElementById('pys-nocomm').checked;const w=document.getElementById('pys-comm-wrap');w.style.opacity=off?'.45':'';w.style.pointerEvents=off?'none':'';}
 function pyOpenSet(saleId){
   const s=sales.find(x=>x.id===saleId);if(!s)return;
   document.getElementById('pys-sale').value=saleId;
-  document.getElementById('pys-head').textContent='⚙️ ตั้งค่าค่าคอม — '+(s.code||'')+' · '+s.name;
+  document.getElementById('pys-head').textContent='⚙️ ตั้งค่าเงินเดือน/ค่าคอม — '+(s.code||'')+' · '+s.name;
   pyFillSet(pyCompOf(saleId));
   document.getElementById('py-set-modal').style.display='flex';
 }
 async function pySaveSet(){
   const g=id=>document.getElementById(id);const n=id=>Number(g(id).value);
   const saleId=Number(g('pys-sale').value);
-  const rec={sale_id:saleId,base_salary:n('pys-base')||0,days1:Math.max(1,Math.round(n('pys-days1')||90)),rate1:n('pys-rate1')||0,days2:Math.max(1,Math.round(n('pys-days2')||90)),rate2:n('pys-rate2')||0,rate3:n('pys-rate3')||0,
+  const rec={sale_id:saleId,position:g('pys-position').value,base_salary:n('pys-base')||0,comm_enabled:!g('pys-nocomm').checked,days1:Math.max(1,Math.round(n('pys-days1')||90)),rate1:n('pys-rate1')||0,days2:Math.max(1,Math.round(n('pys-days2')||90)),rate2:n('pys-rate2')||0,rate3:n('pys-rate3')||0,
     bonus:[1,2,3].map(i=>({n:Math.round(n('pys-b'+i+'n')),amt:n('pys-b'+i+'a')||0})).filter(t=>t.n>0),updated_at:new Date().toISOString()};
   const {error}=await db.from('sale_comp').upsert(rec,{onConflict:'sale_id'});
-  if(error){toast('บันทึกไม่ได้: '+error.message+(error.code==='42P01'?' — ยังไม่ได้รัน SQL mix888-sale-commission.sql':''));return;}
+  if(error){toast('บันทึกไม่ได้: '+error.message+(error.code==='42P01'?' — ยังไม่ได้รัน SQL mix888-sale-commission.sql':'')+(/comm_enabled|position/.test(error.message)?' — ยังไม่ได้รัน SQL เพิ่มคอลัมน์ comm_enabled/position':''));return;}
   pyComp[saleId]=rec;toast('บันทึกตั้งค่าแล้ว');
   document.getElementById('py-set-modal').style.display='none';pyRender();
 }

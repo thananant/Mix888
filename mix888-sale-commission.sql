@@ -6,6 +6,8 @@
 create table if not exists sale_comp (
   sale_id     integer primary key references sales(id) on delete cascade,
   base_salary numeric not null default 0,      -- เงินเดือนพื้นฐาน/เดือน
+  position    text    not null default 'sale', -- sale=เซลล์ cosale=Co-Sale cs=Customer Service admin=ธุรการ
+  comm_enabled boolean not null default true,  -- false = คนนี้ไม่รับค่าคอม/โบนัส (ได้เงินเดือน + เพิ่ม/หัก เท่านั้น)
   days1       integer not null default 90,     -- ช่วงที่ 1 กี่วันแรก (นับจากบิลแรกของลูกค้า)
   rate1       numeric not null default 1,      -- % ช่วงที่ 1
   days2       integer not null default 90,     -- ช่วงที่ 2 อีกกี่วัน
@@ -14,6 +16,8 @@ create table if not exists sale_comp (
   bonus       jsonb   not null default '[{"n":10,"amt":2000},{"n":20,"amt":5000},{"n":30,"amt":7000}]',
   updated_at  timestamptz default now()
 );
+alter table sale_comp add column if not exists position     text    not null default 'sale';  -- สำหรับคนที่รันเวอร์ชันแรกไปแล้ว
+alter table sale_comp add column if not exists comm_enabled boolean not null default true;
 -- เพิ่ม/หัก รายเดือน (ค่าน้ำมัน หักขาดงาน ฯลฯ)
 create table if not exists sale_pay_adj (
   id         bigserial primary key,
