@@ -250,7 +250,11 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
 
     <div class="mgroup" data-g="plan">
-      <div class="mhead" onclick="showPage('plan')" data-page="plan"><span class="ic">📅</span>แพลนสั่งซื้อ<span class="badge" id="pl-badge" style="display:none">0</span></div>
+      <div class="mhead" onclick="toggleGroup('plan')"><span class="ic">📅</span>แพลนสั่งของ<span class="badge" id="grp-plan-badge" style="display:none">0</span><span class="chev">▾</span></div>
+      <div class="msub">
+        <div class="mi" data-page="plan" onclick="showPage('plan')"><span class="ic">📅</span>แพลนสั่งซื้อ<span class="badge" id="pl-badge" style="display:none">0</span></div>
+        <div class="mi" data-page="salecmp" onclick="showPage('salecmp')"><span class="ic">📈</span>เทียบยอดขาย</div>
+      </div>
     </div>
 
     <div class="mgroup" data-g="purchase">
@@ -267,7 +271,6 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <div class="mi" data-page="products" onclick="showPage('products')"><span class="ic">📦</span>สินค้า</div>
         <div class="mi" data-page="moves" onclick="showPage('moves')"><span class="ic">📊</span>เดินรายการสินค้า</div>
         <div class="mi" data-page="transfer" onclick="showPage('transfer')"><span class="ic">🚛</span>โอนโกดัง<span class="badge" id="tf-badge" style="display:none">0</span></div>
-        <div class="mi" data-page="salecmp" onclick="showPage('salecmp')"><span class="ic">📈</span>เทียบยอดขาย/แพลนโอน</div>
         <div class="mi" data-page="receive" onclick="showPage('receive')"><span class="ic">📥</span>รับสินค้า<span class="badge" id="rc-badge" style="display:none">0</span></div>
         <div class="mi" data-page="warehouse" onclick="showPage('warehouse')"><span class="ic">🏭</span>คลังสินค้า</div>
         <div class="mi" data-page="stockops" onclick="showPage('stockops')"><span class="ic">📋</span>นับ/ปรับสต๊อก</div>
@@ -12061,6 +12064,8 @@ function plRender(){
   document.getElementById('pl-sum').insertAdjacentHTML('afterend',warn);
   const b=document.getElementById('pl-badge');
   if(b){b.textContent=toOrder;b.style.display=toOrder?'':'none';}
+  const gb=document.getElementById('grp-plan-badge');   // ป้ายที่หัวกลุ่ม "แพลนสั่งของ" ตอนพับเมนู
+  if(gb){gb.textContent=toOrder;gb.style.display=toOrder?'':'none';}
   if(!list.length){el.innerHTML='<tr><td colspan="10" class="empty">ไม่มีรายการที่ต้องสั่ง ✓</td></tr>';return;}
   const STL={urgent:'<span class="tag tag-out" style="background:#fdecec;color:#b52020">🔴 จะขาด</span>',
     order:'<span class="tag tag-low">🟡 ควรสั่ง</span>',
