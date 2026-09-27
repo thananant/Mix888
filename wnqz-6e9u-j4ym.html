@@ -696,16 +696,19 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div id="c-credit-sched" style="display:none;margin-top:10px;background:#faf5f1;border:1px solid #f0e4dc;border-radius:12px;padding:12px">
       <div class="row">
         <div><label>ปี (พ.ศ.)</label><select id="cs-year" onchange="csYearChanged()" style="width:110px"></select></div>
-        <div><label>วางบิลทุกวันที่</label><select id="cs-bill-day" style="width:120px"></select></div>
-        <div><label>ยอดรอบ: ตัดยอดถึงวันที่</label><select id="cs-cut-day" style="width:120px" title="ยอดขายตั้งแต่วันถัดจากวันตัดยอดครั้งก่อน ถึงวันตัดยอดของเดือนนี้ — ปกติ = วันวางบิล หรือก่อนวางบิล 1–2 วัน"></select></div>
+        <div><label>ยอดรอบ: ตัดยอดถึงวันที่</label><select id="cs-cut-day" style="width:120px" title="ยอดขายตั้งแต่วันถัดจากวันตัดยอดครั้งก่อน ถึงวันตัดยอดของเดือนนี้"></select></div>
+        <div><label>วางบิลวันที่</label><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <select id="cs-bill-day" style="width:120px"></select>
+          <select id="cs-bill-month" style="min-width:150px"><option value="0">ของเดือนเดียวกัน</option><option value="1">ของเดือนถัดไป</option></select>
+        </div></div>
         <div><label>ลูกค้าชำระ</label><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <select id="cs-due-mode" onchange="csDueModeUI()" style="min-width:160px"><option value="after">หลังวางบิล … วัน</option><option value="fixed">วันที่ … ของเดือนถัดไป</option><option value="same">วันที่ … ของเดือนเดียวกัน</option></select>
+          <select id="cs-due-mode" onchange="csDueModeUI()" style="min-width:190px"><option value="after">หลังวางบิล … วัน</option><option value="fixed">วันที่ … ของเดือนถัดจากวางบิล</option><option value="same">วันที่ … ของเดือนที่วางบิล</option></select>
           <input id="cs-due-n" type="number" min="0" max="120" step="1" class="num" style="width:80px" value="30">
           <select id="cs-due-day" style="width:100px;display:none"></select>
         </div></div>
         <div style="align-self:flex-end"><button class="btn-s" onclick="csGenerate()">📅 สร้างตารางทั้งปี</button></div>
       </div>
-      <p class="hint" style="margin-top:6px">สร้างตารางแล้วแก้รายงวดได้ทุกช่อง (เช่น เลื่อนวันหยุด) · วันที่ 31 ของเดือนที่ไม่มี = ใช้วันสิ้นเดือนแทน · เพิ่ม/ลบงวดเองได้</p>
+      <p class="hint" style="margin-top:6px">ตัวอย่าง: ตัดยอดสิ้นเดือน → วางบิลวันที่ 1 <b>ของเดือนถัดไป</b> → ชำระวันที่ 5 ของเดือนถัดจากวางบิล · ถ้าเลือก "เดือนเดียวกัน" แต่วันวางบิลมาก่อนวันตัดยอด ระบบจะเลื่อนไปเดือนถัดไปให้เอง · สร้างแล้วแก้รายงวดได้ทุกช่อง · วันที่ 31 ของเดือนที่ไม่มี = สิ้นเดือน</p>
       <div style="overflow-x:auto;margin-top:8px">
       <table id="cs-table" style="font-size:13.5px">
         <thead><tr><th style="width:52px">งวด</th><th>ยอดตั้งแต่วันที่</th><th>ถึงวันที่</th><th>วางบิลวันที่</th><th>ลูกค้าชำระวันที่</th><th class="num">ระยะเครดิต</th><th></th></tr></thead>
@@ -4695,20 +4698,24 @@ function csGenerate(){
   const dueMode=document.getElementById('cs-due-mode').value;
   const dueN=Number(document.getElementById('cs-due-n').value)||0;
   const dueD=Number(document.getElementById('cs-due-day').value)||1;
+  const billOff=Number(document.getElementById('cs-bill-month').value)||0;   // 0 = เดือนเดียวกับตัดยอด · 1 = เดือนถัดไป
   if(csRead().length&&!confirm('มีตารางอยู่แล้ว — สร้างใหม่ทับของเดิมทั้งหมด?'))return;
-  const rows=[];
+  const rows=[];let bumped=0;
   for(let m=0;m<12;m++){
     const to=csDateOf(y,m,cutD);
     const from=csAddDays(csDateOf(y,m-1,cutD),1);    // วันถัดจากวันตัดยอดเดือนก่อน
-    const bill=csDateOf(y,m,billD);
+    let bm=m+billOff;
+    let bill=csDateOf(y,bm,billD);
+    if(bill<to){bm++;bill=csDateOf(y,bm,billD);bumped++;}   // วางบิลต้องไม่มาก่อนวันตัดยอด → เลื่อนไปเดือนถัดไป
     let due;
     if(dueMode==='after')due=csAddDays(bill,dueN);
-    else if(dueMode==='fixed')due=csDateOf(y,m+1,dueD);
-    else due=csDateOf(y,m,dueD);
+    else if(dueMode==='fixed')due=csDateOf(y,bm+1,dueD);      // เดือนถัดจากเดือนที่วางบิล
+    else due=csDateOf(y,bm,dueD);                              // เดือนเดียวกับที่วางบิล
+    if(due<bill)due=csDateOf(y,bm+1,dueD);                     // วันชำระต้องไม่มาก่อนวางบิล
     rows.push({from:ymd(from),to:ymd(to),bill:ymd(bill),due:ymd(due)});
   }
   csRender(rows);
-  toast('สร้างตารางปี '+(y+543)+' แล้ว 12 งวด — แก้รายงวดได้เลย');
+  toast('สร้างตารางปี '+(y+543)+' แล้ว 12 งวด'+(bumped?' · เลื่อนวันวางบิลไปเดือนถัดไป '+bumped+' งวด เพราะมาก่อนวันตัดยอด':'')+' — แก้รายงวดได้เลย');
 }
 function csRender(rows){
   const tb=document.getElementById('cs-body');
