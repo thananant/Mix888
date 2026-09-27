@@ -1471,8 +1471,17 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="fbtn" onclick="pyShiftMonth(-1)" title="เดือนก่อน">◀</button>
       <input type="month" id="py-month" onchange="pyRender()">
       <button class="fbtn" onclick="pyShiftMonth(1)" title="เดือนถัดไป">▶</button>
-      <label style="margin:0 0 0 8px;cursor:pointer;user-select:none;font-size:13px"><input type="checkbox" id="py-paidonly" style="width:15px;height:15px;vertical-align:-2px" onchange="pyRender()"> นับเฉพาะบิลที่จ่ายแล้ว</label>
       <button class="btn-g mini" onclick="pyLoad(true)" title="ดึงบิลล่าสุดจากฐานข้อมูล">🔄</button>
+    </div>
+  </div>
+  <div class="card" style="padding:12px 16px">
+    <div class="row" style="align-items:flex-end">
+      <div><label>เริ่มนับค่าคอมตั้งแต่บิลที่ออกวันที่</label><input type="date" id="py-start" style="width:170px"></div>
+      <div><label>ลูกค้าที่เคยซื้อก่อนวันเริ่ม</label><select id="py-agemode" style="min-width:300px">
+        <option value="true">นับอายุจากบิลแรกจริง (ลูกค้าเก่าได้อัตราท้าย 0.25%)</option>
+        <option value="reset">เริ่มนับใหม่จากบิลแรกหลังวันเริ่ม (ทุกคนเริ่ม 1%)</option></select></div>
+      <button class="btn-p mini" style="height:40px" onclick="pySaveRules()">💾 บันทึกกติกา</button>
+      <span class="hint" style="margin:0 0 6px;flex:1;min-width:240px">✅ นับเฉพาะบิลที่<b>ลูกค้าชำระแล้ว</b> และลงเดือนตาม<b>วันที่ชำระ</b> (สั่งเดือนนี้ โอนเดือนหน้า = ค่าคอมเดือนหน้า) · บิลที่ออกก่อนวันเริ่มไม่นับเลย</span>
     </div>
   </div>
   <div class="cards" id="py-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px"></div>
@@ -1483,14 +1492,14 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th>เซลล์</th><th class="num">เงินเดือน</th><th class="num">ยอดขายเดือนนี้</th><th class="num">ค่าคอม</th><th class="num">ลูกค้าใหม่</th><th class="num">โบนัส</th><th class="num">เพิ่ม/หัก</th><th class="num">รวมจ่าย</th><th></th></tr></thead>
+      <thead><tr><th>เซลล์</th><th class="num">เงินเดือน</th><th class="num">ยอดที่ชำระแล้ว</th><th class="num">ค่าคอม</th><th class="num">ลูกค้าใหม่</th><th class="num">โบนัส</th><th class="num">เพิ่ม/หัก</th><th class="num">รวมจ่าย</th><th></th></tr></thead>
       <tbody id="py-body"><tr><td colspan="9" class="empty">กำลังโหลด…</td></tr></tbody>
       <tfoot id="py-foot"></tfoot>
     </table>
     </div>
-    <p class="hint">กติกา: ค่าคอมคิดจากยอดบิล (ไม่รวมบิลที่ยกเลิก) ของลูกค้าที่เซลล์คนนั้นดูแล <b>เริ่มนับจากวันที่ออกบิลแรกของลูกค้ารายนั้น</b> ไม่ใช่วันเพิ่มลูกค้า ·
+    <p class="hint">กติกา: ค่าคอมคิดจากบิลที่<b>ลูกค้าชำระแล้ว</b>เท่านั้น (ไม่รวมบิลยกเลิก · บิลค้างจ่ายยังไม่นับ จะไปนับในเดือนที่ชำระ) ของลูกค้าที่เซลล์คนนั้นดูแล · อัตราดูจากอายุลูกค้า <b>นับจากวันที่ออกบิลแรกของลูกค้ารายนั้น</b> ไม่ใช่วันเพิ่มลูกค้า ·
       ค่าเริ่มต้น: 90 วันแรก 1% → 90 วันถัดไป 0.5% → หลังจากนั้น 0.25% (ตั้งต่างกันรายคนได้ที่ ⚙️) ·
-      โบนัสลูกค้าใหม่ = จำนวนลูกค้าที่ <b>ออกบิลแรกในเดือนนั้น</b> ครบขั้น (ค่าเริ่มต้น 10 คน 2,000 · 20 คน 5,000 · 30 คน 7,000) ·
+      โบนัสลูกค้าใหม่ = จำนวนลูกค้าที่ <b>บิลแรกถูกชำระในเดือนนั้น</b> ครบขั้น (ค่าเริ่มต้น 10 คน 2,000 · 20 คน 5,000 · 30 คน 7,000) ·
       ย้ายลูกค้าไปเซลล์อื่น = ยอดของลูกค้ารายนั้นย้ายตามไปทั้งหมด</p>
   </div>
 </div>
@@ -1512,11 +1521,13 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <h4 style="margin:10px 0 6px;font-size:14px">🧾 บิลที่นับค่าคอมในเดือนนี้</h4>
     <div style="overflow-x:auto">
     <table style="font-size:13px">
-      <thead><tr><th>วันที่</th><th>บิล</th><th>ลูกค้า</th><th>บิลแรกเมื่อ</th><th class="num">วันที่นับ</th><th class="num">อัตรา</th><th class="num">ยอดบิล</th><th class="num">ค่าคอม</th></tr></thead>
+      <thead><tr><th>ออกบิล</th><th>ชำระเมื่อ</th><th>บิล</th><th>ลูกค้า</th><th>บิลแรกเมื่อ</th><th class="num">วันที่นับ</th><th class="num">อัตรา</th><th class="num">ยอดบิล</th><th class="num">ค่าคอม</th></tr></thead>
       <tbody id="pyd-body"></tbody>
     </table>
     </div>
-    <h4 style="margin:14px 0 6px;font-size:14px">🆕 ลูกค้าใหม่ (ออกบิลแรกในเดือนนี้)</h4>
+    <h4 style="margin:14px 0 6px;font-size:14px">⏳ บิลที่ออกในเดือนนี้แต่ยังไม่ชำระ (ยังไม่นับ — จะนับในเดือนที่ลูกค้าโอน)</h4>
+    <div id="pyd-unpaid" style="font-size:13px"></div>
+    <h4 style="margin:14px 0 6px;font-size:14px">🆕 ลูกค้าใหม่ (บิลแรกถูกชำระในเดือนนี้)</h4>
     <div id="pyd-new" style="font-size:13px"></div>
   </div>
 </div>
@@ -11007,6 +11018,22 @@ function enterApp(user){
 const PY_DEF={base_salary:0,days1:90,rate1:1,days2:90,rate2:0.5,rate3:0.25,bonus:[{n:10,amt:2000},{n:20,amt:5000},{n:30,amt:7000}]};
 let pyBills=null, pyComp={}, pyAdj=[], pyLoading=false, pyCalc={};
 function pyIsAdmin(){return !!(currentUser&&currentUser.role==='admin');}
+const PY_START_DEF='2026-10-01';
+function pyRules(){
+  const a=(typeof appSettings!=='undefined'&&appSettings)||{};
+  return {start:(a.comm_start&&/^\d{4}-\d{2}-\d{2}$/.test(a.comm_start))?a.comm_start:PY_START_DEF,ageMode:a.comm_age_mode==='reset'?'reset':'true'};
+}
+function pyFillRules(){const r=pyRules();const s=document.getElementById('py-start'),m=document.getElementById('py-agemode');if(s&&document.activeElement!==s)s.value=r.start;if(m)m.value=r.ageMode;}
+async function pySaveRules(){
+  const start=document.getElementById('py-start').value,mode=document.getElementById('py-agemode').value;
+  if(!start){toast('เลือกวันเริ่มก่อน');return;}
+  const rows=[{key:'comm_start',value:start},{key:'comm_age_mode',value:mode}];
+  const {error}=await db.from('settings').upsert(rows,{onConflict:'key'});
+  if(error){toast('บันทึกไม่ได้: '+error.message);return;}
+  if(typeof appSettings==='undefined'||!appSettings)appSettings={};
+  rows.forEach(r=>appSettings[r.key]=r.value);
+  toast('บันทึกกติกาแล้ว');pyRender();
+}
 function pyMonthStr(){const el=document.getElementById('py-month');if(!el.value)el.value=ymd(new Date()).slice(0,7);return el.value;}
 function pyShiftMonth(d){const [y,m]=pyMonthStr().split('-').map(Number);const dt=new Date(y,m-1+d,1);document.getElementById('py-month').value=ymd(dt).slice(0,7);pyRender();}
 function pyCompOf(saleId){return Object.assign({},PY_DEF,pyComp[saleId]||{},{bonus:(pyComp[saleId]&&Array.isArray(pyComp[saleId].bonus)&&pyComp[saleId].bonus.length)?pyComp[saleId].bonus:PY_DEF.bonus});}
@@ -11018,7 +11045,7 @@ async function pyLoad(force){
   const st=document.getElementById('py-status');st.textContent='กำลังโหลดบิลทั้งหมด…';
   try{
     const [bills,comp,adj]=await Promise.all([
-      fetchAllPages(()=>db.from('bills').select('id,bill_no,customer_id,total,created_at,ship_status,payment_status').order('created_at')),
+      fetchAllPages(()=>db.from('bills').select('id,bill_no,customer_id,total,created_at,ship_status,payment_status,paid_at').order('created_at')),
       db.from('sale_comp').select('*'),
       db.from('sale_pay_adj').select('*').order('created_at')
     ]);
@@ -11028,36 +11055,45 @@ async function pyLoad(force){
     pyAdj=adj.error?[]:(adj.data||[]);
   }catch(e){st.textContent='โหลดไม่สำเร็จ: '+(e.message||e);pyLoading=false;return;}
   pyLoading=false;
+  pyFillRules();
   pyRender();
 }
-// คำนวณทั้งเดือน → {bySale:{id:{...}}, firstBill:{custId:date}}
+// คำนวณทั้งเดือน → {bySale:{id:{...}}, first:{custId:date}, month, rules}
+//  - นับเฉพาะบิลที่ออก ≥ วันเริ่ม และ payment_status='paid' · ลงเดือนตามวันที่ชำระ (paid_at)
+//  - อัตราดูจากอายุลูกค้า = วันที่ออกบิล − วันบิลแรกของลูกค้า (บิลแรกจริง หรือบิลแรกหลังวันเริ่ม ตามกติกา)
+//  - ลูกค้าใหม่ของเดือน = ลูกค้าที่บิลแรก (≥ วันเริ่ม) ถูกชำระในเดือนนั้น
 function pyCompute(){
-  const month=pyMonthStr();
-  const paidOnly=document.getElementById('py-paidonly').checked;
+  const month=pyMonthStr();const rules=pyRules();const start=rules.start;
   const live=(pyBills||[]).filter(b=>(b.ship_status||'pending')!=='cancelled'&&b.customer_id);
+  const bd=b=>String(b.created_at||'').slice(0,10);
+  const pd=b=>String(b.paid_at||b.created_at||'').slice(0,10);   // ไม่มี paid_at (ข้อมูลเก่า) → ใช้วันออกบิล
   const first={};
-  live.forEach(b=>{const d=b.created_at.slice(0,10);if(!first[b.customer_id]||d<first[b.customer_id])first[b.customer_id]=d;});
+  live.forEach(b=>{const d=bd(b);if(rules.ageMode==='reset'&&d<start)return;if(!first[b.customer_id]||d<first[b.customer_id])first[b.customer_id]=d;});
   const custById={};customers.forEach(c=>custById[c.id]=c);
   const bySale={};
-  sales.forEach(s=>bySale[s.id]={sale:s,cfg:pyCompOf(s.id),sales:0,comm:0,tiers:[0,0,0],tierAmt:[0,0,0],rows:[],newCust:[],bonus:0,adj:0,adjRows:[]});
+  sales.forEach(s=>bySale[s.id]={sale:s,cfg:pyCompOf(s.id),sales:0,comm:0,tiers:[0,0,0],tierAmt:[0,0,0],rows:[],newCust:[],bonus:0,adj:0,adjRows:[],unpaid:[],unpaidSum:0});
   const dayDiff=(a,b)=>Math.round((new Date(b)-new Date(a))/86400000);
+  const firstPaid={};   // ลูกค้า → วันชำระของบิลแรก (ไว้ตัดสินเดือนที่นับเป็นลูกค้าใหม่)
   live.forEach(b=>{
-    const d=b.created_at.slice(0,10);if(d.slice(0,7)!==month)return;
-    if(paidOnly&&b.payment_status!=='paid')return;
+    const d=bd(b);if(d<start)return;                                  // บิลก่อนวันเริ่ม ไม่นับเลย
     const c=custById[b.customer_id];if(!c||!c.sale_id||!bySale[c.sale_id])return;
     const g=bySale[c.sale_id],cfg=g.cfg;
-    const age=dayDiff(first[b.customer_id],d);
+    const paid=b.payment_status==='paid';
+    if(!paid){if(d.slice(0,7)===month){g.unpaid.push({date:d,bill:b.bill_no,cust:c,total:Number(b.total)||0});g.unpaidSum+=Number(b.total)||0;}return;}
+    const pm=pd(b);
+    if(first[b.customer_id]===d&&(!firstPaid[b.customer_id]||pm<firstPaid[b.customer_id]))firstPaid[b.customer_id]=pm;
+    if(pm.slice(0,7)!==month)return;                                   // ลงเดือนตามวันชำระ
+    const age=dayDiff(first[b.customer_id]||d,d);
     const tier=age<cfg.days1?0:(age<cfg.days1+cfg.days2?1:2);
     const rate=[cfg.rate1,cfg.rate2,cfg.rate3][tier];
     const total=Number(b.total)||0,comm=total*rate/100;
     g.sales+=total;g.comm+=comm;g.tiers[tier]+=total;g.tierAmt[tier]+=comm;
-    g.rows.push({date:d,bill:b.bill_no,cust:c,first:first[b.customer_id],age,rate,total,comm,paid:b.payment_status==='paid'});
+    g.rows.push({date:d,paidDate:pm,noPaidAt:!b.paid_at,bill:b.bill_no,cust:c,first:first[b.customer_id]||d,age,rate,total,comm});
   });
-  // ลูกค้าใหม่ = บิลแรกอยู่ในเดือนนี้ (ไม่ขึ้นกับ paidOnly — นับว่าเปิดบิลแล้ว)
-  Object.keys(first).forEach(cid=>{
-    if(first[cid].slice(0,7)!==month)return;
+  Object.keys(firstPaid).forEach(cid=>{
+    if(first[cid]<start||firstPaid[cid].slice(0,7)!==month)return;
     const c=custById[cid];if(!c||!c.sale_id||!bySale[c.sale_id])return;
-    bySale[c.sale_id].newCust.push({cust:c,first:first[cid]});
+    bySale[c.sale_id].newCust.push({cust:c,first:first[cid],paidDate:firstPaid[cid]});
   });
   Object.values(bySale).forEach(g=>{
     const tiersB=[...g.cfg.bonus].filter(t=>t&&Number(t.n)>0).sort((a,b)=>Number(b.n)-Number(a.n));
@@ -11067,7 +11103,7 @@ function pyCompute(){
     g.adj=g.adjRows.reduce((s,a)=>s+(Number(a.amount)||0),0);
     g.total=Number(g.cfg.base_salary||0)+g.comm+g.bonus+g.adj;
   });
-  return {bySale,first,month};
+  return {bySale,first,month,rules};
 }
 function pyRender(){
   if(!pyIsAdmin())return;
@@ -11075,6 +11111,8 @@ function pyRender(){
   pyCalc=pyCompute();
   const month=pyCalc.month;const [y,m]=month.split('-').map(Number);
   document.getElementById('py-month-lbl').textContent='· '+TH_MONTHS[m-1]+' '+(y+543);
+  const rl=pyCalc.rules;const rs=new Date(rl.start+'T00:00:00');
+  document.getElementById('py-month-lbl').title='นับบิลที่ออกตั้งแต่ '+rs.getDate()+' '+TH_MONTHS[rs.getMonth()]+' '+(rs.getFullYear()+543);
   const list=Object.values(pyCalc.bySale).filter(g=>g.sale.active!==false||g.rows.length||g.adjRows.length)
     .sort((a,b)=>b.total-a.total||String(a.sale.name).localeCompare(String(b.sale.name),'th'));
   const tot={base:0,sales:0,comm:0,nc:0,bonus:0,adj:0,total:0};
@@ -11084,7 +11122,7 @@ function pyRender(){
     return `<tr${g.sale.active===false?' style="opacity:.55"':''}>
       <td><b>${esc(g.sale.code||'???')}</b> · ${esc(g.sale.name)}${g.sale.active===false?' <span class="tag tag-out">ปิดใช้</span>':''}${custom?'':' <span class="tag tag-low" title="ยังไม่ได้ตั้งค่ารายคน ใช้ค่าเริ่มต้น">ค่าเริ่มต้น</span>'}</td>
       <td class="num">${fmt(g.cfg.base_salary||0)}</td>
-      <td class="num">${fmt(g.sales)}<div style="font-size:11px;color:var(--muted)">${g.rows.length} บิล</div></td>
+      <td class="num">${fmt(g.sales)}<div style="font-size:11px;color:var(--muted)">${g.rows.length} บิล${g.unpaid.length?' · <span style="color:var(--warn)" title="ออกบิลเดือนนี้แต่ยังไม่ชำระ — ยังไม่นับ">รอชำระ '+g.unpaid.length+' บิล '+fmt(g.unpaidSum)+'</span>':''}</div></td>
       <td class="num"><b>${fmt(g.comm)}</b><div style="font-size:11px;color:var(--muted)" title="แยกตามช่วง: ${g.cfg.rate1}% / ${g.cfg.rate2}% / ${g.cfg.rate3}%">${g.cfg.rate1}%: ${fmt(g.tierAmt[0])} · ${g.cfg.rate2}%: ${fmt(g.tierAmt[1])} · ${g.cfg.rate3}%: ${fmt(g.tierAmt[2])}</div></td>
       <td class="num">${g.newCust.length}</td>
       <td class="num">${g.bonus?'<span class="tag tag-ok">'+fmt(g.bonus)+'</span>':'<span style="color:var(--muted)">—</span>'}${g.bonusTier?'<div style="font-size:11px;color:var(--muted)">ครบ '+g.bonusTier.n+' คน</div>':''}</td>
@@ -11094,7 +11132,8 @@ function pyRender(){
   }).join(''):'<tr><td colspan="9" class="empty">ยังไม่มีเซลล์ในระบบ</td></tr>';
   document.getElementById('py-foot').innerHTML=list.length?`<tr style="font-weight:700;background:#faf5f1"><td>รวม ${list.length} คน</td><td class="num">${fmt(tot.base)}</td><td class="num">${fmt(tot.sales)}</td><td class="num">${fmt(tot.comm)}</td><td class="num">${tot.nc}</td><td class="num">${fmt(tot.bonus)}</td><td class="num">${fmt(tot.adj)}</td><td class="num">${fmt(tot.total)}</td><td></td></tr>`:'';
   const stat=(l,v,sub)=>`<div class="stat" style="flex-direction:column;align-items:flex-start;gap:2px"><div style="font-size:12.5px;color:var(--muted)">${l}</div><div style="font-size:20px;font-weight:700">${v}</div>${sub?'<div style="font-size:11.5px;color:var(--muted)">'+sub+'</div>':''}</div>`;
-  document.getElementById('py-stats').innerHTML=stat('ยอดขายที่นับค่าคอม',fmt(tot.sales),'บาท')+stat('ค่าคอมรวม',fmt(tot.comm),'บาท')+stat('ลูกค้าใหม่ (บิลแรกในเดือน)',tot.nc,'ราย')+stat('โบนัสรวม',fmt(tot.bonus),'บาท')+stat('ยอดจ่ายรวมทั้งทีม',fmt(tot.total),'เงินเดือน + ค่าคอม + โบนัส ± เพิ่ม/หัก');
+  const unpaidAll=list.reduce((n,g)=>n+g.unpaid.length,0),unpaidSum=list.reduce((n,g)=>n+g.unpaidSum,0);
+  document.getElementById('py-stats').innerHTML=stat('ยอดที่ชำระแล้ว (นับค่าคอม)',fmt(tot.sales),unpaidAll?'รอชำระอีก '+unpaidAll+' บิล '+fmt(unpaidSum)+' บาท (ยังไม่นับ)':'บาท')+stat('ค่าคอมรวม',fmt(tot.comm),'บาท')+stat('ลูกค้าใหม่ (บิลแรกในเดือน)',tot.nc,'ราย')+stat('โบนัสรวม',fmt(tot.bonus),'บาท')+stat('ยอดจ่ายรวมทั้งทีม',fmt(tot.total),'เงินเดือน + ค่าคอม + โบนัส ± เพิ่ม/หัก');
 }
 function pyOpenDetail(saleId){
   const g=pyCalc.bySale&&pyCalc.bySale[saleId];if(!g)return;
@@ -11105,13 +11144,15 @@ function pyOpenDetail(saleId){
   document.getElementById('pyd-adj-amt').value='';document.getElementById('pyd-adj-note').value='';
   pyRenderAdj(g);
   const fd=d=>{const x=new Date(d);return x.getDate()+' '+TH_MONTHS[x.getMonth()]+' '+(x.getFullYear()+543).toString().slice(2);};
-  const rows=[...g.rows].sort((a,b)=>a.date.localeCompare(b.date)||String(a.bill).localeCompare(String(b.bill)));
+  const rows=[...g.rows].sort((a,b)=>a.paidDate.localeCompare(b.paidDate)||String(a.bill).localeCompare(String(b.bill)));
   document.getElementById('pyd-body').innerHTML=rows.length?rows.map(r=>`<tr>
-    <td style="white-space:nowrap">${fd(r.date)}</td><td>${esc(r.bill||'')}${r.paid?'':' <span class="tag tag-low" style="font-size:10.5px">ยังไม่จ่าย</span>'}</td>
+    <td style="white-space:nowrap">${fd(r.date)}</td><td style="white-space:nowrap">${fd(r.paidDate)}${r.noPaidAt?' <span class="tag tag-low" style="font-size:10.5px" title="บิลเก่าไม่มีวันชำระบันทึกไว้ ใช้วันออกบิลแทน">ไม่มีวันชำระ</span>':''}${r.paidDate.slice(0,7)!==r.date.slice(0,7)?' <span class="tag tag-ov" style="font-size:10.5px">สั่ง '+TH_MONTHS[new Date(r.date).getMonth()]+'</span>':''}</td><td>${esc(r.bill||'')}</td>
     <td>${esc(r.cust.code)} ${esc(r.cust.name)}</td><td style="white-space:nowrap">${fd(r.first)}</td>
     <td class="num">วันที่ ${r.age+1}</td><td class="num">${r.rate}%</td><td class="num">${fmt(r.total)}</td><td class="num"><b>${fmt(r.comm)}</b></td></tr>`).join('')
-    :'<tr><td colspan="8" class="empty">ไม่มีบิลในเดือนนี้</td></tr>';
-  document.getElementById('pyd-new').innerHTML=g.newCust.length?'<div style="display:flex;flex-wrap:wrap;gap:6px">'+g.newCust.sort((a,b)=>a.first.localeCompare(b.first)).map(x=>'<span style="border:1px solid var(--line,#eee);border-radius:8px;padding:3px 8px"><b>'+esc(x.cust.code)+'</b> '+esc(x.cust.name)+' <span style="color:var(--muted)">· บิลแรก '+fd(x.first)+'</span></span>').join('')+'</div>'
+    :'<tr><td colspan="9" class="empty">ไม่มีบิลที่ชำระในเดือนนี้</td></tr>';
+  document.getElementById('pyd-unpaid').innerHTML=g.unpaid.length?'<div style="display:flex;flex-wrap:wrap;gap:6px">'+g.unpaid.sort((a,b)=>a.date.localeCompare(b.date)).map(u=>'<span style="border:1px solid var(--line,#eee);border-radius:8px;padding:3px 8px">'+fd(u.date)+' · <b>'+esc(u.bill||'')+'</b> '+esc(u.cust.name)+' <span style="color:var(--muted)">'+fmt(u.total)+'</span></span>').join('')+'</div><div style="margin-top:6px;color:var(--muted)">รวม '+g.unpaid.length+' บิล '+fmt(g.unpaidSum)+' บาท</div>'
+    :'<div style="color:var(--muted)">ไม่มีบิลค้างชำระที่ออกในเดือนนี้</div>';
+  document.getElementById('pyd-new').innerHTML=g.newCust.length?'<div style="display:flex;flex-wrap:wrap;gap:6px">'+g.newCust.sort((a,b)=>a.first.localeCompare(b.first)).map(x=>'<span style="border:1px solid var(--line,#eee);border-radius:8px;padding:3px 8px"><b>'+esc(x.cust.code)+'</b> '+esc(x.cust.name)+' <span style="color:var(--muted)">· บิลแรก '+fd(x.first)+' · ชำระ '+fd(x.paidDate)+'</span></span>').join('')+'</div>'
     +(g.bonusTier?'<div style="margin-top:6px">✅ ครบขั้น '+g.bonusTier.n+' คน → โบนัส '+fmt(g.bonus)+' บาท</div>':'<div style="margin-top:6px;color:var(--muted)">ยังไม่ครบขั้นโบนัส (ขั้นแรก '+(g.cfg.bonus[0]?g.cfg.bonus[0].n:'-')+' คน)</div>')
     :'<div class="empty" style="padding:10px 0">ไม่มีลูกค้าใหม่ในเดือนนี้</div>';
   document.getElementById('py-detail-modal').style.display='flex';
