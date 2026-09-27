@@ -12381,7 +12381,7 @@ function plRender(){
       if(pct<=-15)return '<div style="font-size:11px;color:#b52020">📉 '+pct+'%</div>';
       return '<div style="font-size:11px;color:#999">คงที่</div>';})()}</td>
     <td class="num">${r.stock}${r.reserved?'<div style="font-size:11px;color:#a04a00">จอง '+r.reserved+'</div>':''}</td>
-    <td class="num" style="color:#159b78;cursor:pointer;white-space:nowrap" title="กดเพื่อบันทึก/แก้ของที่สั่งไปแล้วกำลังรอรับ" onclick="plIncOpen(${r.p.id})">${r.incoming?r.incoming+' <span style="font-size:11px">✏️</span>':'<span style="color:#b9b9b9;font-size:12px">＋ ใส่</span>'}</td>
+    <td class="num" style="color:#159b78;cursor:pointer;white-space:nowrap" title="กดเพื่อบันทึก/แก้ของที่สั่งไปแล้วกำลังรอรับ" onclick="plIncOpen(${r.p.id})">${r.incoming?'<b>'+r.incoming+'</b>':'<span style="color:#bbb">—</span>'}<div style="font-size:11px;color:#b9b9b9">＋ ใส่</div></td>
     <td class="num" style="font-weight:700;color:${r.daysLeft===null?'#999':(r.daysLeft<30?'#b52020':(r.daysLeft<45?'#a04a00':'#159b78'))}">${r.daysLeft===null?'—':r.daysLeft+' วัน'}</td>
     <td class="num">${r.target||'—'}</td>
     <td class="num" style="font-weight:700;color:#b52020">${r.need||'—'} ${r.need?esc(r.p.unit||''):''}</td>
