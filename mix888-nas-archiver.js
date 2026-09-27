@@ -222,6 +222,22 @@ function writeIfChanged(file, content){   // ไม่เขียนทับ�
 }
 const PAY_TH = {prepay: 'จ่ายก่อนส่ง', postpay: 'จ่ายหลังส่ง', credit: 'เครดิต'};
 const CR_TH  = {pending: 'รออนุมัติ', approved: 'อนุมัติแล้ว', rejected: 'ตีกลับ'};
+// ข้อมูลตารางที่โปรแกรมใช้ (ลูกค้า สินค้า ราคา ออเดอร์ รายจ่าย …) — ผ่าน RPC nas_export_data (ตารางเหล่านี้อ่านตรงไม่ได้)
+let DATA = null;
+async function loadData(){
+  if(DATA) return DATA;
+  const since = new Date(Date.now() - CFG.ORDER_HISTORY_DAYS * 24 * 3600 * 1000).toISOString();
+  try{ DATA = await rpc('nas_export_data', {p_since: since}); DATA._via = 'rpc'; return DATA; }
+  catch(e){ log('[!] เรียก nas_export_data ไม่สำเร็จ (' + e.message + ') — ลองอ่านตารางตรง (ถ้าได้ 0 แถว = รัน mix888-nas-archiver-v2.sql แล้วใส่รหัสลับใน nas_check_key)'); }
+  DATA = {_via: 'rest'};
+  const get = async (t, q) => { try{ return await apiAll('/rest/v1/' + t + '?select=*' + (q || '')); }catch(e){ return []; } };
+  DATA.customers = await get('customers', '&order=code.asc');
+  DATA.products = await get('products'); DATA.customer_prices = await get('customer_prices'); DATA.price_log = await get('price_log', '&order=id.asc');
+  DATA.line_groups = await get('line_groups'); DATA.credit_docs = await get('credit_docs'); DATA.petty_cash = await get('petty_cash', '&order=spent_at.asc');
+  DATA.expense_categories = await get('expense_categories'); DATA.credit_statements = await get('credit_statements');
+  try{ DATA.orders = await apiAll('/rest/v1/orders?select=id,order_no,customer_id,created_at,status,total,created_by,order_items(product_id,qty,price,amount)&created_at=gte.' + encodeURIComponent(since) + '&order=created_at.asc'); }catch(e){ DATA.orders = []; }
+  return DATA;
+}
 function readIdFile(dir){ try{ return fs.readFileSync(path.join(dir, ID_FILE), 'utf8').trim(); }catch(e){ return null; } }
 // โฟลเดอร์ลูกค้าตามรหัสปัจจุบัน — ถ้ารหัสเปลี่ยน (โฟลเดอร์เก่ามี .customer_id ตรงกัน) ให้เปลี่ยนชื่อโฟลเดอร์ตาม
 // โฟลเดอร์ตามรหัสลูกค้า (จำตัวตนด้วยไฟล์ .customer_id) — รหัสเปลี่ยน → เปลี่ยนชื่อโฟลเดอร์ + ไฟล์ข้างในที่ขึ้นต้นด้วยรหัสเดิม
@@ -293,16 +309,13 @@ async function syncCustomers(ROOT){
   let saved = 0, skipped = 0, failed = 0;
   const base = path.join(ROOT, CUST_DIR);
   fs.mkdirSync(base, {recursive: true});
-  const custs = await apiAll('/rest/v1/customers?select=*&order=code.asc');
-  const docs  = await apiAll('/rest/v1/credit_docs?select=customer_id,doc_type,file_path,file_name,uploaded_at');
-  const prods = await apiAll('/rest/v1/products?select=id,sku,name,unit,base_price,price_r20,price_r50,price_upc,active');
-  const cps   = await apiAll('/rest/v1/customer_prices?select=customer_id,product_id,price');
-  let plog = []; try{ plog = await apiAll('/rest/v1/price_log?select=id,customer_id,product_id,field,old_price,new_price,action,source,changed_by,changed_at&order=id.asc'); }catch(e){ log('  [!] อ่านประวัติราคาไม่ได้ (รัน mix888-price-log.sql หรือยัง?): ' + e.message); }
-  let lgroups = {}; try{ (await apiAll('/rest/v1/line_groups?select=group_id,name')).forEach(g => lgroups[g.group_id] = g.name); }catch(e){}
-  const since = new Date(Date.now() - CFG.ORDER_HISTORY_DAYS * 24 * 3600 * 1000).toISOString();
-  let orders = []; try{ orders = await apiAll('/rest/v1/orders?select=id,order_no,customer_id,created_at,status,total,created_by,order_items(product_id,qty,price,amount)&created_at=gte.' + encodeURIComponent(since) + '&order=created_at.asc'); }
-  catch(e){ log('  [!] อ่านประวัติสั่งซื้อไม่ได้: ' + e.message); }
-  log('ลูกค้า ' + custs.length + ' ราย · จัดสินค้า ' + cps.length + ' แถว · ประวัติราคา ' + plog.length + ' · ออเดอร์ ' + orders.length);
+  const D = await loadData();
+  const custs = [...(D.customers || [])].sort((a, b) => String(a.code || '').localeCompare(String(b.code || '')));
+  const docs  = D.credit_docs || [], prods = D.products || [], cps = D.customer_prices || [];
+  const plog  = [...(D.price_log || [])].sort((a, b) => a.id - b.id);
+  const lgroups = {}; (D.line_groups || []).forEach(g => lgroups[g.group_id] = g.name);
+  const orders = [...(D.orders || [])].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  log('ลูกค้า ' + custs.length + ' ราย · จัดสินค้า ' + cps.length + ' แถว · ประวัติราคา ' + plog.length + ' · ออเดอร์ ' + orders.length + (D._via === 'rpc' ? '' : ' (อ่านตรง — ถ้าเป็น 0 ให้รัน SQL v2)'));
   const P = {}; prods.forEach(p => P[p.id] = p);
   const codeOf = {}; custs.forEach(c => codeOf[c.id] = c.code);
   const effPrice = (p, grp) => { const v = grp === 'r20' ? p.price_r20 : grp === 'r50' ? p.price_r50 : grp === 'upc' ? p.price_upc : null; return (v != null && v !== '') ? Number(v) : Number(p.base_price || 0); };
@@ -372,7 +385,9 @@ async function syncCustomers(ROOT){
 }
 async function syncStatements(ROOT){
   let saved = 0, skipped = 0, failed = 0;
-  const rows = await api('/rest/v1/credit_statements?select=customer_id,bill_date,image_url,customers(code)&kind=eq.statement&image_url=not.is.null&order=created_at.desc&limit=3000');
+  const D = await loadData();
+  const codeOf = {}; (D.customers || []).forEach(c => codeOf[c.id] = c.code);
+  const rows = (D.credit_statements || []).filter(r => r.kind === 'statement' && r.image_url).map(r => Object.assign({}, r, {customers: {code: codeOf[r.customer_id]}}));
   if(!rows.length) return {saved, skipped, failed};
   const base = path.join(ROOT, STMT_DIR);
   fs.mkdirSync(base, {recursive: true});
@@ -406,6 +421,7 @@ async function deleteObject(bucket, objPath){
   if(DRY_RUN){ log('  (ทดลอง) จะลบใน Supabase: ' + bucket + '/' + objPath); return; }
   const r = await fetch(SUPABASE_URL + '/storage/v1/object/' + bucket + '/' + objPath.split('/').map(encodeURIComponent).join('/'), {
     method: 'DELETE', headers: {apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY}});
+  if(r.status === 404 || r.status === 400) return;   // ไม่มีไฟล์แล้ว (เช่น สลิปใบเดียวกันผูกหลายบิล ลบไปตอนบิลก่อนหน้า)
   if(!r.ok) throw new Error('ลบไฟล์ ' + bucket + '/' + objPath + ' ไม่ได้ (' + r.status + ') — รัน mix888-nas-archiver-v2.sql หรือยัง?');
 }
 const onNas = p => { try{ return fs.statSync(p).size > 0; }catch(e){ return false; } };
@@ -438,7 +454,13 @@ async function pruneBills(ROOT){
     const files = fs.readdirSync(billDir);
     const hasBill = !b.image_url || files.some(f => f.includes('_บิล_v') && onNas(path.join(billDir, f)));
     const nSlipNas = files.filter(f => f.includes('_สลิป') && onNas(path.join(billDir, f))).length;
-    if(!hasBill || nSlipNas < slips.length){ kept++; continue; }   // ยังเก็บไม่ครบ รอรอบหน้า
+    let needSlips = slips.length;
+    if(hasBill && nSlipNas < needSlips){   // สลิปบางใบอาจไม่มีในต้นทางแล้ว (โหลดได้ 400/404) → ไม่นับ
+      let missingRemote = 0;
+      for(const u of slips){ try{ const h = await fetch(u, {method: 'HEAD'}); if(h.status === 400 || h.status === 404) missingRemote++; }catch(e){} }
+      needSlips -= missingRemote;
+    }
+    if(!hasBill || nSlipNas < needSlips){ kept++; continue; }   // ยังเก็บไม่ครบ รอรอบหน้า
     let okAll = true;
     for(const [bucket, u] of urls){
       const op = objPathOf(u, bucket); if(!op) continue;
@@ -457,7 +479,7 @@ async function pruneBills(ROOT){
 async function syncMedia(ROOT){
   let saved = 0, skipped = 0, failed = 0, pruned = 0;
   const base = path.join(ROOT, MEDIA_DIR);
-  const products = await api('/rest/v1/products?select=id,sku,name,image_url&image_url=not.is.null&limit=10000');
+  const products = ((await loadData()).products || []).filter(p => p.image_url);
   const pdir = path.join(base, 'สินค้า'); fs.mkdirSync(pdir, {recursive: true});
   const referenced = new Set();
   for(const p of products){
@@ -492,8 +514,9 @@ async function syncMedia(ROOT){
 // (3) รายจ่าย Petty Cash: CSV รายเดือน + รูปใบเสร็จ ในโฟลเดอร์ รายจ่าย/ปี/ปี-เดือน
 async function syncExpenses(ROOT){
   let saved = 0, skipped = 0, failed = 0;
-  const cats = {}; try{ (await api('/rest/v1/expense_categories?select=id,name&limit=1000')).forEach(c => cats[c.id] = c.name); }catch(e){}
-  const rows = await api('/rest/v1/petty_cash?select=*&order=spent_at.asc&limit=50000');
+  const D = await loadData();
+  const cats = {}; (D.expense_categories || []).forEach(c => cats[c.id] = c.name);
+  const rows = [...(D.petty_cash || [])].sort((a, b) => String(a.spent_at || '').localeCompare(String(b.spent_at || '')));
   if(!rows.length) return {saved, skipped, failed};
   const byMonth = {};
   rows.forEach(r => { const ym = String(r.spent_at || r.created_at || '').slice(0, 7); if(ym) (byMonth[ym] = byMonth[ym] || []).push(r); });
@@ -565,6 +588,7 @@ async function syncOnce(){
       return false;
     }
     log('ปลายทาง: ' + ROOT);
+    DATA = null;   // โหลดข้อมูลตารางใหม่ทุกรอบ
     const since = new Date(Date.now() - CFG.DAYS_BACK * 24 * 3600 * 1000).toISOString();
     const bills = await fetchBills(since);
     log('พบบิล ' + bills.length + ' ใบ (ย้อนหลัง ' + CFG.DAYS_BACK + ' วัน)');
