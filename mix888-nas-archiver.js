@@ -25,7 +25,7 @@
      <NAS_ROOT>\สำรองข้อมูล\2026-10-06\<ตาราง>.csv/.json       ← สำรองตารางข้อมูลทุก 7 วัน (แยกจากโฟลเดอร์ สำรองข้อมูล เดิมของคุณ) (กู้คืนได้ถ้า Supabase มีปัญหา)
 
    ประหยัดพื้นที่ Supabase: บิลที่จ่ายครบแล้วเกิน 30 วัน และไฟล์อยู่บน NAS แล้ว → ลบรูปบิล/สลิปออกจาก Supabase
-   (ต้องรัน mix888-nas-archiver-v2.sql ก่อน · หลังบ้านยังกด "สร้างรูปบิลใหม่" ได้ ระบบจะเก็บสำเนาแล้วลบให้อีกรอบ)
+   (ต้องรัน mix888-nas-key-fix.sql ก่อน · หลังบ้านยังกด "สร้างรูปบิลใหม่" ได้ ระบบจะเก็บสำเนาแล้วลบให้อีกรอบ)
 
    วิธีใช้ (เลือกอย่างใดอย่างหนึ่ง):
    ① บน Synology NAS: ลงแพ็กเกจ Node.js จาก Package Center แล้วตั้ง
@@ -47,9 +47,9 @@ const DAYS_BACK  = 45;                // ซิงก์บิลย้อนห
 const EVERY_MIN  = 30;                // ซิงก์ซ้ำทุกกี่นาที
 const SUPABASE_URL = 'https://eqbzpgynzgdwvouuzfwt.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_HqLNQDwR4omYcb7BNUEKIw_vyHCo4N-';
-const NAS_EXPORT_KEY = 'PASTE_NAS_EXPORT_KEY_HERE';   // รหัสลับให้ตรงกับที่รันในไฟล์ mix888-nas-export.sql
+const NAS_EXPORT_KEY = 'PASTE_NAS_EXPORT_KEY_HERE';   // รหัสลับ = ค่าในตาราง nas_config (select export_key from nas_config) — ใส่ใน archiver.config.json
 const KEEP_A4_PAGES  = false;         // true = เก็บไฟล์บิลแบบแบ่งหน้า A4 ด้วย (เนื้อหาซ้ำกับใบเต็ม ปกติไม่จำเป็น)
-/* ---- ประหยัดพื้นที่ Supabase (ต้องรัน mix888-nas-archiver-v2.sql ก่อน) ---- */
+/* ---- ประหยัดพื้นที่ Supabase (ต้องรัน mix888-nas-key-fix.sql ก่อน) ---- */
 const PRUNE_PAID_BILLS       = true;  // ลบรูปบิล+สลิปออกจาก Supabase เมื่อบิล "จ่ายครบแล้ว" และไฟล์อยู่บน NAS แล้ว (ต้นฉบับอยู่ NAS · หลังบ้านกดสร้างรูปใหม่ได้ ระบบจะเก็บแล้วลบซ้ำให้)
 const PRUNE_PAID_AFTER_DAYS  = 30;    // ลบหลังจ่ายครบมาแล้วกี่วัน
 const PRUNE_DAYS_BACK        = 400;   // มองหาบิลที่ควรลบย้อนหลังกี่วัน
@@ -68,7 +68,7 @@ const CFG = (() => {
     if(fs.existsSync(f)){
       const raw = fs.readFileSync(f, 'utf8').replace(/^\uFEFF/, '');
       const j = JSON.parse(raw);
-      for(const k of Object.keys(c)) if(j[k] !== undefined && j[k] !== null && j[k] !== '') c[k] = j[k];
+      for(const k of Object.keys(c)) if(j[k] !== undefined && j[k] !== null && j[k] !== '') c[k] = typeof j[k] === 'string' ? j[k].trim() : j[k];   // ตัดช่องว่าง/ขึ้นบรรทัดที่ติดมาตอนก๊อป
       c._from = f;
     }
   }catch(e){ console.log('[!] อ่าน archiver.config.json ไม่ได้: ' + e.message + ' — ใช้ค่าในไฟล์สคริปต์แทน'); }
@@ -173,7 +173,7 @@ async function fetchBills(sinceISO){
     return Array.isArray(data) ? data : (data || []);
   }catch(e){
     log('เรียก nas_export_bills ไม่สำเร็จ (' + e.message + ') — ลองอ่านตารางตรงแทน');
-    log('  ↳ ถ้ายังได้บิล 0 ใบตลอด: รันไฟล์ mix888-nas-export.sql ใน Supabase ก่อน');
+    log('  ↳ ถ้ายังได้บิล 0 ใบตลอด: รันไฟล์ mix888-nas-key-fix.sql ใน Supabase ก่อน');
   }
   const base = '/rest/v1/bills?select=';
   const cols = 'id,bill_no,total,shipping_fee,discount,revision,created_at,payment_status,paid_amount,paid_at,pay_method,ship_status,image_url,page_urls,slip_url,customers(code,name,branch_name),orders(order_no)';
@@ -228,7 +228,7 @@ async function loadData(){
   if(DATA) return DATA;
   const since = new Date(Date.now() - CFG.ORDER_HISTORY_DAYS * 24 * 3600 * 1000).toISOString();
   try{ DATA = await rpc('nas_export_data', {p_since: since}); DATA._via = 'rpc'; return DATA; }
-  catch(e){ log('[!] เรียก nas_export_data ไม่สำเร็จ (' + e.message + ') — ลองอ่านตารางตรง (ถ้าได้ 0 แถว = รัน mix888-nas-archiver-v2.sql แล้วใส่รหัสลับใน nas_check_key)'); }
+  catch(e){ log('[!] เรียก nas_export_data ไม่สำเร็จ (' + e.message + ') — ลองอ่านตารางตรง (ถ้าได้ 0 แถว = รัน mix888-nas-key-fix.sql ใน Supabase)'); }
   DATA = {_via: 'rest'};
   const get = async (t, q) => { try{ return await apiAll('/rest/v1/' + t + '?select=*' + (q || '')); }catch(e){ return []; } };
   DATA.customers = await get('customers', '&order=code.asc');
@@ -422,9 +422,30 @@ async function deleteObject(bucket, objPath){
   const r = await fetch(SUPABASE_URL + '/storage/v1/object/' + bucket + '/' + objPath.split('/').map(encodeURIComponent).join('/'), {
     method: 'DELETE', headers: {apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY}});
   if(r.status === 404 || r.status === 400) return;   // ไม่มีไฟล์แล้ว (เช่น สลิปใบเดียวกันผูกหลายบิล ลบไปตอนบิลก่อนหน้า)
-  if(!r.ok) throw new Error('ลบไฟล์ ' + bucket + '/' + objPath + ' ไม่ได้ (' + r.status + ') — รัน mix888-nas-archiver-v2.sql หรือยัง?');
+  if(!r.ok) throw new Error('ลบไฟล์ ' + bucket + '/' + objPath + ' ไม่ได้ (' + r.status + ') — รัน mix888-nas-key-fix.sql หรือยัง?');
 }
 const onNas = p => { try{ return fs.statSync(p).size > 0; }catch(e){ return false; } };
+const maskKey = k => !k ? '(ว่าง)' : (k.length <= 6 ? k[0] + '***' : k.slice(0, 4) + '***' + k.slice(-2) + ' (' + k.length + ' ตัวอักษร)');
+// ---- ตรวจรหัสลับ + การเชื่อมต่อก่อนเริ่มทุกรอบ (RPC nas_ping) — ไม่ผ่าน = หยุดทันที ไม่แตะอะไรทั้งสิ้น ----
+async function preflight(){
+  log('ตั้งค่าจาก: ' + (CFG._from || 'ค่าในไฟล์สคริปต์ (ไม่พบ archiver.config.json)') + ' · NAS_EXPORT_KEY = ' + maskKey(CFG.NAS_EXPORT_KEY));
+  if(!CFG.NAS_EXPORT_KEY || CFG.NAS_EXPORT_KEY === 'PASTE_NAS_EXPORT_KEY_HERE'){
+    log('[X] ยังไม่ได้ใส่ NAS_EXPORT_KEY ใน archiver.config.json — เปิด Supabase SQL Editor รัน: select export_key from nas_config;  แล้วก๊อปมาใส่');
+    return false;
+  }
+  try{
+    const r = await rpc('nas_ping');
+    log('[OK] เชื่อมต่อ Supabase ได้ รหัสตรง — ลูกค้า ' + r.customers + ' ราย · สินค้า ' + r.products + ' รายการ · บิล ' + r.bills + ' ใบ');
+    return true;
+  }catch(e){
+    const m = String(e.message || e);
+    if(/ 404/.test(m) || /PGRST202|Could not find the function/i.test(m)) log('[X] Supabase ยังไม่มีฟังก์ชัน nas_ping — ยังไม่ได้รันไฟล์ mix888-nas-key-fix.sql ใน SQL Editor');
+    else if(/BAD_KEY/.test(m)) log('[X] รหัสไม่ตรง — NAS_EXPORT_KEY ใน archiver.config.json (' + maskKey(CFG.NAS_EXPORT_KEY) + ') ไม่เท่ากับค่าในตาราง nas_config · รัน: select export_key from nas_config;  ใน SQL Editor แล้วก๊อปมาใส่ให้ตรงทุกตัว');
+    else log('[X] เชื่อมต่อ Supabase ไม่ได้: ' + m + ' — เช็คอินเทอร์เน็ตของ NAS / ไฟร์วอลล์');
+    log('    รอบนี้ไม่ทำอะไรต่อ (ไม่เก็บ ไม่ลบ) จนกว่าจะแก้ให้ผ่านก่อน');
+    return false;
+  }
+}
 
 // (1) บิลจ่ายครบแล้ว: ไฟล์อยู่บน NAS ครบ → ลบรูปบิล/สลิปออกจาก Supabase แล้วบันทึกว่า "เก็บบน NAS แล้ว"
 async function pruneBills(ROOT){
@@ -590,6 +611,7 @@ async function backupTables(ROOT){
 // กู้คืนไฟล์ใน bucket products จากสำเนาบน NAS (ใช้เมื่อไฟล์ถูกลบผิดพลาด): node archiver.js --restore-media
 const MIME = {jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp', gif:'image/gif', mp4:'video/mp4', mov:'video/quicktime'};
 async function restoreMedia(){
+  if(!(await preflight())){ flushLog(); return false; }
   const ROOT = resolveNasRoot(); if(!ROOT){ log('[X] หาโฟลเดอร์ปลายทางไม่เจอ'); return false; }
   const base = path.join(ROOT, MEDIA_DIR);
   if(!fs.existsSync(base)){ log('[X] ไม่มีโฟลเดอร์ ' + base); return false; }
@@ -632,6 +654,7 @@ async function syncOnce(){
       return false;
     }
     log('ปลายทาง: ' + ROOT);
+    if(!(await preflight())){ running = false; flushLog(); return false; }
     DATA = null;   // โหลดข้อมูลตารางใหม่ทุกรอบ
     const since = new Date(Date.now() - CFG.DAYS_BACK * 24 * 3600 * 1000).toISOString();
     const bills = await fetchBills(since);
@@ -715,7 +738,7 @@ async function syncOnce(){
     try{ await pruneBills(ROOT); }
     catch(e){ log('[!] ลบไฟล์บิลจ่ายครบไม่สำเร็จ: ' + (e.message || e)); }
     try{ await backupTables(ROOT); }
-    catch(e){ log('[!] สำรองข้อมูลไม่สำเร็จ: ' + (e.message || e) + ' (รัน mix888-nas-archiver-v2.sql หรือยัง?)'); }
+    catch(e){ log('[!] สำรองข้อมูลไม่สำเร็จ: ' + (e.message || e) + ' (รัน mix888-nas-key-fix.sql หรือยัง?)'); }
 
     log('[OK] ซิงก์เสร็จใน ' + Math.round((Date.now()-t0)/1000) + ' วิ — ไฟล์ใหม่ ' + saved
         + ' · มีอยู่แล้ว ' + skipped + (failed ? ' · โหลดพลาด ' + failed + ' (จะลองใหม่รอบหน้า)' : ''));
@@ -736,7 +759,7 @@ async function syncOnce(){
 console.log('==========================================================');
 console.log('  Mix Fresh 168 — เก็บบิล + สลิปเข้า NAS อัตโนมัติ');
 console.log('  ปลายทาง: ' + (CFG.NAS_ROOT || '(หาอัตโนมัติ /volume1-6/Mix888)') + (CFG._from ? '  · ตั้งค่าจาก archiver.config.json' : '  · ตั้งค่าจากในไฟล์สคริปต์'));
-if(!CFG.NAS_EXPORT_KEY || CFG.NAS_EXPORT_KEY === 'PASTE_NAS_EXPORT_KEY_HERE') console.log('  [!] ยังไม่ได้ใส่ NAS_EXPORT_KEY — ใส่ใน archiver.config.json (จะอ่านบิลได้ 0 ใบ)');
+if(!CFG.NAS_EXPORT_KEY || CFG.NAS_EXPORT_KEY === 'PASTE_NAS_EXPORT_KEY_HERE') console.log('  [!] ยังไม่ได้ใส่ NAS_EXPORT_KEY — ใส่ใน archiver.config.json (ค่าดูได้จาก: select export_key from nas_config;)');
 console.log('  ซิงก์ย้อนหลัง ' + CFG.DAYS_BACK + ' วัน · ทำซ้ำทุก ' + CFG.EVERY_MIN + ' นาที' + (DRY_RUN ? '  [โหมดทดลอง --dry-run: ไม่ลบ/ไม่แก้อะไรใน Supabase]' : ''));
 console.log('  เปิดหน้าต่างนี้ทิ้งไว้ (ย่อได้ อย่าปิด) — ปิดแล้วเปิดใหม่ก็ซิงก์ต่อจากเดิมได้');
 console.log('==========================================================');

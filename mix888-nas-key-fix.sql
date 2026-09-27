@@ -1,15 +1,98 @@
--- ⚠️ ไฟล์นี้ถูกแทนที่ด้วย mix888-nas-key-fix.sql (รวมทุกอย่าง + รหัสลับเก็บในตาราง nas_config) — ใช้ไฟล์นั้นแทน
 -- ============================================================
---  Mix Fresh 168 — NAS archiver v2: ส่งออกข้อมูลลูกค้า/สินค้า/รายจ่าย · ประหยัดพื้นที่ Supabase · สำรองข้อมูล
---  รันใน Supabase (โปรเจกต์ Mix Fresh) → SQL Editor → Run · รันซ้ำได้
---  ⚠️ แก้รหัสลับ "จุดเดียว" ในฟังก์ชัน nas_check_key ด้านล่าง ให้ตรงกับที่ใช้ใน mix888-nas-export.sql / archiver.config.json
+--  Mix Fresh 168 — NAS archiver: ตั้งค่าครบจบในไฟล์เดียว (แทน mix888-nas-export.sql + mix888-nas-archiver-v2.sql)
+--  รันใน Supabase (โปรเจกต์ Mix Fresh) → SQL Editor → Run · รันซ้ำได้ ไม่กระทบระบบเดิม
+--
+--  รหัสลับของโปรแกรม NAS เก็บ "ที่เดียว" ในตาราง nas_config (อ่านได้เฉพาะฟังก์ชันหลังบ้าน anon อ่านไม่ได้)
+--  ทุกฟังก์ชัน nas_* ตรวจรหัสจากตารางนี้ → ไม่ต้องแก้ตัวเลขในฟังก์ชันอีก
+--  รันเสร็จ บรรทัดสุดท้ายจะโชว์ค่า NAS_EXPORT_KEY ให้ก๊อปไปใส่ archiver.config.json
 -- ============================================================
-create or replace function nas_check_key(p_key text)
-returns void language plpgsql security definer set search_path = public, pg_temp as $$
+
+-- 0) ตารางเก็บรหัสลับ (แถวเดียว)
+create table if not exists nas_config (
+  id          int primary key default 1 check (id = 1),
+  export_key  text not null,
+  updated_at  timestamptz not null default now()
+);
+alter table nas_config enable row level security;          -- ไม่มี policy = anon/authenticated อ่านไม่ได้ อ่านได้เฉพาะฟังก์ชัน security definer
+revoke all on nas_config from anon, authenticated;
+
+-- ใส่รหัสครั้งแรก: ดึงจากฟังก์ชันเดิม (nas_check_key / nas_export_bills) ถ้าเคยใส่ไว้ · ไม่มีก็สุ่มให้ใหม่
+do $$
+declare k text; def text;
 begin
-  if p_key is null or p_key <> 'PASTE_NAS_EXPORT_KEY_HERE' then raise exception 'BAD_KEY'; end if;   -- ← แก้ตรงนี้จุดเดียว
+  if exists (select 1 from nas_config where id = 1) then return; end if;
+  for def in
+    select pg_get_functiondef(p.oid) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and p.proname in ('nas_check_key', 'nas_export_bills')
+  loop
+    k := (regexp_match(def, '<>[[:space:]]*''([^'']+)'''))[1];
+    if k is not null and k <> 'PASTE_NAS_EXPORT_KEY_HERE' then exit; end if;
+    k := null;
+  end loop;
+  if k is null then k := encode(gen_random_bytes(18), 'hex'); end if;
+  insert into nas_config (id, export_key) values (1, k);
 end $$;
 
+-- 1) ตรวจรหัส (ทุกฟังก์ชัน nas_* เรียกตัวนี้) — เทียบแบบตัดช่องว่างหัวท้าย กันก๊อปติดช่องว่าง/ขึ้นบรรทัด
+create or replace function nas_check_key(p_key text)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare k text;
+begin
+  select export_key into k from nas_config where id = 1;
+  if k is null or p_key is null or btrim(p_key) <> btrim(k) then raise exception 'BAD_KEY'; end if;
+end $$;
+
+-- 2) ทดสอบการเชื่อมต่อ (โปรแกรม NAS เรียกก่อนเริ่มทุกรอบ — รหัสไม่ตรงจะหยุดทันที ไม่แตะอะไร)
+create or replace function nas_ping(p_key text)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+declare nc bigint; np bigint; nb bigint;
+begin
+  perform nas_check_key(p_key);
+  select count(*) into nc from customers;
+  select count(*) into np from products;
+  select count(*) into nb from bills;
+  return jsonb_build_object('ok', true, 'customers', nc, 'products', np, 'bills', nb, 'server_time', now());
+end $$;
+
+-- 3) บิล (ตาราง bills ล็อก RLS — เป็นช่องทางเดียวของโปรแกรม NAS)
+create or replace function nas_export_bills(p_key text, p_since timestamptz)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  perform nas_check_key(p_key);
+  return coalesce((
+    select jsonb_agg(x order by (x->>'created_at'))
+      from (
+        select jsonb_build_object(
+          'id',             b.id,
+          'bill_no',        b.bill_no,
+          'total',          b.total,
+          'shipping_fee',   b.shipping_fee,
+          'discount',       b.discount,
+          'revision',       b.revision,
+          'created_at',     b.created_at,
+          'payment_status', b.payment_status,
+          'paid_amount',    b.paid_amount,
+          'paid_at',        b.paid_at,
+          'pay_method',     b.pay_method,
+          'ship_status',    b.ship_status,
+          'image_url',      b.image_url,
+          'page_urls',      b.page_urls,
+          'slip_url',       b.slip_url,
+          'customers', (select jsonb_build_object('code', c.code, 'name', c.name, 'branch_name', c.branch_name)
+                          from customers c where c.id = b.customer_id),
+          'orders',    (select jsonb_build_object('order_no', o.order_no)
+                          from orders o where o.id = b.order_id),
+          'payments',  coalesce((select jsonb_agg(jsonb_build_object(
+                                          'amount', p.amount, 'created_at', p.created_at, 'slips', p.slips)
+                                        order by p.id)
+                                   from payments p where p.bill_id = b.id), '[]'::jsonb)
+        ) as x
+        from bills b
+        where b.created_at >= p_since
+      ) s), '[]'::jsonb);
+end $$;
+
+-- 4) ส่วนที่เหลือ (ข้อมูลลูกค้า/สินค้า/รายจ่าย · ลบไฟล์บิลที่เก็บแล้ว · รายชื่อไฟล์ · สำรองตาราง · สิทธิ์ storage)
 alter table bills add column if not exists archived_at timestamptz;   -- ลบไฟล์ออกจาก Supabase แล้ว (สำเนาอยู่ NAS)
 alter table bills add column if not exists nas_path    text;          -- โฟลเดอร์บน NAS ที่เก็บบิลนี้
 
@@ -100,3 +183,8 @@ create policy nas_update_media on storage.objects for update to anon, authentica
 drop policy if exists nas_delete_media on storage.objects;
 create policy nas_delete_media on storage.objects for delete to anon, authenticated
   using (bucket_id in ('bills', 'products', 'slips'));
+
+-- ============================================================
+--  ผลลัพธ์: ค่านี้คือ NAS_EXPORT_KEY — ก๊อปไปใส่ใน archiver.config.json บน NAS ให้ตรงทุกตัวอักษร
+-- ============================================================
+select export_key as "NAS_EXPORT_KEY (ใส่ใน archiver.config.json)", updated_at from nas_config where id = 1;
