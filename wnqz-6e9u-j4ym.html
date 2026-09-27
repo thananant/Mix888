@@ -1054,10 +1054,10 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="pagehead"><h2>📅 แพลนการสั่งซื้อ</h2><span class="date">สั่งทุกวันที่ 1 และ 15 · รอของ 30 วัน → ต้องมีของครอบคลุม 60 วัน</span></div>
   <div class="card">
     <div class="row" style="align-items:flex-end;flex-wrap:wrap;gap:10px">
-      <div><label>ดูยอดขายย้อนหลัง</label><select id="pl-days" onchange="plCalc()"><option value="30">30 วัน</option><option value="90" selected>90 วัน</option><option value="180">180 วัน</option></select></div>
-      <div><label>รอของ (วัน)</label><input id="pl-lead" type="number" value="30" min="1" style="width:80px" class="num" onchange="plCalc()"></div>
+      <div><label>ดูยอดขายย้อนหลัง</label><select id="pl-days" onchange="plCalc()"><option value="30" selected>30 วัน</option><option value="90">90 วัน</option><option value="180">180 วัน</option></select></div>
+      <div><label>รอของ (วัน)</label><input id="pl-lead" type="number" value="20" min="1" style="width:80px" class="num" onchange="plCalc()"></div>
       <div><label>รอบสั่งทุก (วัน)</label><input id="pl-cycle" type="number" value="15" min="1" style="width:80px" class="num" onchange="plCalc()"></div>
-      <div><label>เผื่อฉุกเฉิน (วัน)</label><input id="pl-safety" type="number" value="15" min="0" style="width:80px" class="num" onchange="plCalc()"></div>
+      <div><label>เผื่อฉุกเฉิน (วัน)</label><input id="pl-safety" type="number" value="10" min="0" style="width:80px" class="num" onchange="plCalc()"></div>
       <div><label>คาดการณ์ยอด</label><select id="pl-mode" onchange="plCalc()" style="min-width:170px" title="รับมือยอดขายที่กำลังโต">
         <option value="trend" selected>📈 ตามเทรนด์ (แนะนำ)</option>
         <option value="recent">⚡ ยึดยอดล่าสุด 30 วัน</option>
@@ -12125,8 +12125,8 @@ function mcCSV(){
 /* ==================== แพลนการสั่งซื้อ ==================== */
 let plRows=[], plVel={};
 async function plCalc(){
-  const days=Number(document.getElementById('pl-days').value)||90;
-  const lead=Number(document.getElementById('pl-lead').value)||30;
+  const days=Number(document.getElementById('pl-days').value)||30;
+  const lead=Number(document.getElementById('pl-lead').value)||20;
   const cycle=Number(document.getElementById('pl-cycle').value)||15;
   const safe=Number(document.getElementById('pl-safety').value)||0;
   const cover=lead+cycle+safe;
@@ -12237,7 +12237,7 @@ async function plCreatePO(btn){
   if(!list.length){toast('ไม่มีรายการต้องสั่ง');return;}
   const supName=document.getElementById('pl-sup').value;
   const sup=(suppliers||[]).find(x=>x.name===supName);
-  const lead=Number(document.getElementById('pl-lead').value)||30;
+  const lead=Number(document.getElementById('pl-lead').value)||20;
   const eta=new Date(Date.now()+(lead+7)*3600000*24).toISOString().slice(0,10);
   if(!confirm('บันทึกใบสั่งซื้อ '+list.length+' รายการ'+(supName?' · '+supName:'')
     +'\nคาดว่าของถึง '+eta+'\n\nระบบจะนับเป็น "ของกำลังมา" รอบหน้าจะไม่สั่งซ้ำ'))return;
