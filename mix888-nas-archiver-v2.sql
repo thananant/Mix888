@@ -43,7 +43,8 @@ create or replace function nas_mark_pruned(p_key text, p_bill_id bigint, p_nas_p
 returns void language plpgsql security definer set search_path = public, pg_temp as $$
 begin
   perform nas_check_key(p_key);
-  update bills set image_url = null, page_urls = null, slip_url = null, archived_at = now(), nas_path = p_nas_path where id = p_bill_id;
+  -- ใช้ค่าว่างแทน null (บางคอลัมน์ตั้ง not null ไว้) — หลังบ้านถือว่า '' = ไม่มีรูป เหมือน null
+  update bills set image_url = '', page_urls = '[]'::jsonb, slip_url = '', archived_at = now(), nas_path = p_nas_path where id = p_bill_id;
   update payments set slips = '[]'::jsonb where bill_id = p_bill_id;
 end $$;
 
@@ -56,7 +57,21 @@ begin
                      from storage.objects o where o.bucket_id = p_bucket and o.name not like '%/'), '[]'::jsonb);
 end $$;
 
--- 4) สำรองตารางหลักทั้งหมด (CSV/JSON บน NAS ทุก 7 วัน)
+-- 4) สำรองตาราง ทีละตาราง ทีละหน้า (กัน statement timeout)
+create or replace function nas_export_table(p_key text, p_table text, p_offset int default 0, p_limit int default 2000)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+declare part jsonb;
+begin
+  perform nas_check_key(p_key);
+  if p_table !~ '^[a-z_]+$' then raise exception 'BAD_TABLE'; end if;
+  begin
+    execute format('select coalesce(jsonb_agg(to_jsonb(x)), ''[]''::jsonb) from (select * from %I order by 1 offset %s limit %s) x', p_table, p_offset, p_limit) into part;
+  exception when undefined_table then part := '[]'::jsonb;
+  end;
+  return part;
+end $$;
+
+-- 4b) (แบบเดิม — ตารางใหญ่จะ timeout ใช้ 4 แทน)
 create or replace function nas_export_backup(p_key text)
 returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
 declare r jsonb := '{}'::jsonb; t text; part jsonb;
@@ -75,6 +90,12 @@ end $$;
 
 -- 5) ให้โปรแกรมบน NAS ลบไฟล์ใน bucket bills / products ได้ (bucket slips เปิดอยู่แล้วเพราะหลังบ้านใช้ลบสลิป)
 --    หมายเหตุ: เป็นระดับสิทธิ์เดียวกับที่หลังบ้านใช้อยู่ (anon key) — ไฟล์ต้นฉบับทุกไฟล์มีสำเนาบน NAS ก่อนลบเสมอ
+-- 6) ให้โปรแกรมบน NAS อัปโหลดไฟล์กลับ bucket products ได้ (โหมดกู้คืน --restore-media)
+drop policy if exists nas_upload_media on storage.objects;
+create policy nas_upload_media on storage.objects for insert to anon, authenticated with check (bucket_id in ('products'));
+drop policy if exists nas_update_media on storage.objects;
+create policy nas_update_media on storage.objects for update to anon, authenticated using (bucket_id in ('products')) with check (bucket_id in ('products'));
+
 drop policy if exists nas_delete_media on storage.objects;
 create policy nas_delete_media on storage.objects for delete to anon, authenticated
   using (bucket_id in ('bills', 'products', 'slips'));

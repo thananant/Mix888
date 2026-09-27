@@ -476,10 +476,14 @@ async function pruneBills(ROOT){
 }
 
 // (2) รูปสินค้า + สื่อบรอดแคสต์ (bucket products)
+const BROADCAST_RE = /^(broadcast|promo|media)-\d{10,}-/;   // ไฟล์ที่หน้า "บรอดแคสต์/โปรโมชั่น" อัปโหลด (uploadLineMedia) — ลบได้หลังส่งแล้ว · ไฟล์อื่นทั้งหมด = รูปสินค้า ห้ามลบ
 async function syncMedia(ROOT){
   let saved = 0, skipped = 0, failed = 0, pruned = 0;
   const base = path.join(ROOT, MEDIA_DIR);
-  const products = ((await loadData()).products || []).filter(p => p.image_url);
+  const D = await loadData();
+  const canPrune = D._via === 'rpc' && Array.isArray(D.products) && D.products.length > 0;   // รู้รายการสินค้าแน่ ๆ ถึงจะลบอะไรได้
+  if(!canPrune) log('[!] ยังอ่านรายการสินค้าไม่ได้ (BAD_KEY/0 แถว) — รอบนี้เก็บสื่ออย่างเดียว ไม่ลบอะไรใน Supabase');
+  const products = (D.products || []).filter(p => p.image_url);
   const pdir = path.join(base, 'สินค้า'); fs.mkdirSync(pdir, {recursive: true});
   const referenced = new Set();
   for(const p of products){
@@ -495,15 +499,17 @@ async function syncMedia(ROOT){
   const cutoff = Date.now() - CFG.PRUNE_BROADCAST_DAYS * 24 * 3600 * 1000;
   for(const o of objs){
     if(referenced.has(o.name)) continue;                        // รูปสินค้าที่ยังใช้อยู่ เก็บไว้ข้างบนแล้ว ไม่ลบ
+    const isBroadcast = BROADCAST_RE.test(o.name);
     const url = SUPABASE_URL + '/storage/v1/object/public/products/' + o.name.split('/').map(encodeURIComponent).join('/');
     const {y, m} = thDate(o.created_at);
-    const dir = path.join(base, 'บรอดแคสต์', y + '-' + m); fs.mkdirSync(dir, {recursive: true});
+    const sub = isBroadcast ? 'บรอดแคสต์' : 'รูปสินค้าอื่นๆ';           // ไฟล์ที่ไม่ใช่บรอดแคสต์ = รูปสินค้าเก่า/สำรอง เก็บไว้เฉย ๆ ไม่ลบ
+    const dir = path.join(base, sub, y + '-' + m); fs.mkdirSync(dir, {recursive: true});
     const dest = path.join(dir, safeName(o.name.replace(/\//g, '_')));
     if(!fs.existsSync(dest)){
-      try{ await download(url, dest); saved++; tally('สื่อบรอดแคสต์', 'new'); log('  [เก็บ] ' + path.join(MEDIA_DIR, 'บรอดแคสต์', y + '-' + m, path.basename(dest))); }
-      catch(e){ failed++; tally('สื่อบรอดแคสต์', 'fail'); log('  [!] โหลดสื่อ ' + o.name + ' ไม่ได้ — ' + e.message); continue; }
-    }else{ skipped++; tally('สื่อบรอดแคสต์', 'have'); }
-    if(new Date(o.created_at).getTime() < cutoff && onNas(dest)){
+      try{ await download(url, dest); saved++; tally(isBroadcast ? 'สื่อบรอดแคสต์' : 'รูปสินค้าอื่นๆ (ไม่ลบ)', 'new'); log('  [เก็บ] ' + path.join(MEDIA_DIR, sub, y + '-' + m, path.basename(dest))); }
+      catch(e){ failed++; tally(isBroadcast ? 'สื่อบรอดแคสต์' : 'รูปสินค้าอื่นๆ (ไม่ลบ)', 'fail'); log('  [!] โหลดสื่อ ' + o.name + ' ไม่ได้ — ' + e.message); continue; }
+    }else{ skipped++; tally(isBroadcast ? 'สื่อบรอดแคสต์' : 'รูปสินค้าอื่นๆ (ไม่ลบ)', 'have'); }
+    if(canPrune && isBroadcast && new Date(o.created_at).getTime() < cutoff && onNas(dest)){
       try{ await deleteObject('products', o.name); pruned++; tally('สื่อบรอดแคสต์', 'pruned'); log('  [ลบใน Supabase] ลบสื่อบรอดแคสต์ออกจาก Supabase: ' + o.name); }
       catch(e){ log('  [!] ' + e.message); }
     }
@@ -559,18 +565,56 @@ async function backupTables(ROOT){
   const last = marks[marks.length - 1];
   const today = thDate(new Date().toISOString()); const todayStr = today.y + '-' + today.m + '-' + today.d;
   if(last && (new Date(todayStr) - new Date(last)) / 86400000 < CFG.BACKUP_EVERY_DAYS) return {done: false};
-  const data = await rpc('nas_export_backup');
+  const TABLES = ['customers','products','sales','orders','order_items','bills','payments','petty_cash','expense_categories','customer_prices','warehouses','settings',
+                  'sale_comp','sale_pay_adj','credit_statements','credit_docs','credit_reviews','line_groups','price_log','price_adjust_batches','holidays'];
   const dir = path.join(base, todayStr); fs.mkdirSync(dir, {recursive: true});
   let n = 0;
-  for(const [table, rows] of Object.entries(data || {})){
-    if(!Array.isArray(rows)) continue;
+  for(const table of TABLES){
+    const rows = [];
+    try{
+      for(let off = 0; ; off += 2000){   // ทีละ 2,000 แถว กัน statement timeout ของ Supabase
+        const page = await rpc('nas_export_table', {p_table: table, p_offset: off, p_limit: 2000});
+        rows.push(...(Array.isArray(page) ? page : [])); if(!Array.isArray(page) || page.length < 2000) break;
+      }
+    }catch(e){ log('  [!] สำรองตาราง ' + table + ' ไม่ได้: ' + e.message); continue; }
     fs.writeFileSync(path.join(dir, table + '.json'), JSON.stringify(rows));
     fs.writeFileSync(path.join(dir, table + '.csv'), toCsv(rows));
     n++;
   }
+  if(!n){ try{ fs.rmdirSync(dir); }catch(e){} return {done: false}; }
   tally('สำรองตารางข้อมูล', 'new', n);
   log('[สำรอง] สำรองข้อมูล ' + n + ' ตาราง → ' + path.join(BACKUP_DIR, todayStr));
   return {done: true, tables: n};
+}
+
+// กู้คืนไฟล์ใน bucket products จากสำเนาบน NAS (ใช้เมื่อไฟล์ถูกลบผิดพลาด): node archiver.js --restore-media
+const MIME = {jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp', gif:'image/gif', mp4:'video/mp4', mov:'video/quicktime'};
+async function restoreMedia(){
+  const ROOT = resolveNasRoot(); if(!ROOT){ log('[X] หาโฟลเดอร์ปลายทางไม่เจอ'); return false; }
+  const base = path.join(ROOT, MEDIA_DIR);
+  if(!fs.existsSync(base)){ log('[X] ไม่มีโฟลเดอร์ ' + base); return false; }
+  const files = [];
+  const walk = d => { for(const e of fs.readdirSync(d, {withFileTypes: true})){ const p = path.join(d, e.name); if(e.isDirectory()) walk(p); else if(!e.name.startsWith('.')) files.push(p); } };
+  for(const sub of ['บรอดแคสต์', 'รูปสินค้าอื่นๆ']) if(fs.existsSync(path.join(base, sub))) walk(path.join(base, sub));
+  log('กู้คืนสื่อสินค้า: พบไฟล์บน NAS ' + files.length + ' ไฟล์ → ตรวจว่าใน Supabase ยังมีไหม ถ้าไม่มีจะอัปโหลดกลับ');
+  let up = 0, have = 0, fail = 0;
+  for(const f of files){
+    const name = path.basename(f);   // ชื่อไฟล์บน NAS = ชื่อ object เดิมใน bucket products
+    const url = SUPABASE_URL + '/storage/v1/object/public/products/' + encodeURIComponent(name);
+    try{
+      const h = await fetch(url, {method: 'HEAD'});
+      if(h.ok){ have++; continue; }
+      const ext = name.split('.').pop().toLowerCase();
+      const r = await fetch(SUPABASE_URL + '/storage/v1/object/products/' + encodeURIComponent(name), {
+        method: 'POST', headers: {apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Content-Type': MIME[ext] || 'application/octet-stream', 'x-upsert': 'true'},
+        body: fs.readFileSync(f)});
+      if(!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()).slice(0, 120));
+      up++; log('  [กู้คืน] ' + name);
+    }catch(e){ fail++; log('  [!] กู้คืน ' + name + ' ไม่ได้ — ' + e.message + (/40[13]/.test(e.message) ? ' (รัน SQL เปิดสิทธิ์อัปโหลด nas_upload_media หรือยัง?)' : '')); }
+  }
+  log('[OK] กู้คืนเสร็จ — อัปโหลดกลับ ' + up + ' · มีอยู่แล้ว ' + have + (fail ? ' · พลาด ' + fail : ''));
+  flushLog();
+  return fail === 0;
 }
 
 let running = false;
@@ -696,7 +740,9 @@ if(!CFG.NAS_EXPORT_KEY || CFG.NAS_EXPORT_KEY === 'PASTE_NAS_EXPORT_KEY_HERE') co
 console.log('  ซิงก์ย้อนหลัง ' + CFG.DAYS_BACK + ' วัน · ทำซ้ำทุก ' + CFG.EVERY_MIN + ' นาที' + (DRY_RUN ? '  [โหมดทดลอง --dry-run: ไม่ลบ/ไม่แก้อะไรใน Supabase]' : ''));
 console.log('  เปิดหน้าต่างนี้ทิ้งไว้ (ย่อได้ อย่าปิด) — ปิดแล้วเปิดใหม่ก็ซิงก์ต่อจากเดิมได้');
 console.log('==========================================================');
-if(process.argv.includes('--once')){
+if(process.argv.includes('--restore-media')){
+  restoreMedia().then(ok => process.exit(ok ? 0 : 1));   // กู้คืนไฟล์ products จาก NAS แล้วจบ
+}else if(process.argv.includes('--once')){
   syncOnce().then(ok => process.exit(ok ? 0 : 1));   // โหมด Task Scheduler: ทำรอบเดียวแล้วจบ (ล้ม = สถานะผิดปกติ)
 }else{
   syncOnce();
