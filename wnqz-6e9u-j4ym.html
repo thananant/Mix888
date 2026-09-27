@@ -1069,6 +1069,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     </div>
     <div id="pl-sum" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px"></div>
     <div class="row" style="align-items:flex-end;flex-wrap:wrap;gap:10px;margin-top:12px">
+      <div style="flex:1;min-width:200px"><label>ค้นหาสินค้า</label><input id="pl-q" style="width:100%" placeholder="พิมพ์ชื่อหรือ SKU…" oninput="plRender()" autocomplete="off"></div>
       <div><label>ซัพพลายเออร์</label><select id="pl-sup" onchange="plRender()" style="min-width:180px"><option value="">ทั้งหมด</option></select></div>
       <label style="font-size:13px;align-self:flex-end"><input type="checkbox" id="pl-only" checked onchange="plRender()"> เฉพาะที่ต้องสั่ง</label>
     </div>
@@ -12343,7 +12344,9 @@ async function plCalc(){
 }
 function plFiltered(){
   const sup=document.getElementById('pl-sup').value, only=document.getElementById('pl-only').checked;
-  return plRows.filter(r=>(!sup||(sup==='__none__'?!r.sups.length:r.sups.includes(sup)))&&(!only||r.need>0));
+  const q=(document.getElementById('pl-q')?.value||'').trim().toLowerCase();
+  const hit=r=>!q||String(r.p.name||'').toLowerCase().includes(q)||String(r.p.sku||'').toLowerCase().includes(q);
+  return plRows.filter(r=>hit(r)&&(!sup||(sup==='__none__'?!r.sups.length:r.sups.includes(sup)))&&(!only||r.need>0));
 }
 function plRender(){
   const list=plFiltered(), el=document.getElementById('pl-body');
@@ -12368,7 +12371,7 @@ function plRender(){
   if(b){b.textContent=toOrder;b.style.display=toOrder?'':'none';}
   const gb=document.getElementById('grp-plan-badge');   // ป้ายที่หัวกลุ่ม "แพลนสั่งของ" ตอนพับเมนู
   if(gb){gb.textContent=toOrder;gb.style.display=toOrder?'':'none';}
-  if(!list.length){el.innerHTML='<tr><td colspan="10" class="empty">ไม่มีรายการที่ต้องสั่ง ✓</td></tr>';return;}
+  if(!list.length){el.innerHTML='<tr><td colspan="10" class="empty">'+((document.getElementById('pl-q')?.value||'').trim()?'ไม่พบสินค้าที่ค้นหา'+(document.getElementById('pl-only').checked?' (ลองเอาติ๊ก "เฉพาะที่ต้องสั่ง" ออก)':''):'ไม่มีรายการที่ต้องสั่ง ✓')+'</td></tr>';return;}
   const STL={urgent:'<span class="tag tag-out" style="background:#fdecec;color:#b52020">🔴 จะขาด</span>',
     order:'<span class="tag tag-low">🟡 ควรสั่ง</span>',
     ok:'<span class="tag" style="background:#e8f6ef;color:#159b78">✅ พอ</span>',
