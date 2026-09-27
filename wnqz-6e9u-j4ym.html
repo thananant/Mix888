@@ -1027,7 +1027,6 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <tbody id="sc-body"><tr><td colspan="6" class="empty">เลือกโกดังและชุดสินค้า</td></tr></tbody>
       </table></div>
       <div style="display:flex;gap:10px;margin-top:12px;align-items:center;flex-wrap:wrap">
-        <div class="chk"><input type="checkbox" id="sc-adjust"><span><b>ปรับสต๊อกให้ตรงกับที่นับ</b> (บันทึกเข้าประวัติปรับสต๊อกทุกตัวที่ไม่ตรง)</span></div>
         <button class="btn-p" style="margin-left:auto" onclick="confirmCount(this)">✓ ยืนยันผลนับ + สรุปเดินสต๊อก</button>
       </div>
       <p class="hint">แถวสีแดง = นับได้ไม่ตรงกับระบบ · กดยืนยันแล้วระบบเก็บสรุปไว้ในประวัติการนับ และล้างฟอร์มให้เริ่มรอบใหม่</p>
@@ -8915,7 +8914,7 @@ async function confirmCount(btn){
     return {...it,counted,diff:counted-it.system_qty};
   });
   const diffs=rows.filter(r=>r.diff!==0);
-  const doAdjust=document.getElementById('sc-adjust').checked;
+  const doAdjust=false;   // เจ้าของสั่งเอาตัวเลือก "ปรับสต๊อกให้ตรงกับที่นับ" ออก — นับสต๊อกไม่แตะยอดสต๊อก (ปรับผ่านหน้านับ/ปรับสต๊อกเอง)
   if(!confirm('ยืนยันผลนับ '+rows.length+' รายการ (ไม่ตรง '+diffs.length+' รายการ)'
     +(doAdjust&&diffs.length?'\n\n⚠️ จะปรับสต๊อกให้ตรงกับที่นับ '+diffs.length+' รายการ':'')
     +'\n\nหลังยืนยัน ฟอร์มจะถูกล้างเริ่มรอบใหม่'))return;
