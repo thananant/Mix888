@@ -1076,7 +1076,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div style="overflow-x:auto;margin-top:8px"><table>
       <thead><tr><th>SKU</th><th>สินค้า</th><th class="num">ขาย/วัน</th><th class="num">สต๊อกรวม</th><th class="num">กำลังมา</th><th class="num">ใช้ได้อีก</th><th class="num">เป้าหมาย</th><th class="num">ต้องสั่ง</th><th>ซัพ</th><th>สถานะ</th></tr></thead>
       <tbody id="pl-body"><tr><td colspan="10" class="empty">กด "คำนวณแผน"</td></tr></tbody></table></div>
-    <p class="hint" style="margin-top:8px">เป้าหมาย = ขาย/วัน × (รอของ + รอบสั่ง + เผื่อ) · ต้องสั่ง = เป้าหมาย − (สต๊อก + กำลังมา − ยอดจอง) ปัดขึ้น 5 · <b>กดที่ช่อง "กำลังมา"</b> เพื่อบันทึกของที่สั่งไปแล้วกำลังรอรับ/0 · สินค้าไม่มีประวัติขายใช้ Max Stock แทน</p>
+    <p class="hint" style="margin-top:8px">เป้าหมาย = ขาย/วัน × (รอของ + รอบสั่ง + เผื่อ) · ต้องสั่ง = เป้าหมาย − (สต๊อก + กำลังมา − ยอดจอง) ปัดขึ้น 5 · <b>กดที่ช่อง "กำลังมา"</b> เพื่อบันทึกของที่สั่งไปแล้วกำลังรอรับ · สินค้าที่ต้องสั่งแต่มีของกำลังมาอยู่ = <b>⏳ ค้างไว้ก่อน</b> ไม่รวมในใบสั่งซื้อรอบนี้ (ของถึงแล้วค่อยคำนวณใหม่)/0 · สินค้าไม่มีประวัติขายใช้ Max Stock แทน</p>
   </div>
   <div class="card">
     <h3 class="ct">📦 ใบสั่งซื้อที่ยังไม่ครบ (ของกำลังมา)</h3>
@@ -12331,7 +12331,8 @@ async function plCalc(){
     if(adu<=0&&target<=0)st='nodata';
     else if(daysLeft!==null&&daysLeft<lead)st='urgent';          // ของจะหมดก่อนของใหม่ถึง
     else if(needRaw>0)st='order';
-    plRows.push({p,adu,adu30,aduBase,sold:Number(v.sold)||0,incoming,stock,reserved,usable,target,need,daysLeft,st,
+    if(incoming>0&&(st==='order'||st==='urgent'))st='hold';   // ต้องสั่งแต่มีของกำลังมาอยู่แล้ว → ค้างไว้ก่อน รอของถึงค่อยดูใหม่
+    plRows.push({p,adu,adu30,aduBase,sold:Number(v.sold)||0,incoming,stock,reserved,usable,target,need,daysLeft,st,hold:st==='hold',
       sups:supsOf(p.id)});
   });
   plRows.sort((a,b)=>(a.daysLeft??9999)-(b.daysLeft??9999)||byThaiName(a.p,b.p));
@@ -12346,18 +12347,20 @@ function plFiltered(){
   const sup=document.getElementById('pl-sup').value, only=document.getElementById('pl-only').checked;
   const q=(document.getElementById('pl-q')?.value||'').trim().toLowerCase();
   const hit=r=>!q||String(r.p.name||'').toLowerCase().includes(q)||String(r.p.sku||'').toLowerCase().includes(q);
-  return plRows.filter(r=>hit(r)&&(!sup||(sup==='__none__'?!r.sups.length:r.sups.includes(sup)))&&(!only||r.need>0));
+  return plRows.filter(r=>hit(r)&&(!sup||(sup==='__none__'?!r.sups.length:r.sups.includes(sup)))&&(!only||r.need>0||r.hold));
 }
 function plRender(){
   const list=plFiltered(), el=document.getElementById('pl-body');
   const urgent=plRows.filter(r=>r.st==='urgent').length;
-  const toOrder=plRows.filter(r=>r.need>0).length;
-  const val=list.reduce((a,r)=>a+r.need*(Number(r.p.base_price)||0),0);
+  const toOrder=plRows.filter(r=>r.need>0&&!r.hold).length;
+  const held=plRows.filter(r=>r.hold).length;
+  const val=list.filter(r=>!r.hold).reduce((a,r)=>a+r.need*(Number(r.p.base_price)||0),0);
   const card=(t,v,c)=>'<div style="flex:1;min-width:145px;border:1px solid var(--line,#eee);border-left:4px solid '+c+';border-radius:10px;padding:8px 12px"><div style="font-size:11.5px;color:var(--muted)">'+t+'</div><div style="font-size:18px;font-weight:700;color:'+c+'">'+v+'</div></div>';
   const oldW=document.querySelector('#page-plan .plwarn');if(oldW)oldW.remove();
   document.getElementById('pl-sum').innerHTML=
     card('🔴 จะขาดก่อนของถึง',urgent+' รายการ','#b52020')
     +card('ต้องสั่งรอบนี้',toOrder+' รายการ','#a04a00')
+    +card('⏳ ค้างไว้ก่อน (ของกำลังมา)',held+' รายการ','#5b6bc0')
     +card('มูลค่าโดยประมาณ','฿'+fmt(val),'#159b78')
     +card('ดูอยู่',list.length+' รายการ','#555');
   // เตือนถ้าข้อมูลยังน้อย — ตัวเลขจะแกว่ง
@@ -12375,7 +12378,8 @@ function plRender(){
   const STL={urgent:'<span class="tag tag-out" style="background:#fdecec;color:#b52020">🔴 จะขาด</span>',
     order:'<span class="tag tag-low">🟡 ควรสั่ง</span>',
     ok:'<span class="tag" style="background:#e8f6ef;color:#159b78">✅ พอ</span>',
-    nodata:'<span class="tag tag-low" style="color:#888">— ไม่มีข้อมูล</span>'};
+    nodata:'<span class="tag tag-low" style="color:#888">— ไม่มีข้อมูล</span>',
+    hold:'<span class="tag" style="background:#e8ebf8;color:#3f4fa8">⏳ ค้างไว้ก่อน — ของกำลังมา</span>'};
   el.innerHTML=list.map(r=>`<tr>
     <td style="font-size:12.5px"><b>${esc(r.p.sku)}</b></td>
     <td>${r.p.image_url?'<img src="'+esc(r.p.image_url)+'" style="width:28px;height:28px;object-fit:cover;border-radius:6px;vertical-align:-8px;margin-right:6px">':''}${esc(r.p.name)}</td>
@@ -12389,12 +12393,12 @@ function plRender(){
     <td class="num" style="color:#159b78;cursor:pointer;white-space:nowrap" title="กดเพื่อบันทึก/แก้ของที่สั่งไปแล้วกำลังรอรับ" onclick="plIncOpen(${r.p.id})">${r.incoming?'<b>'+r.incoming+'</b>':'<span style="color:#bbb">—</span>'}<div style="font-size:11px;color:#b9b9b9">＋ ใส่</div></td>
     <td class="num" style="font-weight:700;color:${r.daysLeft===null?'#999':(r.daysLeft<30?'#b52020':(r.daysLeft<45?'#a04a00':'#159b78'))}">${r.daysLeft===null?'—':r.daysLeft+' วัน'}</td>
     <td class="num">${r.target||'—'}</td>
-    <td class="num" style="font-weight:700;color:#b52020">${r.need||'—'} ${r.need?esc(r.p.unit||''):''}</td>
+    <td class="num" style="font-weight:700;color:${r.hold?'#8a90b8':'#b52020'}">${r.need||'—'} ${r.need?esc(r.p.unit||''):''}${r.hold?'<div style="font-size:11px;font-weight:400;color:#8a90b8">รอของถึงก่อน</div>':''}</td>
     <td style="font-size:12px">${esc(r.sups.join(' / ')||'—')}</td>
     <td>${STL[r.st]}</td></tr>`).join('');
 }
 function plText(){
-  const list=plFiltered().filter(r=>r.need>0);
+  const list=plFiltered().filter(r=>r.need>0&&!r.hold);
   const by={};list.forEach(r=>{const k=r.sups[0]||'— ไม่ระบุซัพ —';(by[k]=by[k]||[]).push(r);});
   return '📦 ใบสั่งซื้อ '+new Date().toLocaleDateString('th-TH',{day:'numeric',month:'long',year:'numeric'})
     +'\n(แผนครอบคลุม '+(Number(document.getElementById('pl-lead').value)+Number(document.getElementById('pl-cycle').value)+Number(document.getElementById('pl-safety').value))+' วัน)\n'
@@ -12404,11 +12408,11 @@ function plText(){
     +'\n\nรวม '+list.length+' รายการ';
 }
 function plCopy(){
-  if(!plFiltered().filter(r=>r.need>0).length){toast('ไม่มีรายการต้องสั่ง');return;}
+  if(!plFiltered().filter(r=>r.need>0&&!r.hold).length){toast('ไม่มีรายการต้องสั่ง');return;}
   navigator.clipboard.writeText(plText()).then(()=>toast('คัดลอกแล้ว ✓'),()=>toast('คัดลอกไม่สำเร็จ'));
 }
 async function plCreatePO(btn){
-  const list=plFiltered().filter(r=>r.need>0);
+  const list=plFiltered().filter(r=>r.need>0&&!r.hold);
   if(!list.length){toast('ไม่มีรายการต้องสั่ง');return;}
   const supSel=document.getElementById('pl-sup').value, supName=supSel==='__none__'?'':supSel;
   const sup=(suppliers||[]).find(x=>x.name===supName);
