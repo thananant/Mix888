@@ -1063,14 +1063,16 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <option value="recent">⚡ ยึดยอดล่าสุด 30 วัน</option>
         <option value="avg">🛡️ อนุรักษ์ (เฉลี่ยยาว)</option>
       </select></div>
-      <div><label>ซัพพลายเออร์</label><select id="pl-sup" onchange="plRender()"><option value="">ทั้งหมด</option></select></div>
-      <label style="font-size:13px;align-self:flex-end"><input type="checkbox" id="pl-only" checked onchange="plRender()"> เฉพาะที่ต้องสั่ง</label>
       <button class="btn-p" onclick="plCalc()">🧮 คำนวณแผน</button>
       <button class="btn-g" onclick="plCopy()">📋 คัดลอกใบสั่งซื้อ</button>
       <button class="btn-s" onclick="plCreatePO(this)">📦 บันทึกเป็นใบสั่งซื้อ</button>
     </div>
     <div id="pl-sum" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px"></div>
-    <div style="overflow-x:auto;margin-top:10px"><table>
+    <div class="row" style="align-items:flex-end;flex-wrap:wrap;gap:10px;margin-top:12px">
+      <div><label>ซัพพลายเออร์</label><select id="pl-sup" onchange="plRender()" style="min-width:180px"><option value="">ทั้งหมด</option></select></div>
+      <label style="font-size:13px;align-self:flex-end"><input type="checkbox" id="pl-only" checked onchange="plRender()"> เฉพาะที่ต้องสั่ง</label>
+    </div>
+    <div style="overflow-x:auto;margin-top:8px"><table>
       <thead><tr><th>SKU</th><th>สินค้า</th><th class="num">ขาย/วัน</th><th class="num">สต๊อกรวม</th><th class="num">กำลังมา</th><th class="num">ใช้ได้อีก</th><th class="num">เป้าหมาย</th><th class="num">ต้องสั่ง</th><th>ซัพ</th><th>สถานะ</th></tr></thead>
       <tbody id="pl-body"><tr><td colspan="10" class="empty">กด "คำนวณแผน"</td></tr></tbody></table></div>
     <p class="hint" style="margin-top:8px">เป้าหมาย = ขาย/วัน × (รอของ + รอบสั่ง + เผื่อ) · ต้องสั่ง = เป้าหมาย − (สต๊อก + กำลังมา − ยอดจอง) ปัดขึ้น 5 · <b>กดที่ช่อง "กำลังมา"</b> เพื่อบันทึกของที่สั่งไปแล้วกำลังรอรับ/0 · สินค้าไม่มีประวัติขายใช้ Max Stock แทน</p>
