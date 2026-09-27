@@ -214,6 +214,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div class="mhead" onclick="toggleGroup('plan')"><span class="ic">📅</span>แพลนสั่งของ<span class="badge" id="grp-plan-badge" style="display:none">0</span><span class="chev">▾</span></div>
       <div class="msub">
         <div class="mi" data-page="plan" onclick="showPage('plan')"><span class="ic">📅</span>แพลนสั่งซื้อ<span class="badge" id="pl-badge" style="display:none">0</span></div>
+        <div class="mi" data-page="incoming" onclick="showPage('incoming')"><span class="ic">🚚</span>ของกำลังมา<span class="badge" id="inc-badge" style="display:none;background:#5b6bc0">0</span></div>
         <div class="mi" data-page="salecmp" onclick="showPage('salecmp')"><span class="ic">📈</span>เทียบยอดขาย</div>
       </div>
     </div>
@@ -1078,8 +1079,18 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <tbody id="pl-body"><tr><td colspan="10" class="empty">กด "คำนวณแผน"</td></tr></tbody></table></div>
     <p class="hint" style="margin-top:8px">เป้าหมาย = ขาย/วัน × (รอของ + รอบสั่ง + เผื่อ) · ต้องสั่ง = เป้าหมาย − (สต๊อก − ยอดจอง) ปัดขึ้น 5 (ไม่นับ "กำลังมา" จนกว่าของจะถึงและตรวจนับแล้ว) · <b>กดที่ช่อง "กำลังมา"</b> เพื่อบันทึกของที่สั่งไปแล้วกำลังรอรับ · สินค้าที่ควรสั่งแต่มีของกำลังมาอยู่ ยังโชว์สถานะจริง (ควรสั่ง/จะขาด) พร้อมป้าย <b>⏳ ค้างไว้ก่อน</b> — ไม่รวมในใบสั่งซื้อรอบนี้ และบอกว่าของมาถึงแล้วยังขาดอีกไหม/0 · สินค้าไม่มีประวัติขายใช้ Max Stock แทน</p>
   </div>
+</div>
+
+<!-- ============ 🚚 ของกำลังมา (ใบสั่งซื้อที่รอรับ) ============ -->
+<div class="page" id="page-incoming">
+  <div class="pagehead"><h2>🚚 ของกำลังมา</h2><span class="date">สินค้าที่สั่งซื้อแล้วกำลังรอรับ — ยังไม่นับเป็นสต๊อก จนกว่าจะตรวจนับและกดรับเข้า</span></div>
   <div class="card">
-    <h3 class="ct">📦 ใบสั่งซื้อที่ยังไม่ครบ (ของกำลังมา)</h3>
+    <h3 class="ct">📦 รอรับเข้า — ตรวจนับแล้วใส่ยอดรับจริง กด ✓ รับเข้า (สต๊อกเพิ่มทันที)</h3>
+    <div class="po-pending"><div class="empty">—</div></div>
+    <div class="po-pending-empty empty" style="display:none">ไม่มีของกำลังมา ✓ — ไปบันทึกของที่สั่งแล้วได้ที่ช่อง "กำลังมา" ในหน้าแพลนสั่งซื้อ</div>
+  </div>
+  <div class="card">
+    <h3 class="ct">📋 ใบสั่งซื้อที่ยังไม่ครบ</h3>
     <div id="pl-po"><div class="empty">—</div></div>
   </div>
 </div>
@@ -1264,9 +1275,9 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
 
 <div class="page" id="page-receive">
   <div class="pagehead"><h2>รับสินค้าเข้า</h2></div>
-  <div class="card" id="po-pending-card" style="display:none">
+  <div class="card po-pending-card" style="display:none">
     <h3 style="margin:0 0 10px">📦 รอรับจากใบสั่งซื้อ (ของกำลังมา)</h3>
-    <div id="po-pending"></div>
+    <div class="po-pending"></div>
   </div>
   <div class="card" id="tf-pending-card" style="display:none">
     <h3 style="margin:0 0 10px">🚛 รอรับเข้าจากโกดัง</h3>
@@ -2236,6 +2247,7 @@ function showPage(p){
   if(p==='orders') loadOrders();
   if(p==='account') loadBills();
   if(p==='receive'){loadProducts();renderPoPending().catch(()=>{});}
+  if(p==='incoming'){renderPoPending().catch(()=>{});plLoadPO();}
   if(p==='salecmp') mcInitPage();
   if(p==='warehouse') loadWarehouse();
   if(p==='moves'){mvInit();loadMoves();}
@@ -12288,19 +12300,23 @@ async function plIncRecv(itemId,btn){
   if(await poReceive(row,p,got,wh,cost,btn))await plIncRefresh();
 }
 /* ---- หน้า "รับสินค้าเข้า": การ์ดรอรับจากใบสั่งซื้อ (ของกำลังมา) — ยอดสั่ง + ช่องยอดรับจริง ---- */
+function plUpdateIncBadge(){
+  const n=Object.values(plPOItems||{}).flat().filter(r=>r.qty-r.received>0).length;
+  const b=document.getElementById('inc-badge');if(b){b.textContent=n;b.style.display=n?'':'none';}
+}
 async function renderPoPending(){
-  const card=document.getElementById('po-pending-card'),el=document.getElementById('po-pending');
-  if(!card||!el)return;
-  await plLoadOpenPO();
+  await plLoadOpenPO(); plUpdateIncBadge();
   const rows=Object.values(plPOItems||{}).flat().filter(r=>r.qty-r.received>0);
-  card.style.display=rows.length?'block':'none';
-  if(!rows.length){el.innerHTML='';return;}
+  document.querySelectorAll('.po-pending-card').forEach(c=>c.style.display=rows.length?'block':'none');   // การ์ดในหน้า "รับสินค้าเข้า" โชว์เฉพาะตอนมีของรอ
+  document.querySelectorAll('.po-pending-empty').forEach(c=>c.style.display=rows.length?'none':'');
+  const els=[...document.querySelectorAll('.po-pending')];if(!els.length)return;
+  if(!rows.length){els.forEach(el=>el.innerHTML='');return;}
   let defWh=null;try{defWh=Number(localStorage.getItem('pick_wh_last'))||null;}catch(e){}
   if(!defWh){const w=whList.find(w=>String(w.name).includes('วังหิน'))||whList.find(w=>w.is_default)||whList[0];defWh=w?w.id:null;}
   const today=plThToday();
   const byPO={};rows.forEach(r=>(byPO[r.po_no]=byPO[r.po_no]||[]).push(r));
-  el.innerHTML='<div class="row" style="align-items:flex-end;flex-wrap:wrap;gap:10px;margin-bottom:8px">'
-    +'<div><label>รับเข้าคลัง</label><select id="po-wh">'+whList.map(w=>'<option value="'+w.id+'"'+(w.id===defWh?' selected':'')+'>'+esc(w.name)+'</option>').join('')+'</select></div>'
+  const html='<div class="row" style="align-items:flex-end;flex-wrap:wrap;gap:10px;margin-bottom:8px">'
+    +'<div><label>รับเข้าคลัง</label><select class="po-wh">'+whList.map(w=>'<option value="'+w.id+'"'+(w.id===defWh?' selected':'')+'>'+esc(w.name)+'</option>').join('')+'</select></div>'
     +'<span class="hint" style="flex:1">ใส่ "ยอดรับจริง" ตามที่นับได้ แล้วกด ✓ — สต๊อกเพิ่มทันที · รับไม่ครบ ส่วนที่ขาดยังค้างเป็นของกำลังมา</span></div>'
     +Object.entries(byPO).map(([po,its])=>{
       const late=its[0].eta&&its[0].eta<today;
@@ -12311,18 +12327,20 @@ async function renderPoPending(){
       +its.map(r=>{const p=products.find(x=>x.id===r.product_id)||{};const left=r.qty-r.received;
         return '<tr><td>'+esc(p.name||'?')+'<div style="font-size:11px;color:var(--muted)">'+esc(p.sku||'')+'</div></td>'
         +'<td class="num"><b>'+r.qty+'</b> '+esc(p.unit||'')+'</td><td class="num">'+(r.received||'—')+'</td>'
-        +'<td class="num"><input type="number" min="0" id="por-q-'+r.item_id+'" class="num" style="width:90px;border:2px solid #159b78" value="'+left+'"></td>'
-        +'<td class="num"><input type="number" min="0" step="0.01" id="por-c-'+r.item_id+'" class="num" style="width:90px" placeholder="'+(Number(p.last_cost)||'')+'"></td>'
+        +'<td class="num"><input type="number" min="0" class="num por-q" style="width:90px;border:2px solid #159b78" value="'+left+'"></td>'
+        +'<td class="num"><input type="number" min="0" step="0.01" class="num por-c" style="width:90px" placeholder="'+(Number(p.last_cost)||'')+'"></td>'
         +'<td><button class="btn-ok mini" onclick="poPendingRecv('+r.item_id+',this)">✓ รับเข้า</button></td></tr>';}).join('')
       +'</tbody></table></div></div>';}).join('');
+  els.forEach(el=>el.innerHTML=html);
 }
 async function poPendingRecv(itemId,btn){
   const row=plIncFind(itemId);if(!row)return;
   const p=products.find(x=>x.id===row.product_id);if(!p)return;
-  const got=Number(document.getElementById('por-q-'+itemId)?.value)||0;
-  const wh=Number(document.getElementById('po-wh')?.value)||null;
-  const cost=Number(document.getElementById('por-c-'+itemId)?.value)||null;
-  if(await poReceive(row,p,got,wh,cost,btn)){await renderPoPending();if(typeof loadRcvHistory==='function')loadRcvHistory();}
+  const tr=btn.closest('tr'), card=btn.closest('.card');
+  const got=Number(tr?.querySelector('.por-q')?.value)||0;
+  const wh=Number(card?.querySelector('.po-wh')?.value)||null;
+  const cost=Number(tr?.querySelector('.por-c')?.value)||null;
+  if(await poReceive(row,p,got,wh,cost,btn)){await renderPoPending();plLoadPO();if(typeof loadRcvHistory==='function')loadRcvHistory();}
 }
 async function plIncDel(itemId){
   const row=plIncFind(itemId);if(!row)return;
@@ -12352,6 +12370,7 @@ async function plCalc(){
     db.rpc('sales_velocity',{p_days:30}),    // ยอดล่าสุด ไว้จับเทรนด์
     plLoadOpenPO()                            // ของกำลังมา (ใบสั่งซื้อที่ยังรับไม่ครบ) รายสินค้า
   ]);
+  plUpdateIncBadge();
   if(error){document.getElementById('pl-body').innerHTML='<tr><td colspan="10" class="empty">โหลดไม่ได้: '+esc(error.message)+' (รัน purchase_plan.sql หรือยัง?)</td></tr>';return;}
   plVel={};(data||[]).forEach(r=>plVel[r.product_id]=r);
   const vel30={};(d30||[]).forEach(r=>vel30[r.product_id]=Number(r.adu)||0);
