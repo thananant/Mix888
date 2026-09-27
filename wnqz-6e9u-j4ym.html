@@ -640,7 +640,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <div id="c-recode-wrap" style="display:none;align-self:flex-end"><button class="btn-s mini" id="c-recode-btn" onclick="recodeCustomer()" title="รหัสขึ้นต้นไม่ตรงกับเซลล์ที่ดูแล — ออกรหัสใหม่ต่อจากเลขล่าสุดของเซลล์ปลายทาง">🔁 ออกรหัสใหม่ตามเซลล์</button><div id="c-recode-note" style="font-size:11.5px;color:var(--warn);margin-top:3px"></div></div>
       <div style="flex:1;min-width:170px"><label>ชื่อร้าน</label><input id="c-name" style="width:100%"></div>
       <div style="min-width:170px"><label>เซลล์ที่ดูแล</label><select id="c-sale" style="width:100%" onchange="updateCodePreview();checkCodeMismatch()"><option value="">— เลือกเซลล์ —</option></select></div>
-      <div style="flex:1;min-width:200px"><label>LINE Group ID (ไว้ส่งบิล)</label><input id="c-line" style="width:100%" placeholder="ใส่ทีหลังได้" oninput="cLineNameHint()"><div id="c-line-name" style="font-size:12.5px;margin-top:3px"></div><input id="c-line-copy-q" placeholder="🔎 หากลุ่มร่วม: พิมพ์ชื่อร้าน/รหัส/สาขา…" style="width:100%;margin-top:4px;font-size:12.5px" oninput="fillLineCopySelect()"><select id="c-line-copy" onchange="copyLineFrom(this)" style="width:100%;margin-top:4px;font-size:12.5px;color:var(--muted)"><option value="">📎 ใช้กลุ่มเดียวกับร้านอื่น…</option></select></div>
+      <div style="flex:1;min-width:200px"><label>LINE Group ID (ไว้ส่งบิล)</label><input id="c-line" style="width:100%" placeholder="ใส่ทีหลังได้" oninput="cLineNameHint();autoFetchGroupName(this.value,'c-line')"><div id="c-line-name" style="font-size:12.5px;margin-top:3px"></div><input id="c-line-copy-q" placeholder="🔎 หากลุ่มร่วม: พิมพ์ชื่อร้าน/รหัส/สาขา…" style="width:100%;margin-top:4px;font-size:12.5px" oninput="fillLineCopySelect()"><select id="c-line-copy" onchange="copyLineFrom(this)" style="width:100%;margin-top:4px;font-size:12.5px;color:var(--muted)"><option value="">📎 ใช้กลุ่มเดียวกับร้านอื่น…</option></select></div>
       <div><label>กลุ่มราคา</label><select id="c-pgroup"><option value="base">ราคากลาง</option><option value="r20">เรท 20 ลัง</option><option value="r50">เรท 50 ลัง</option><option value="upc">รวมส่งตจว</option></select></div>
     </div>
     <p class="hint">เลือกเซลล์ก่อน → รหัสลูกค้าจะรันต่อจากรหัสเซลล์อัตโนมัติ เช่น เซลล์รหัส AAA → ลูกค้าได้ AAA00001, AAA00002 …</p>
@@ -764,7 +764,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <input id="c-search" placeholder="ค้นหาลูกค้า…" style="flex:1;min-width:200px" oninput="renderCustomers()">
       <select id="c-sale-filter" style="min-width:170px" onchange="renderCustomers()" title="กรองลูกค้าตามรหัสเซลล์ที่ดูแล"><option value="">เซลล์: ทั้งหมด</option></select>
       <button class="btn-s mini" id="c-noline-btn" onclick="openNoLineModal()" title="กดดูรายชื่อร้านที่ยังไม่ผูกกลุ่มไลน์ แยกตามเซลล์">🔗 ยังไม่ผูกกลุ่ม</button>
-      <button class="btn-g mini" onclick="refreshLineGroupNames(this)" title="ถามชื่อกลุ่มจาก LINE (เฉพาะกลุ่มที่ยังไม่มีชื่อหรือเก่ากว่า 7 วัน)">🔄 ดึงชื่อกลุ่ม</button>
+      <button class="btn-g mini" onclick="refreshLineGroupNames(this)" title="ระบบดึงชื่อกลุ่มให้เองตอนใส่รหัสและเช็คใหม่วันละครั้ง — ปุ่มนี้ไว้บังคับดึงทันที">🔄 ดึงชื่อกลุ่ม</button>
       <button class="btn-d mini" id="c-incomplete-btn" onclick="toggleIncompleteFilter()" title="ลูกค้าที่ข้อมูลออกบิล/จัดส่งยังกรอกไม่ครบ — กดเพื่อกรองดูเฉพาะรายการนี้">⚠️ ข้อมูลไม่ครบ</button>
       <span class="count" id="c-count"></span>
     </div>
@@ -1501,8 +1501,8 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="card">
     <h3 class="ct">⚙️ ตั้งค่าระบบ</h3>
     <div class="row">
-      <div style="flex:1;min-width:260px"><label>LINE Group ID กลุ่มกลาง (แจ้งออเดอร์ใหม่ + สรุปประจำวัน)</label><input id="st-central" style="width:100%" placeholder="Cxxxxxxxx… (พิมพ์ id ในกลุ่มกลางให้บอทตอบ)"></div>
-      <div style="flex:1;min-width:260px"><label>LINE Group ID กลุ่มรีพอร์ต (สำเนาใบวางบิล + ทวงสลิป)</label><input id="st-report" style="width:100%" placeholder="Cxxxxxxxx… (สร้างกลุ่มใหม่ เชิญบอทเข้า แล้วพิมพ์ id)"></div>
+      <div style="flex:1;min-width:260px"><label>LINE Group ID กลุ่มกลาง (แจ้งออเดอร์ใหม่ + สรุปประจำวัน)</label><input id="st-central" style="width:100%" placeholder="Cxxxxxxxx… (พิมพ์ id ในกลุ่มกลางให้บอทตอบ)" oninput="renderGroupNameHints();autoFetchGroupName(this.value,'st-central')"></div>
+      <div style="flex:1;min-width:260px"><label>LINE Group ID กลุ่มรีพอร์ต (สำเนาใบวางบิล + ทวงสลิป)</label><input id="st-report" style="width:100%" placeholder="Cxxxxxxxx… (สร้างกลุ่มใหม่ เชิญบอทเข้า แล้วพิมพ์ id)" oninput="renderGroupNameHints();autoFetchGroupName(this.value,'st-report')"></div>
       <button class="btn-p" onclick="saveSettings()">บันทึกตั้งค่า</button>
       <button class="btn-g" onclick="refreshLineGroupNames(this)" title="ถามชื่อกลุ่มจาก LINE">🔄 ดึงชื่อกลุ่ม</button>
     </div>
@@ -3731,6 +3731,7 @@ function exportCSV(){
 async function loadCustomers(){
   if(!Object.keys(lineGroupNames).length)await loadLineGroupNames().catch(()=>{});
   const data=await fetchAllPages(()=>db.from('customers').select('*').order('code'));
+  setTimeout(()=>autoRefreshGroupNamesDaily().catch(()=>{}),3000);   // เช็คชื่อกลุ่มที่อาจเปลี่ยน วันละครั้ง (เบื้องหลัง)
   customers=data||[];
   qtInit(); fillParentSelect(editCustomerId||null);
   renderCustomers();
@@ -4386,19 +4387,41 @@ function lgLabel(id,short){ // ชื่อกลุ่ม (ถ้ามี) · 
   const r=lineGroupNames[id];
   return '<span style="color:var(--muted)" title="'+esc(id)+(r&&r.error?' · ดึงชื่อไม่ได้: '+esc(r.error):' · ยังไม่ได้ดึงชื่อ — กด 🔄 ดึงชื่อกลุ่ม')+'">'+esc(short?id.slice(0,10)+'…':id)+'</span>';
 }
-async function refreshLineGroupNames(btn,ids){
-  const all=ids||[...new Set([...customers.map(c=>c.line_group_id),appSettings.line_central_group,appSettings.line_report_group,appSettings.line_summary_group,appSettings.line_supplier_group].filter(Boolean))];
-  const week=Date.now()-7*86400000;
-  const need=ids?all:all.filter(id=>{const r=lineGroupNames[id];return !r||!r.name||new Date(r.updated_at).getTime()<week;});
-  if(!need.length){toast('ชื่อกลุ่มครบแล้ว (อัปเดตภายใน 7 วัน)');return;}
+const LG_RE=/^[CR][0-9a-f]{32}$/i;
+// opts: {silent:true = ไม่ toast, maxAgeMs = ดึงใหม่เฉพาะที่เก่ากว่านี้ (ค่าเริ่มต้น 12 ชม.)}
+async function refreshLineGroupNames(btn,ids,opts){
+  opts=opts||{};
+  const all=ids||[...new Set([...customers.map(c=>c.line_group_id),appSettings.line_central_group,appSettings.line_report_group,appSettings.line_summary_group,appSettings.line_supplier_group].filter(Boolean))].filter(id=>LG_RE.test(id));
+  const cut=Date.now()-(opts.maxAgeMs||12*3600000);
+  const need=ids?all:all.filter(id=>{const r=lineGroupNames[id];return !r||!r.name||new Date(r.updated_at).getTime()<cut;});
+  if(!need.length){if(!opts.silent)toast('ชื่อกลุ่มครบแล้ว (อัปเดตล่าสุดไม่เกิน 12 ชม.)');return true;}
   const t0=btn?btn.textContent:'';if(btn){btn.disabled=true;btn.textContent='กำลังดึง '+need.length+' กลุ่ม…';}
+  let ok=false;
   try{
     const {data,error}=await db.functions.invoke('line-group-name',{body:{ids:need}});
     if(error||!data||!data.ok)throw new Error((data&&data.error)||(error&&error.message)||'ไม่ทราบสาเหตุ — deploy line-group-name แล้วหรือยัง?');
-    await loadLineGroupNames();renderCustomers();fillLineCopySelect();renderGroupNameHints();
-    toast('ดึงชื่อกลุ่มแล้ว '+Object.keys(data.groups||{}).length+' กลุ่ม'+(data.missing&&data.missing.length?' · ดึงไม่ได้ '+data.missing.length+' (บอทอาจไม่อยู่ในกลุ่มแล้ว)':''));
-  }catch(e){toast('ดึงชื่อกลุ่มไม่ได้: '+(e.message||e));}
+    await loadLineGroupNames();renderCustomers();fillLineCopySelect();renderGroupNameHints();cLineNameHint();
+    if(!opts.silent)toast('ดึงชื่อกลุ่มแล้ว '+Object.keys(data.groups||{}).length+' กลุ่ม'+(data.missing&&data.missing.length?' · ดึงไม่ได้ '+data.missing.length+' (บอทอาจไม่อยู่ในกลุ่มแล้ว)':''));
+    ok=true;
+  }catch(e){if(!opts.silent)toast('ดึงชื่อกลุ่มไม่ได้: '+(e.message||e));}
   if(btn){btn.disabled=false;btn.textContent=t0;}
+  return ok;
+}
+// ใส่รหัสกลุ่มในช่องไหนก็ตาม → ดึงชื่อให้เองทันที (หน่วง 0.6 วิ กันยิงทุกตัวอักษร) — ชื่อที่รู้อยู่แล้วและยังสด ไม่ยิงซ้ำ
+const _lgTimers={};
+function autoFetchGroupName(gid,inputId){
+  clearTimeout(_lgTimers[inputId]);
+  gid=String(gid||'').trim();if(!LG_RE.test(gid))return;
+  const r=lineGroupNames[gid];if(r&&r.name&&Date.now()-new Date(r.updated_at).getTime()<12*3600000)return;
+  _lgTimers[inputId]=setTimeout(()=>refreshLineGroupNames(null,[gid],{silent:true}),600);
+}
+// เปิดแอปแล้วเช็คชื่อกลุ่มทุกกลุ่มใหม่วันละครั้งต่อเครื่อง (กลุ่มเปลี่ยนชื่อ → หลังบ้านเปลี่ยนตาม)
+async function autoRefreshGroupNamesDaily(){
+  if(!currentUser)return;
+  let last=0;try{last=Number(localStorage.getItem('mf_lgn_last')||0);}catch(e){}
+  if(Date.now()-last<12*3600000)return;
+  const ok=await refreshLineGroupNames(null,null,{silent:true,maxAgeMs:12*3600000});
+  if(ok){try{localStorage.setItem('mf_lgn_last',String(Date.now()));}catch(e){}}
 }
 function renderGroupNameHints(){
   [['st-central','line_central_group'],['st-report','line_report_group']].forEach(([id,key])=>{
@@ -4406,7 +4429,7 @@ function renderGroupNameHints(){
     let h=document.getElementById(id+'-name');
     if(!h){h=document.createElement('div');h.id=id+'-name';h.style.cssText='font-size:12.5px;margin-top:4px';el.insertAdjacentElement('afterend',h);}
     const gid=el.value.trim()||appSettings[key]||'';
-    h.innerHTML=gid?(lgName(gid)?'👥 <b>'+esc(lgName(gid))+'</b>':'<span style="color:var(--muted)">ยังไม่รู้ชื่อกลุ่ม — บันทึกแล้วกด 🔄 ดึงชื่อกลุ่ม</span>'):'';
+    h.innerHTML=gid?(lgName(gid)?'👥 <b>'+esc(lgName(gid))+'</b>':(LG_RE.test(gid)?'<span style="color:var(--muted)">⏳ กำลังดึงชื่อกลุ่ม…'+(lineGroupNames[gid]&&lineGroupNames[gid].error?' ดึงไม่ได้: '+esc(lineGroupNames[gid].error)+' (บอทอยู่ในกลุ่มไหม?)':'')+'</span>':'<span style="color:var(--muted)">รหัสกลุ่มต้องขึ้นต้นด้วย C ยาว 33 ตัว</span>')):'';
   });
 }
 function renderCustomers(){
@@ -4481,11 +4504,11 @@ function fillLineCopySelect(reset){
 function cLineNameHint(){
   const el=document.getElementById('c-line-name');if(!el)return;
   const gid=document.getElementById('c-line').value.trim();
-  el.innerHTML=gid?(lgName(gid)?'👥 <b>'+esc(lgName(gid))+'</b>':'<span style="color:var(--muted)">ยังไม่รู้ชื่อกลุ่ม (บันทึกแล้วกด 🔄 ดึงชื่อกลุ่ม)</span>'):'';
+  el.innerHTML=gid?(lgName(gid)?'👥 <b>'+esc(lgName(gid))+'</b>':(LG_RE.test(gid)?'<span style="color:var(--muted)">⏳ กำลังดึงชื่อกลุ่ม…'+(lineGroupNames[gid]&&lineGroupNames[gid].error?' ดึงไม่ได้: '+esc(lineGroupNames[gid].error)+' (บอทอยู่ในกลุ่มไหม?)':'')+'</span>':'<span style="color:var(--muted)">รหัสกลุ่มต้องขึ้นต้นด้วย C ยาว 33 ตัว</span>')):'';
 }
 function copyLineFrom(sel){
   if(!sel.value)return;
-  document.getElementById('c-line').value=sel.value;cLineNameHint();
+  document.getElementById('c-line').value=sel.value;cLineNameHint();autoFetchGroupName(sel.value,'c-line');
   const label=(sel.options&&sel.options[sel.selectedIndex])?sel.options[sel.selectedIndex].text:'';
   toast('ใช้กลุ่มเดียวกับ '+label+' — อย่าลืมกด 💾 บันทึก');
 }
@@ -5042,6 +5065,7 @@ async function saveCustomer(){
   const {error}=await q;
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
   toast((editCustomerId?'อัพเดตลูกค้าแล้ว'+(rec.code?' · รหัสใหม่ '+rec.code:''):'เพิ่มลูกค้า '+rec.code+' แล้ว')+(ml?' · 📍 ปักหมุดตามลิงก์แผนที่แล้ว':''));
+  if(rec.line_group_id&&LG_RE.test(rec.line_group_id)&&!lgName(rec.line_group_id))refreshLineGroupNames(null,[rec.line_group_id],{silent:true});
   closeCustomerForm(); loadCustomers();
 }
 async function deleteCustomer(id){
@@ -12992,6 +13016,7 @@ async function saveSettings(){
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
   appSettings.line_central_group=val;appSettings.line_report_group=rep;
   renderGroupNameHints();
+  const ids=[val,rep].filter(g=>LG_RE.test(g)&&!lgName(g));if(ids.length)refreshLineGroupNames(null,ids,{silent:true});
   toast('บันทึกตั้งค่าแล้ว');
 }
 /* ================= ใบวางบิลอัตโนมัติ (หน้าผู้ใช้ระบบ · admin) ================= */
