@@ -1477,11 +1477,9 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="card" style="padding:12px 16px">
     <div class="row" style="align-items:flex-end">
       <div><label>เริ่มนับค่าคอมตั้งแต่บิลที่ออกวันที่</label><input type="date" id="py-start" style="width:170px"></div>
-      <div><label>ลูกค้าที่เคยซื้อก่อนวันเริ่ม</label><select id="py-agemode" style="min-width:300px">
-        <option value="true">นับอายุจากบิลแรกจริง (ลูกค้าเก่าได้อัตราท้าย 0.25%)</option>
-        <option value="reset">เริ่มนับใหม่จากบิลแรกหลังวันเริ่ม (ทุกคนเริ่ม 1%)</option></select></div>
       <button class="btn-p mini" style="height:40px" onclick="pySaveRules()">💾 บันทึกกติกา</button>
-      <span class="hint" style="margin:0 0 6px;flex:1;min-width:240px">✅ นับเฉพาะบิลที่<b>ลูกค้าชำระแล้ว</b> และลงเดือนตาม<b>วันที่ชำระ</b> (สั่งเดือนนี้ โอนเดือนหน้า = ค่าคอมเดือนหน้า) · บิลที่ออกก่อนวันเริ่มไม่นับเลย</span>
+      <span class="hint" style="margin:0 0 6px;flex:1;min-width:240px">✅ นับเฉพาะบิลที่<b>ลูกค้าชำระแล้ว</b> ลงเดือนตาม<b>วันที่ชำระ</b> (สั่งเดือนนี้ โอนเดือนหน้า = ค่าคอมเดือนหน้า) · บิลที่ออกก่อนวันเริ่มไม่นับเลย ·
+        <b>วันที่นับ</b>: ลูกค้าที่เคยซื้อก่อนวันเริ่ม = นับ<b>วันเริ่มเป็นวันที่ 1</b> · ลูกค้าที่บิลแรกหลังวันเริ่ม = นับ<b>บิลแรกเป็นวันที่ 1</b></span>
     </div>
   </div>
   <div class="cards" id="py-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px"></div>
@@ -1521,7 +1519,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <h4 style="margin:10px 0 6px;font-size:14px">🧾 บิลที่นับค่าคอมในเดือนนี้</h4>
     <div style="overflow-x:auto">
     <table style="font-size:13px">
-      <thead><tr><th>ออกบิล</th><th>ชำระเมื่อ</th><th>บิล</th><th>ลูกค้า</th><th>บิลแรกเมื่อ</th><th class="num">วันที่นับ</th><th class="num">อัตรา</th><th class="num">ยอดบิล</th><th class="num">ค่าคอม</th></tr></thead>
+      <thead><tr><th>ออกบิล</th><th>ชำระเมื่อ</th><th>บิล</th><th>ลูกค้า</th><th>วันที่ 1 ของลูกค้า</th><th class="num">วันที่นับ</th><th class="num">อัตรา</th><th class="num">ยอดบิล</th><th class="num">ค่าคอม</th></tr></thead>
       <tbody id="pyd-body"></tbody>
     </table>
     </div>
@@ -11027,13 +11025,13 @@ function pyIsAdmin(){return !!(currentUser&&currentUser.role==='admin');}
 const PY_START_DEF='2026-10-01';
 function pyRules(){
   const a=(typeof appSettings!=='undefined'&&appSettings)||{};
-  return {start:(a.comm_start&&/^\d{4}-\d{2}-\d{2}$/.test(a.comm_start))?a.comm_start:PY_START_DEF,ageMode:a.comm_age_mode==='reset'?'reset':'true'};
+  return {start:(a.comm_start&&/^\d{4}-\d{2}-\d{2}$/.test(a.comm_start))?a.comm_start:PY_START_DEF};
 }
-function pyFillRules(){const r=pyRules();const s=document.getElementById('py-start'),m=document.getElementById('py-agemode');if(s&&document.activeElement!==s)s.value=r.start;if(m)m.value=r.ageMode;}
+function pyFillRules(){const r=pyRules();const s=document.getElementById('py-start');if(s&&document.activeElement!==s)s.value=r.start;}
 async function pySaveRules(){
-  const start=document.getElementById('py-start').value,mode=document.getElementById('py-agemode').value;
+  const start=document.getElementById('py-start').value;
   if(!start){toast('เลือกวันเริ่มก่อน');return;}
-  const rows=[{key:'comm_start',value:start},{key:'comm_age_mode',value:mode}];
+  const rows=[{key:'comm_start',value:start}];
   const {error}=await db.from('settings').upsert(rows,{onConflict:'key'});
   if(error){toast('บันทึกไม่ได้: '+error.message);return;}
   if(typeof appSettings==='undefined'||!appSettings)appSettings={};
@@ -11066,15 +11064,17 @@ async function pyLoad(force){
 }
 // คำนวณทั้งเดือน → {bySale:{id:{...}}, first:{custId:date}, month, rules}
 //  - นับเฉพาะบิลที่ออก ≥ วันเริ่ม และ payment_status='paid' · ลงเดือนตามวันที่ชำระ (paid_at)
-//  - อัตราดูจากอายุลูกค้า = วันที่ออกบิล − วันบิลแรกของลูกค้า (บิลแรกจริง หรือบิลแรกหลังวันเริ่ม ตามกติกา)
-//  - ลูกค้าใหม่ของเดือน = ลูกค้าที่บิลแรก (≥ วันเริ่ม) ถูกชำระในเดือนนั้น
+//  - อัตราดูจากอายุลูกค้า = วันที่ออกบิล − "วันที่ 1" ของลูกค้า
+//      ลูกค้าเก่า (เคยมีบิลก่อนวันเริ่ม) → วันเริ่มระบบคือวันที่ 1 · ลูกค้าใหม่ → วันบิลแรกคือวันที่ 1
+//  - ลูกค้าใหม่ของเดือน = ลูกค้าที่บิลแรกจริง ≥ วันเริ่ม และบิลแรกนั้นถูกชำระในเดือนนั้น
 function pyCompute(){
   const month=pyMonthStr();const rules=pyRules();const start=rules.start;
   const live=(pyBills||[]).filter(b=>(b.ship_status||'pending')!=='cancelled'&&b.customer_id);
   const bd=b=>String(b.created_at||'').slice(0,10);
   const pd=b=>String(b.paid_at||b.created_at||'').slice(0,10);   // ไม่มี paid_at (ข้อมูลเก่า) → ใช้วันออกบิล
   const first={};
-  live.forEach(b=>{const d=bd(b);if(rules.ageMode==='reset'&&d<start)return;if(!first[b.customer_id]||d<first[b.customer_id])first[b.customer_id]=d;});
+  live.forEach(b=>{const d=bd(b);if(!first[b.customer_id]||d<first[b.customer_id])first[b.customer_id]=d;});   // บิลแรกจริง (ทุกช่วงเวลา)
+  const day1=cid=>(first[cid]&&first[cid]>start)?first[cid]:start;                                            // "วันที่ 1" ของลูกค้า
   const custById={};customers.forEach(c=>custById[c.id]=c);
   const bySale={};
   sales.forEach(s=>bySale[s.id]={sale:s,cfg:pyCompOf(s.id),sales:0,comm:0,tiers:[0,0,0],tierAmt:[0,0,0],rows:[],newCust:[],bonus:0,adj:0,adjRows:[],unpaid:[],unpaidSum:0});
@@ -11089,12 +11089,12 @@ function pyCompute(){
     const pm=pd(b);
     if(first[b.customer_id]===d&&(!firstPaid[b.customer_id]||pm<firstPaid[b.customer_id]))firstPaid[b.customer_id]=pm;
     if(pm.slice(0,7)!==month)return;                                   // ลงเดือนตามวันชำระ
-    const age=dayDiff(first[b.customer_id]||d,d);
+    const base=day1(b.customer_id);const age=dayDiff(base,d);
     const tier=age<cfg.days1?0:(age<cfg.days1+cfg.days2?1:2);
     const rate=[cfg.rate1,cfg.rate2,cfg.rate3][tier];
     const total=Number(b.total)||0,comm=total*rate/100;
     g.sales+=total;g.comm+=comm;g.tiers[tier]+=total;g.tierAmt[tier]+=comm;
-    g.rows.push({date:d,paidDate:pm,noPaidAt:!b.paid_at,bill:b.bill_no,cust:c,first:first[b.customer_id]||d,age,rate,total,comm});
+    g.rows.push({date:d,paidDate:pm,noPaidAt:!b.paid_at,bill:b.bill_no,cust:c,first:base,oldCust:first[b.customer_id]<start,age,rate,total,comm});
   });
   Object.keys(firstPaid).forEach(cid=>{
     if(first[cid]<start||firstPaid[cid].slice(0,7)!==month)return;
@@ -11163,7 +11163,7 @@ function pyOpenDetail(saleId){
   const rows=[...g.rows].sort((a,b)=>a.paidDate.localeCompare(b.paidDate)||String(a.bill).localeCompare(String(b.bill)));
   document.getElementById('pyd-body').innerHTML=rows.length?rows.map(r=>`<tr>
     <td style="white-space:nowrap">${fd(r.date)}</td><td style="white-space:nowrap">${fd(r.paidDate)}${r.noPaidAt?' <span class="tag tag-low" style="font-size:10.5px" title="บิลเก่าไม่มีวันชำระบันทึกไว้ ใช้วันออกบิลแทน">ไม่มีวันชำระ</span>':''}${r.paidDate.slice(0,7)!==r.date.slice(0,7)?' <span class="tag tag-ov" style="font-size:10.5px">สั่ง '+TH_MONTHS[new Date(r.date).getMonth()]+'</span>':''}</td><td>${esc(r.bill||'')}</td>
-    <td>${esc(r.cust.code)} ${esc(r.cust.name)}</td><td style="white-space:nowrap">${fd(r.first)}</td>
+    <td>${esc(r.cust.code)} ${esc(r.cust.name)}</td><td style="white-space:nowrap">${fd(r.first)}${r.oldCust?' <span class="tag tag-low" style="font-size:10.5px" title="ลูกค้าเก่า เคยซื้อก่อนวันเริ่มระบบ — นับวันเริ่มเป็นวันที่ 1">ลูกค้าเก่า</span>':' <span class="tag tag-ok" style="font-size:10.5px" title="บิลแรกหลังวันเริ่มระบบ — นับบิลแรกเป็นวันที่ 1">บิลแรก</span>'}</td>
     <td class="num">วันที่ ${r.age+1}</td><td class="num">${r.rate}%</td><td class="num">${fmt(r.total)}</td><td class="num"><b>${fmt(r.comm)}</b></td></tr>`).join('')
     :'<tr><td colspan="9" class="empty">ไม่มีบิลที่ชำระในเดือนนี้</td></tr>';
   document.getElementById('pyd-unpaid').innerHTML=g.unpaid.length?'<div style="display:flex;flex-wrap:wrap;gap:6px">'+g.unpaid.sort((a,b)=>a.date.localeCompare(b.date)).map(u=>'<span style="border:1px solid var(--line,#eee);border-radius:8px;padding:3px 8px">'+fd(u.date)+' · <b>'+esc(u.bill||'')+'</b> '+esc(u.cust.name)+' <span style="color:var(--muted)">'+fmt(u.total)+'</span></span>').join('')+'</div><div style="margin-top:6px;color:var(--muted)">รวม '+g.unpaid.length+' บิล '+fmt(g.unpaidSum)+' บาท</div>'
