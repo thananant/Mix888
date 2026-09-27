@@ -655,6 +655,15 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
         <option value="days">เครดิตตามจำนวนวัน</option>
         <option value="schedule">เครดิตตามรอบวางบิล (ตารางทั้งปี)</option></select></div>
       <div id="c-credit-days-wrap" style="display:none"><label>จำนวนวันเครดิต (นับจากวันส่งของ)</label><input id="c-credit-days" type="number" min="1" max="365" step="1" class="num" style="width:120px" placeholder="เช่น 30"></div>
+      <div id="c-credit-entity-wrap" style="display:none"><label>ลูกค้าเครดิตเป็น</label><select id="c-credit-entity" onchange="cdRender()" style="min-width:170px"><option value="person">บุคคลธรรมดา</option><option value="company">บริษัท / นิติบุคคล</option></select></div>
+    </div>
+    <div id="c-credit-docs" style="display:none;margin-top:10px;background:#faf5f1;border:1px solid #f0e4dc;border-radius:12px;padding:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <b>📎 เอกสารขอใช้เครดิต</b><span id="cd-status"></span>
+        <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap" id="cd-admin-btns"></span>
+      </div>
+      <div id="cd-list"></div>
+      <p class="hint" style="margin-top:6px" id="cd-hint"></p>
     </div>
     <div id="c-credit-sched" style="display:none;margin-top:10px;background:#faf5f1;border:1px solid #f0e4dc;border-radius:12px;padding:12px">
       <div class="row">
@@ -4458,7 +4467,7 @@ function renderCustomers(){
       c.parent_id
         ?' <span class="tag tag-low">🏬 '+esc(c.branch_name||'สาขา')+'</span><div style="font-size:11.5px;color:var(--muted)">สาขาของ '+esc(customers.find(p=>p.id===c.parent_id)?.name||'?')+'</div>'
         :(customers.some(x=>x.parent_id===c.id)?' <span class="tag tag-ov">ร้านแม่ '+customers.filter(x=>x.parent_id===c.id).length+' สาขา</span>':'')
-    }<div style="margin-top:3px;display:flex;gap:4px;flex-wrap:wrap"><span class="tag ${(c.pay_type||'prepay')==='credit'?'tag-low':(c.pay_type==='postpay'?'tag-ov':'tag-ok')}" style="font-size:11px">💳 ${esc(payTypeLabel(c))}</span>${
+    }<div style="margin-top:3px;display:flex;gap:4px;flex-wrap:wrap"><span class="tag ${(c.pay_type||'prepay')==='credit'?(c.credit_status==='approved'?'tag-ok':c.credit_status==='rejected'?'tag-out':'tag-low'):(c.pay_type==='postpay'?'tag-ov':'tag-ok')}" style="font-size:11px" title="${c.pay_type==='credit'&&c.credit_status!=='approved'?'ยังใช้เครดิตไม่ได้จนกว่า admin จะอนุมัติ':''}">💳 ${esc(payTypeLabel(c))}</span>${
       (()=>{const m=custMissing(c);return m.length?`<span class="tag tag-out" style="font-size:11px;cursor:pointer" onclick="editCustomer(${c.id})" title="ยังว่าง: ${esc(m.map(f=>f.label).join(', '))} — คลิกเพื่อกรอก">⚠️ ข้อมูลไม่ครบ ${m.length} ช่อง</span>`:''})()
     }${
       (()=>{const mm=codeMismatch(c);return mm?`<span class="tag tag-low" style="font-size:11px;cursor:pointer" onclick="editCustomer(${c.id})" title="รหัสขึ้นต้น ${esc(mm.code.slice(0,3))} แต่เซลล์ที่ดูแลคือ ${esc(mm.saleCode)} — คลิกแก้ไขแล้วกด 🔁 ออกรหัสใหม่ตามเซลล์">🔁 รหัส ${esc(mm.code.slice(0,3))} ≠ เซลล์ ${esc(mm.saleCode)}</span>`:''})()
@@ -4665,8 +4674,9 @@ function payTypeLabel(c){
   if(!c)return '';
   const t=c.pay_type||'prepay';
   if(t!=='credit')return PAY_TYPE_LABEL[t]||t;
-  if(c.credit_mode==='schedule')return 'เครดิต · รอบวางบิล';
-  return 'เครดิต '+(c.credit_days||0)+' วัน';
+  const base=c.credit_mode==='schedule'?'เครดิต · รอบวางบิล':'เครดิต '+(c.credit_days||0)+' วัน';
+  const st=c.credit_status||'pending';
+  return base+(st==='approved'?' ✅':st==='rejected'?' ❌ ตีกลับ':' ⏳ รออนุมัติ');
 }
 function cPayUI(){
   const t=document.getElementById('c-paytype').value;
@@ -4674,6 +4684,125 @@ function cPayUI(){
   document.getElementById('c-credit-mode-wrap').style.display=t==='credit'?'':'none';
   document.getElementById('c-credit-days-wrap').style.display=(t==='credit'&&m==='days')?'':'none';
   document.getElementById('c-credit-sched').style.display=(t==='credit'&&m==='schedule')?'':'none';
+  document.getElementById('c-credit-entity-wrap').style.display=t==='credit'?'':'none';
+  document.getElementById('c-credit-docs').style.display=t==='credit'?'':'none';
+  if(t==='credit')cdRender();
+}
+/* ---------- เอกสารขอใช้เครดิต + อนุมัติโดย admin (ตาราง credit_docs / credit_reviews · bucket credit-docs) ----------
+   บุคคลธรรมดา: สำเนาบัตรประชาชน + สำเนาทะเบียนบ้าน · บริษัท: ภพ.20 + สำเนาบัตร ปชช. กรรมการ + สำเนาทะเบียนบ้านกรรมการ (ทุกใบต้องมีตราประทับบริษัท)
+   ขาดอย่างใดอย่างหนึ่ง = อนุมัติไม่ได้ · เพิ่ม/แก้เครดิตทุกครั้ง → สถานะกลับเป็น "รออนุมัติ" · ตีกลับ = แจ้งกลุ่มรีพอร์ต */
+const CD_TYPES={
+  person:[{k:'id_card',l:'สำเนาบัตรประชาชน'},{k:'house_reg',l:'สำเนาทะเบียนบ้าน'}],
+  company:[{k:'pp20',l:'ใบ ภ.พ.20'},{k:'dir_id_card',l:'สำเนาบัตรประชาชนกรรมการ (1 ท่าน)'},{k:'dir_house_reg',l:'สำเนาทะเบียนบ้านกรรมการ (1 ท่าน)'}]};
+const CD_STATUS={pending:['⏳ รอ admin อนุมัติ','tag-low'],approved:['✅ อนุมัติเครดิตแล้ว','tag-ok'],rejected:['❌ ตีกลับ','tag-out']};
+let cdDocs=[];   // เอกสารของลูกค้าที่กำลังแก้ไข
+function cdIsAdmin(){return !!(currentUser&&currentUser.role==='admin');}
+function cdEntity(){return document.getElementById('c-credit-entity').value==='company'?'company':'person';}
+async function cdLoad(){
+  cdDocs=[];if(!editCustomerId)return;
+  const {data,error}=await db.from('credit_docs').select('*').eq('customer_id',editCustomerId);
+  if(error){document.getElementById('cd-hint').innerHTML='⚠️ ยังไม่ได้รัน SQL <b>mix888-credit-docs.sql</b> — '+esc(error.message);return;}
+  cdDocs=data||[];cdRender();
+}
+function cdComplete(c,docs,entity){   // ครบไหม (ใช้ทั้งฟอร์มและรายชื่อ)
+  const need=CD_TYPES[entity||'person'];
+  return need.every(t=>{const d=docs.find(x=>x.doc_type===t.k);return d&&d.file_path&&(entity!=='company'||d.stamped);});
+}
+function cdRender(){
+  const box=document.getElementById('cd-list');if(!box)return;
+  const c=editCustomerId?customers.find(x=>x.id===editCustomerId):null;
+  const entity=cdEntity();const need=CD_TYPES[entity];const admin=cdIsAdmin();
+  const st=(c&&c.credit_status)||'pending';
+  const S=CD_STATUS[st]||CD_STATUS.pending;
+  document.getElementById('cd-status').innerHTML='<span class="tag '+S[1]+'">'+S[0]+'</span>'
+    +(c&&c.credit_reviewed_by?' <span style="font-size:12px;color:var(--muted)">โดย '+esc(c.credit_reviewed_by)+' '+(c.credit_reviewed_at?new Date(c.credit_reviewed_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'')+'</span>':'')
+    +(st==='rejected'&&c&&c.credit_reject_reason?'<div style="font-size:12.5px;color:var(--danger);margin-top:3px">เหตุผล: '+esc(c.credit_reject_reason)+'</div>':'');
+  if(!editCustomerId){box.innerHTML='<div class="hint" style="margin:0">บันทึกลูกค้าก่อน แล้วกลับมากด "แก้ไข" เพื่ออัปโหลดเอกสาร</div>';document.getElementById('cd-admin-btns').innerHTML='';document.getElementById('cd-hint').textContent='';return;}
+  box.innerHTML=need.map(t=>{
+    const d=cdDocs.find(x=>x.doc_type===t.k);
+    return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px dashed var(--line,#eee)">
+      <div style="min-width:240px;flex:1"><b>${esc(t.l)}</b>${d&&d.file_path?'<div style="font-size:11.5px;color:var(--muted)">อัปโหลดโดย '+esc(d.uploaded_by||'')+' · '+(d.uploaded_at?new Date(d.uploaded_at).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'')+'</div>':'<div style="font-size:11.5px;color:var(--danger)">ยังไม่มีไฟล์</div>'}</div>
+      ${d&&d.file_path?`<button class="btn-g mini" onclick="cdView('${esc(d.file_path)}')">👁️ ดู</button>`:''}
+      <label class="btn-s mini" style="cursor:pointer">${d&&d.file_path?'🔁 เปลี่ยนไฟล์':'📤 อัปโหลด'}<input type="file" accept="image/*,application/pdf" style="display:none" onchange="cdUpload(this,'${t.k}')"></label>
+      ${entity==='company'?`<label style="font-size:13px;cursor:${admin?'pointer':'default'};user-select:none"><input type="checkbox" ${d&&d.stamped?'checked':''} ${admin&&d&&d.file_path?'':'disabled'} onchange="cdStamp('${t.k}',this.checked)" style="width:15px;height:15px;vertical-align:-2px"> มีตราประทับบริษัท${admin?'':' (admin ตรวจ)'}</label>`:''}
+      ${d&&d.file_path?`<button class="btn-d mini" onclick="cdDelete('${t.k}')" title="ลบไฟล์">✕</button>`:''}
+    </div>`;}).join('');
+  const complete=cdComplete(c,cdDocs,entity);
+  document.getElementById('cd-hint').innerHTML=(entity==='company'?'บริษัท: ต้องมีทั้ง 3 ใบ และ admin ติ๊กยืนยันว่าทุกใบมีตราประทับบริษัท ':'บุคคลธรรมดา: ต้องมีทั้ง 2 ใบ ')+'· ขาดอย่างใดอย่างหนึ่งอนุมัติไม่ได้ · เพิ่ม/แก้เงื่อนไขเครดิตแล้วต้องให้ admin อนุมัติใหม่ทุกครั้ง'
+    +(complete?' · <b style="color:var(--ok)">เอกสารครบแล้ว</b>':' · <b style="color:var(--danger)">เอกสารยังไม่ครบ</b>');
+  document.getElementById('cd-admin-btns').innerHTML=admin?`<button class="btn-p mini" ${complete&&st!=='approved'?'':'disabled'} onclick="cdReview('approved')" title="${complete?'อนุมัติให้ใช้เครดิต':'เอกสารยังไม่ครบ อนุมัติไม่ได้'}">✅ อนุมัติเครดิต</button><button class="btn-d mini" ${st==='rejected'?'disabled':''} onclick="cdReview('rejected')">❌ ตีกลับเอกสาร</button>`:'<span style="font-size:12px;color:var(--muted)">เฉพาะ admin อนุมัติ/ตีกลับ</span>';
+}
+async function cdUpload(inp,type){
+  const f=inp.files&&inp.files[0];if(!f||!editCustomerId)return;
+  if(f.size>10*1024*1024){toast('ไฟล์ใหญ่เกิน 10 MB');inp.value='';return;}
+  const ext=(f.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'')||'jpg';
+  const path=editCustomerId+'/'+type+'_'+Date.now()+'.'+ext;
+  toast('กำลังอัปโหลด…');
+  const {error:ue}=await db.storage.from('credit-docs').upload(path,f,{contentType:f.type||'application/octet-stream',upsert:true});
+  if(ue){toast('อัปโหลดไม่ได้: '+ue.message+(/bucket/i.test(ue.message)?' — รัน mix888-credit-docs.sql หรือยัง?':''));inp.value='';return;}
+  const old=cdDocs.find(x=>x.doc_type===type);
+  const rec={customer_id:editCustomerId,doc_type:type,file_path:path,file_name:f.name,stamped:false,uploaded_by:currentUser?(currentUser.display_name||currentUser.username):null,uploaded_at:new Date().toISOString()};
+  const {error}=await db.from('credit_docs').upsert(rec,{onConflict:'customer_id,doc_type'});
+  if(error){toast('บันทึกไม่ได้: '+error.message);return;}
+  if(old&&old.file_path&&old.file_path!==path)db.storage.from('credit-docs').remove([old.file_path]).catch(()=>{});
+  // เอกสารเปลี่ยน → ต้องอนุมัติใหม่
+  const c=customers.find(x=>x.id===editCustomerId);
+  if(c&&c.credit_status==='approved'){await cdSetStatus('pending',null,'เปลี่ยนเอกสาร '+type);}
+  toast('อัปโหลดแล้ว ✓');await cdLoad();
+}
+async function cdView(path){
+  const {data,error}=await db.storage.from('credit-docs').createSignedUrl(path,3600);
+  if(error||!data){toast('เปิดไฟล์ไม่ได้: '+(error&&error.message));return;}
+  window.open(data.signedUrl,'_blank');
+}
+async function cdDelete(type){
+  const d=cdDocs.find(x=>x.doc_type===type);if(!d)return;
+  if(!confirm('ลบไฟล์นี้?'))return;
+  await db.storage.from('credit-docs').remove([d.file_path]).catch(()=>{});
+  const {error}=await db.from('credit_docs').delete().eq('id',d.id);
+  if(error){toast('ลบไม่ได้: '+error.message);return;}
+  const c=customers.find(x=>x.id===editCustomerId);
+  if(c&&c.credit_status==='approved')await cdSetStatus('pending',null,'ลบเอกสาร '+type);
+  toast('ลบแล้ว');await cdLoad();
+}
+async function cdStamp(type,on){
+  if(!cdIsAdmin())return;
+  const d=cdDocs.find(x=>x.doc_type===type);if(!d)return;
+  const {error}=await db.from('credit_docs').update({stamped:on,stamped_by:on?(currentUser.display_name||currentUser.username):null}).eq('id',d.id);
+  if(error){toast('บันทึกไม่ได้: '+error.message);return;}
+  d.stamped=on;cdRender();
+}
+async function cdSetStatus(status,reason,action){
+  const upd={credit_status:status,credit_reviewed_by:currentUser?(currentUser.display_name||currentUser.username):null,credit_reviewed_at:new Date().toISOString(),credit_reject_reason:status==='rejected'?reason:null};
+  const {error}=await db.from('customers').update(upd).eq('id',editCustomerId);
+  if(error){toast('บันทึกสถานะไม่ได้: '+error.message);return false;}
+  const c=customers.find(x=>x.id===editCustomerId);if(c)Object.assign(c,upd);
+  try{await db.from('credit_reviews').insert({customer_id:editCustomerId,action:action||status,reason:reason||null,by:upd.credit_reviewed_by});}catch(e){}
+  return true;
+}
+async function cdReview(status){
+  if(!cdIsAdmin()){toast('เฉพาะ admin เท่านั้น');return;}
+  const c=customers.find(x=>x.id===editCustomerId);if(!c)return;
+  const entity=cdEntity();
+  let reason=null;
+  if(status==='approved'){
+    if(!cdComplete(c,cdDocs,entity)){toast('เอกสารยังไม่ครบ อนุมัติไม่ได้');return;}
+    if(!confirm('อนุมัติให้ '+c.code+' '+c.name+' ใช้ระบบเครดิต?'))return;
+  }else{
+    reason=prompt('เหตุผลที่ตีกลับเอกสาร (จะแจ้งเข้ากลุ่มรีพอร์ต):','');
+    if(reason===null)return;reason=reason.trim()||'เอกสารไม่ผ่าน';
+  }
+  if(!(await cdSetStatus(status,reason,status)))return;
+  // แจ้งกลุ่มรีพอร์ต
+  const gid=appSettings.line_report_group;
+  const who=currentUser.display_name||currentUser.username;
+  const missing=CD_TYPES[entity].filter(t=>{const d=cdDocs.find(x=>x.doc_type===t.k);return !(d&&d.file_path&&(entity!=='company'||d.stamped));}).map(t=>t.l);
+  const txt=status==='approved'
+    ?'✅ อนุมัติเครดิตแล้ว\nร้าน '+c.code+' '+c.name+(c.branch_name?' • '+c.branch_name:'')+(c.sale_name?' · เซลล์ '+c.sale_name:'')+'\nประเภท '+(entity==='company'?'บริษัท':'บุคคลธรรมดา')+' · '+(document.getElementById('c-credit-mode').value==='schedule'?'เครดิตตามรอบวางบิล':'เครดิต '+(document.getElementById('c-credit-days').value||'-')+' วัน')+'\nโดย '+who
+    :'❌ ตีกลับเอกสารเครดิต\nร้าน '+c.code+' '+c.name+(c.branch_name?' • '+c.branch_name:'')+(c.sale_name?' · เซลล์ '+c.sale_name:'')+'\nเหตุผล: '+reason+(missing.length?'\nยังขาด: '+missing.join(', '):'')+'\nโดย '+who+'\n\nรบกวนเซลล์ขอเอกสารจากลูกค้าใหม่แล้วอัปโหลดในหลังบ้านค่ะ';
+  if(gid){const r=await notifyCustomer(gid,txt);toast((status==='approved'?'อนุมัติแล้ว':'ตีกลับแล้ว')+(r.ok?' · แจ้งกลุ่มรีพอร์ตแล้ว':' · แจ้งกลุ่มรีพอร์ตไม่สำเร็จ'));}
+  else toast((status==='approved'?'อนุมัติแล้ว':'ตีกลับแล้ว')+' (ยังไม่ได้ตั้งกลุ่มรีพอร์ต จึงไม่ได้แจ้งไลน์)');
+  cdRender();renderCustomers();
 }
 function csDueModeUI(){
   const mode=document.getElementById('cs-due-mode').value;
@@ -4788,6 +4917,8 @@ function setPayTerms(c){
   document.getElementById('c-paytype').value=(c&&c.pay_type)||'prepay';
   document.getElementById('c-credit-mode').value=(c&&c.credit_mode)||'days';
   document.getElementById('c-credit-days').value=(c&&c.credit_days)||'';
+  document.getElementById('c-credit-entity').value=(c&&c.credit_entity==='company')?'company':'person';
+  cdDocs=[];if(c&&c.pay_type==='credit')cdLoad();
   const rows=Array.isArray(c&&c.credit_schedule)?c.credit_schedule:[];
   csRender(rows);
   if(rows.length&&rows[0].bill){
@@ -4801,10 +4932,10 @@ function setPayTerms(c){
 function readPayTerms(rec){
   const t=document.getElementById('c-paytype').value;
   rec.pay_type=t;
-  rec.credit_mode=null;rec.credit_days=null;rec.credit_schedule=null;
+  rec.credit_mode=null;rec.credit_days=null;rec.credit_schedule=null;rec.credit_entity=null;
   if(t!=='credit')return null;
   const m=document.getElementById('c-credit-mode').value;
-  rec.credit_mode=m;
+  rec.credit_mode=m;rec.credit_entity=cdEntity();
   if(m==='days'){
     const d=Number(document.getElementById('c-credit-days').value);
     if(!d||d<1)return 'ใส่จำนวนวันเครดิตก่อน (อย่างน้อย 1 วัน)';
@@ -5011,6 +5142,13 @@ async function saveCustomer(){
   if(miss.length){toast('⚠️ กรอกข้อมูลออกบิล/จัดส่งให้ครบก่อน — ยังว่าง '+miss.length+' ช่อง: '+miss.slice(0,4).map(f=>f.label).join(', ')+(miss.length>4?' …':''));return;}
   const payErr=readPayTerms(rec);
   if(payErr){toast(payErr);return;}
+  // เครดิต: เพิ่มใหม่ หรือเงื่อนไขเปลี่ยน → กลับเป็น "รอ admin อนุมัติ" เสมอ (แม้ admin แก้เองก็ต้องกดอนุมัติแยก)
+  if(rec.pay_type==='credit'){
+    const cur=editCustomerId?customers.find(x=>x.id===editCustomerId):null;
+    const same=cur&&cur.pay_type==='credit'&&cur.credit_mode===rec.credit_mode&&(cur.credit_entity||'person')===rec.credit_entity
+      &&Number(cur.credit_days||0)===Number(rec.credit_days||0)&&JSON.stringify(cur.credit_schedule||null)===JSON.stringify(rec.credit_schedule||null);
+    if(!same){rec.credit_status='pending';rec.credit_reviewed_by=null;rec.credit_reviewed_at=null;rec.credit_reject_reason=null;}
+  }else{rec.credit_status=null;rec.credit_reviewed_by=null;rec.credit_reviewed_at=null;rec.credit_reject_reason=null;}
   if(phone&&!/^[0-9]{10}$/.test(phone)){toast('เบอร์โทรออกบิลต้องเป็นตัวเลข 10 หลักเท่านั้น');return;}
   if(shipPhone&&!/^[0-9]{10}$/.test(shipPhone)){toast('เบอร์ผู้รับของต้องเป็นตัวเลข 10 หลักเท่านั้น');return;}
   if(rec.tax_id&&!/^[0-9]{13}$/.test(rec.tax_id)){toast('เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก');return;}
@@ -5066,6 +5204,14 @@ async function saveCustomer(){
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
   toast((editCustomerId?'อัพเดตลูกค้าแล้ว'+(rec.code?' · รหัสใหม่ '+rec.code:''):'เพิ่มลูกค้า '+rec.code+' แล้ว')+(ml?' · 📍 ปักหมุดตามลิงก์แผนที่แล้ว':''));
   if(rec.line_group_id&&LG_RE.test(rec.line_group_id)&&!lgName(rec.line_group_id))refreshLineGroupNames(null,[rec.line_group_id],{silent:true});
+  if(rec.pay_type==='credit'&&rec.credit_status==='pending'){
+    const gid=appSettings.line_report_group;const who=currentUser?(currentUser.display_name||currentUser.username):'';
+    if(gid)notifyCustomer(gid,'📝 ขอใช้เครดิต — รอ admin อนุมัติ\nร้าน '+(rec.code||'')+' '+rec.name+(rec.sale_name?' · เซลล์ '+rec.sale_name:'')+'\n'+(rec.credit_mode==='schedule'?'เครดิตตามรอบวางบิล':'เครดิต '+rec.credit_days+' วัน')+' · '+(rec.credit_entity==='company'?'บริษัท':'บุคคลธรรมดา')+'\nโดย '+who+'\nอัปโหลดเอกสารในหลังบ้านแล้ว admin กดอนุมัติได้เลย').catch(()=>{});
+    if(!editCustomerId){   // ลูกค้าใหม่ที่เป็นเครดิต → หลังบันทึก เปิดหน้าแก้ไขต่อให้อัปโหลดเอกสารเลย
+      const {data:nc}=await db.from('customers').select('id').eq('code',rec.code).maybeSingle();
+      await loadCustomers();if(nc&&nc.id){editCustomer(nc.id);toast('บันทึกแล้ว — อัปโหลดเอกสารขอใช้เครดิตต่อได้เลย');return;}
+    }
+  }
   closeCustomerForm(); loadCustomers();
 }
 async function deleteCustomer(id){
@@ -13213,6 +13359,7 @@ async function startApp(){
 //    - ลูกค้าจ่ายก่อนส่ง / จ่ายหลังส่ง: ทุกบิลค้าง → ร้าน · ประเภท · กี่บิล · ยอดรวม
 //    - ลูกค้าเครดิต: เฉพาะที่เลยวันครบกำหนดมาแล้ว 3 วันขึ้นไป (ตามตารางรอบวางบิล หรือ วันบิล + จำนวนวันเครดิต)
 //  ร้านที่ติ๊ก "ซ่อนราคาจากหน้าสั่งของ" (hide_prices) → ใบวางบิล/ทวงสลิป ไม่ส่งเข้ากลุ่มลูกค้า ส่งเข้ากลุ่มรีพอร์ตแทน
+//  ใบวางบิล/ทวงสลิป ทำเฉพาะลูกค้าเครดิตที่ admin อนุมัติแล้ว (customers.credit_status = 'approved')
 // ============================================================
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { initWasm, Resvg } from "https://esm.sh/@resvg/resvg-wasm@2.6.2";
@@ -13464,7 +13611,7 @@ Deno.serve(async (req) => {
       if (out.report.ok && !reportOnly) await db.from("settings").upsert({ key: "unpaid_report_last", value: today }, { onConflict: "key" });
       if (reportOnly) return json(out);
     }
-    let cq = db.from("customers").select("id,code,name,branch_name,contact_name,phone,billing_address,line_group_id,credit_mode,credit_schedule,active,sale_name,hide_prices").eq("pay_type", "credit").eq("credit_mode", "schedule");
+    let cq = db.from("customers").select("id,code,name,branch_name,contact_name,phone,billing_address,line_group_id,credit_mode,credit_schedule,active,sale_name,hide_prices").eq("pay_type", "credit").eq("credit_mode", "schedule").eq("credit_status", "approved");   // เฉพาะเครดิตที่ admin อนุมัติแล้ว
     if (onlyCust) cq = cq.eq("id", onlyCust);
     const { data: custs, error: ce } = await cq;
     if (ce) throw new Error("อ่านลูกค้าไม่ได้: " + ce.message);

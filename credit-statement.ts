@@ -24,6 +24,7 @@
 //    - ลูกค้าจ่ายก่อนส่ง / จ่ายหลังส่ง: ทุกบิลค้าง → ร้าน · ประเภท · กี่บิล · ยอดรวม
 //    - ลูกค้าเครดิต: เฉพาะที่เลยวันครบกำหนดมาแล้ว 3 วันขึ้นไป (ตามตารางรอบวางบิล หรือ วันบิล + จำนวนวันเครดิต)
 //  ร้านที่ติ๊ก "ซ่อนราคาจากหน้าสั่งของ" (hide_prices) → ใบวางบิล/ทวงสลิป ไม่ส่งเข้ากลุ่มลูกค้า ส่งเข้ากลุ่มรีพอร์ตแทน
+//  ใบวางบิล/ทวงสลิป ทำเฉพาะลูกค้าเครดิตที่ admin อนุมัติแล้ว (customers.credit_status = 'approved')
 // ============================================================
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { initWasm, Resvg } from "https://esm.sh/@resvg/resvg-wasm@2.6.2";
@@ -275,7 +276,7 @@ Deno.serve(async (req) => {
       if (out.report.ok && !reportOnly) await db.from("settings").upsert({ key: "unpaid_report_last", value: today }, { onConflict: "key" });
       if (reportOnly) return json(out);
     }
-    let cq = db.from("customers").select("id,code,name,branch_name,contact_name,phone,billing_address,line_group_id,credit_mode,credit_schedule,active,sale_name,hide_prices").eq("pay_type", "credit").eq("credit_mode", "schedule");
+    let cq = db.from("customers").select("id,code,name,branch_name,contact_name,phone,billing_address,line_group_id,credit_mode,credit_schedule,active,sale_name,hide_prices").eq("pay_type", "credit").eq("credit_mode", "schedule").eq("credit_status", "approved");   // เฉพาะเครดิตที่ admin อนุมัติแล้ว
     if (onlyCust) cq = cq.eq("id", onlyCust);
     const { data: custs, error: ce } = await cq;
     if (ce) throw new Error("อ่านลูกค้าไม่ได้: " + ce.message);
