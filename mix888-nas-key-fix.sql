@@ -153,35 +153,53 @@ begin
 end $$;
 
 -- 2b) กู้บิลจาก NAS กลับเข้าระบบ — โปรแกรม NAS (--restore-bill) อัปโหลดรูปบิล/สลิปกลับ bucket แล้วเรียกตัวนี้ใส่ลิงก์คืน
---     สลิป: จำนวนเท่ากับครั้งที่ชำระ → ใส่ใบละครั้งตามลำดับ · ไม่เท่า → ใส่ทั้งหมดไว้ที่ครั้งแรก · ไม่มีประวัติชำระ → ใส่แค่ช่องสลิปบนบิล
-create or replace function nas_restore_bill(p_key text, p_bill_no text, p_image_url text, p_slips jsonb)
+--     กู้ได้เฉพาะบิลที่โปรแกรม NAS เคยเก็บแทน Supabase (archived_at) — บิลอื่นใช้ 📎 แนบสลิปแทน ในหลังบ้านทีละใบ
+--     p_slips แบบใหม่ = [[สลิปของการชำระครั้งที่ 1], [ครั้งที่ 2], …] ตามที่จดไว้ตอนเก็บ → คืนตรงครั้งเดิมทุกใบ
+--     p_slips แบบเก่า = [สลิป, …] (บิลที่เก็บก่อนมีการจด) → จำนวนเท่ากันใบละครั้ง ไม่เท่าใส่ครั้งแรก · ใส่เฉพาะครั้งที่ยังว่าง
+drop function if exists nas_restore_bill(text, text, text, jsonb);
+create or replace function nas_restore_bill(p_key text, p_bill_no text, p_image_url text, p_slips jsonb, p_bill_slip text default null)
 returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
-declare v_id bigint; v_slips jsonb := coalesce(p_slips, '[]'::jsonb); n int := 0; pid bigint; i int := 0; cnt int := 0;
+declare v_id bigint; v_arch timestamptz; v_slips jsonb := coalesce(p_slips, '[]'::jsonb); n int := 0; c int; pid bigint; i int := 0; cnt int := 0; v_layout boolean;
 begin
   perform nas_check_key(p_key);
   if jsonb_typeof(v_slips) <> 'array' then v_slips := '[]'::jsonb; end if;
-  select id into v_id from bills where bill_no = p_bill_no;
+  select id, archived_at into v_id, v_arch from bills where bill_no = p_bill_no;
   if v_id is null then raise exception 'NO_BILL'; end if;
-  update bills
-     set image_url   = coalesce(nullif(p_image_url, ''), image_url),
-         slip_url    = case when jsonb_array_length(v_slips) > 0 then v_slips->>0 else slip_url end,
-         archived_at = null                     -- กลับมามีไฟล์ใน Supabase แล้ว (nas_path คงไว้ — สำเนาบน NAS ยังอยู่)
-   where id = v_id;
+  if v_arch is null then raise exception 'NOT_ARCHIVED'; end if;
+  v_layout := jsonb_array_length(v_slips) > 0 and jsonb_typeof(v_slips->0) = 'array';
   begin
     select count(*) into cnt from payments where bill_id = v_id;
-    if cnt > 0 and jsonb_array_length(v_slips) > 0 then
+    if v_layout then
+      if cnt <> jsonb_array_length(v_slips) then raise exception 'LAYOUT_MISMATCH'; end if;
+      for pid in select id from payments where bill_id = v_id order by id loop
+        update payments set slips = v_slips->i
+         where id = pid and (slips is null or jsonb_typeof(slips) <> 'array' or jsonb_array_length(slips) = 0)
+           and jsonb_array_length(v_slips->i) > 0;
+        get diagnostics c = row_count; n := n + c; i := i + 1;
+      end loop;
+    elsif cnt > 0 and jsonb_array_length(v_slips) > 0 then
       if cnt = jsonb_array_length(v_slips) then
         for pid in select id from payments where bill_id = v_id order by id loop
-          update payments set slips = jsonb_build_array(v_slips->i) where id = pid;
-          i := i + 1; n := n + 1;
+          update payments set slips = jsonb_build_array(v_slips->i)
+           where id = pid and (slips is null or jsonb_typeof(slips) <> 'array' or jsonb_array_length(slips) = 0);
+          get diagnostics c = row_count; n := n + c; i := i + 1;
         end loop;
       else
-        update payments set slips = v_slips where id = (select id from payments where bill_id = v_id order by id limit 1);
-        n := 1;
+        update payments set slips = v_slips
+         where id = (select id from payments where bill_id = v_id order by id limit 1)
+           and (slips is null or jsonb_typeof(slips) <> 'array' or jsonb_array_length(slips) = 0);
+        get diagnostics c = row_count; n := n + c;
       end if;
     end if;
   exception when undefined_table then n := 0;   -- ยังไม่มีตาราง payments ก็ข้าม
   end;
+  update bills
+     set image_url   = coalesce(nullif(p_image_url, ''), image_url),
+         slip_url    = coalesce(nullif(p_bill_slip, ''),
+                                case when not v_layout and jsonb_array_length(v_slips) > 0 then v_slips->>0 end,
+                                slip_url),
+         archived_at = null                     -- กลับมามีไฟล์ใน Supabase แล้ว (nas_path คงไว้ — สำเนาบน NAS ยังอยู่)
+   where id = v_id;
   return jsonb_build_object('bill_id', v_id, 'payments_updated', n);
 end $$;
 

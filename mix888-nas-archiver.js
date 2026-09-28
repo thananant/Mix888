@@ -62,6 +62,7 @@ const ORDER_HISTORY_DAYS     = 730;   // ประวัติสั่งซื
 /* =========================================== */
 
 const fs   = require('fs');
+const crypto = require('crypto');
 const path = require('path');
 // ---- อ่านค่าตั้งค่าจาก archiver.config.json (ถ้ามี) ทับค่าคงที่ด้านบน ----
 const CFG = (() => {
@@ -150,10 +151,18 @@ function removeBillDir(dayDir, b){
   for(const s of ['', ...PAY_SUFFIXES]){
     const p = path.join(dayDir, base + s);
     if(fs.existsSync(p)){
+      // มีสลิป หรือเคยถูกเก็บแทน Supabase แล้ว (ต้นฉบับอาจไม่มีในระบบแล้ว) = สำเนาเดียวที่เหลือ → ห้ามลบ เก็บไว้เป็น _ยกเลิก
+      let keepIt = false;
+      try{ keepIt = fs.readdirSync(p).some(f => f.includes('_สลิป')) || !!readManifest(p).__pruned__; }catch(e){ keepIt = true; }
       try{
-        fs.rmSync(p, {recursive: true, force: true});
-        log('   ลบโฟลเดอร์บิลยกเลิก ' + base + s);
-      }catch(e){ log('  [!] ลบโฟลเดอร์ ' + base + s + ' ไม่ได้ — ' + e.message); }
+        if(keepIt){
+          const dst = path.join(dayDir, base + '_ยกเลิก');
+          if(!fs.existsSync(dst)){ fs.renameSync(p, dst); log('   บิลยกเลิก ' + base + ' มีสลิป/เป็นสำเนาเดียว — ไม่ลบ ย้ายเป็น ' + base + '_ยกเลิก'); }
+        }else{
+          fs.rmSync(p, {recursive: true, force: true});
+          log('   ลบโฟลเดอร์บิลยกเลิก ' + base + s);
+        }
+      }catch(e){ log('  [!] จัดการโฟลเดอร์บิลยกเลิก ' + base + s + ' ไม่ได้ — ' + e.message); }
     }
   }
 }
@@ -211,6 +220,8 @@ async function download(url, dest){
 const ISSUES = new Map();      // url → {kind, ref, url, reason, detail}
 const OK_URLS = new Set();     // ไฟล์ที่รอบนี้สำรองได้ (ปิดเรื่องเก่าที่เคยพลาด)
 const RESTORED = [];           // กู้จาก NAS กลับขึ้น Supabase อัตโนมัติรอบนี้
+const FULL_KINDS = new Set();  // ประเภทไฟล์ที่รอบนี้ไล่ตรวจครบทุกรายการ (เรื่องเก่าที่ไม่เจอแล้ว = ปิด เช่น เปลี่ยนรูปใหม่แทนแล้ว)
+const RESTORE_MAP = new Map(); // ลิงก์ที่กำลังกู้ → Promise<ลิงก์ใหม่> (สลิปโอนรวมหลายบิล กู้ครั้งเดียว)
 const isGone = e => !!e && (e.status === 400 || e.status === 404);
 function noteIssue(kind, ref, url, err){
   if(!url) return;
@@ -224,6 +235,8 @@ function issueText(list, open){
     const what = (KIND_TH[x.kind] || x.kind) + (x.ref ? ' ' + x.ref : '');
     L.push('• ' + what + ' — ' + (x.reason === 'gone'
       ? 'ไฟล์ไม่มีแล้วทั้งใน Supabase และ NAS' + (x.kind === 'slip' ? ' → ขอสลิปจากแชทไลน์ร้าน แล้วกด \u{1F4CE} แนบสลิปแทน ในประวัติการชำระ' : x.kind === 'bill' ? ' → กดสร้างรูปบิลใหม่ในหลังบ้าน' : '')
+      : x.reason === 'nas_unverified'
+      ? 'ไฟล์ในระบบหาย · ' + (x.detail || 'NAS มีสำเนา') + ' (ยืนยันไม่ได้ว่าใบเดียวกัน) → เปิดดูภาพ ถ้าใช่ กด \u{1F4CE} แนบสลิปแทน'
       : 'โหลดไม่ได้ติดกัน ' + x.fail_count + ' รอบ (' + (x.detail || '') + ')'));
   });
   if(list.length > 15) L.push('…และอีก ' + (list.length - 15) + ' ไฟล์');
@@ -246,8 +259,12 @@ async function reportIssues(fullKinds){
     if(items.length) log('(ทดลอง) สำรองไม่ได้ ' + items.length + ' ไฟล์: ' + items.slice(0, 5).map(x => (KIND_TH[x.kind] || x.kind) + ' ' + x.ref + ' [' + x.reason + ']').join(', ') + (items.length > 5 ? ' …' : ''));
     return;
   }
+  const stp = readState();
+  if(Array.isArray(stp.pendingConfirm) && stp.pendingConfirm.length){        // รอบก่อนส่งไลน์ได้แต่ยืนยันไม่ทัน → ยืนยันก่อน
+    try{ await rpc('nas_notify_result', {p_ids: stp.pendingConfirm, p_ok: true}); delete stp.pendingConfirm; writeState(stp); }catch(e){}
+  }
   let res;
-  try{ res = await rpc('nas_report_issues', {p_items: items, p_ok_urls: [...OK_URLS], p_full_kinds: fullKinds || []}); }
+  try{ res = await rpc('nas_report_issues', {p_items: items, p_ok_urls: [...OK_URLS].filter(u => !ISSUES.has(u)), p_full_kinds: fullKinds || []}); }
   catch(e){
     log('[!] ส่งรายการไฟล์ที่สำรองไม่ได้เข้า Supabase ไม่ได้: ' + e.message + (/404|PGRST202/.test(e.message) ? ' (รัน mix888-nas-key-fix.sql ฉบับล่าสุด)' : ''));
     items.forEach(x => log('  [สำรองไม่ได้] ' + (KIND_TH[x.kind] || x.kind) + ' ' + x.ref + ' — ' + x.reason + ' ' + x.detail));
@@ -261,9 +278,17 @@ async function reportIssues(fullKinds){
   if(!text) return;
   const gid = res.report_group;
   const ok = gid ? await linePush(gid, text) : false;
-  if(list.length){ try{ await rpc('nas_notify_result', {p_ids: list.map(x => x.id), p_ok: ok}); }catch(e){} }
+  if(list.length){
+    let confirmed = false;
+    for(let k = 0; k < 3 && !confirmed; k++){
+      try{ await rpc('nas_notify_result', {p_ids: list.map(x => x.id), p_ok: ok}); confirmed = true; }
+      catch(e){ await new Promise(z => setTimeout(z, 2000 * (k + 1))); }
+    }
+    if(!confirmed && ok){ const st2 = readState(); st2.pendingConfirm = [...new Set([...(st2.pendingConfirm || []), ...list.map(x => x.id)])]; writeState(st2); log('[!] ส่งไลน์แล้วแต่บันทึกยืนยันไม่ได้ — จดไว้ยืนยันรอบหน้า (กันแจ้งซ้ำ)'); }
+  }
   log(ok ? '[แจ้งไลน์] ส่งเข้ากลุ่มรีพอร์ตแล้ว'
-         : '[!] ส่งไลน์จาก NAS ไม่ได้' + (gid ? '' : ' (ยังไม่ได้ตั้งกลุ่มรีพอร์ตในหลังบ้าน)') + ' — หลังบ้านที่เปิดอยู่จะส่งแทน · ข้อความ:\n' + text);
+     : !gid ? '[!] ยังไม่ได้ตั้งกลุ่มรีพอร์ตในหลังบ้าน (ผู้ใช้ระบบ → ตั้งค่า) — ไม่ได้แจ้งไลน์ · ดูรายการได้ที่หลังบ้าน บัญชี → ตรวจสลิป/ไฟล์หาย · ข้อความ:\n' + text
+     : '[!] ส่งไลน์จาก NAS ไม่ได้' + (list.length ? ' — หลังบ้านที่เปิดอยู่จะส่งรายการไฟล์ที่สำรองไม่ได้แทน' : '') + (RESTORED.length ? ' (แจ้งกู้คืนอัตโนมัติไม่ได้ส่ง ดูใน log นี้)' : '') + ' · ข้อความ:\n' + text);
 }
 
 /* ================= ข้อมูลลูกค้าเครดิต + ใบวางบิล ================= */
@@ -382,6 +407,7 @@ async function syncCustomers(ROOT){
   const base = path.join(ROOT, CUST_DIR);
   fs.mkdirSync(base, {recursive: true});
   const D = await loadData();
+  if(D._via === 'rpc') FULL_KINDS.add('doc');
   const custs = [...(D.customers || [])].sort((a, b) => String(a.code || '').localeCompare(String(b.code || '')));
   const docs  = D.credit_docs || [], prods = D.products || [], cps = D.customer_prices || [];
   const plog  = [...(D.price_log || [])].sort((a, b) => a.id - b.id);
@@ -459,6 +485,7 @@ async function syncCustomers(ROOT){
 async function syncStatements(ROOT){
   let saved = 0, skipped = 0, failed = 0;
   const D = await loadData();
+  if(D._via === 'rpc') FULL_KINDS.add('statement');
   const codeOf = {}; (D.customers || []).forEach(c => codeOf[c.id] = c.code);
   const rows = (D.credit_statements || []).filter(r => r.kind === 'statement' && r.image_url).map(r => Object.assign({}, r, {customers: {code: codeOf[r.customer_id]}}));
   if(!rows.length) return {saved, skipped, failed};
@@ -562,6 +589,7 @@ function nasFileFor(dir, m, url, name){
 }
 function writeFileAtomic(dest, buf){ const tmp = dest + '.part'; fs.writeFileSync(tmp, buf); fs.renameSync(tmp, dest); }
 // ไฟล์บน NAS เป็น "ต้นฉบับที่โหลดค้างครึ่งทาง" (ไบต์ต้นตรงกันทั้งหมด) ไหม — ถ้าใช่ เขียนทับได้ ถ้าไม่ใช่ = สลิปอีกใบ ห้ามทับ
+function md5Of(file){ try{ return crypto.createHash('md5').update(fs.readFileSync(file)).digest('hex'); }catch(e){ return ''; } }
 function isTruncatedOf(nasBuf, remote){ return nasBuf.length < remote.length && remote.subarray(0, nasBuf.length).equals(nasBuf); }
 // ชื่อตรงแต่เนื้อหาไม่ตรง: ใช่ไฟล์ของลิงก์นี้ (ยืนยันแล้ว/โหลดค้าง) → เขียนทับ · เป็นสลิปอีกใบ → เก็บเป็นชื่อใหม่ ไม่ทับ
 function storeMismatch(dir, man, url, name0, f, remote){
@@ -583,10 +611,14 @@ async function pruneBills(ROOT){
   const keep = reason => { kept++; why[reason] = (why[reason] || 0) + 1; };
   const since = new Date(Date.now() - CFG.PRUNE_DAYS_BACK * 24 * 3600 * 1000).toISOString();
   const cutoff = Date.now() - CFG.PRUNE_PAID_AFTER_DAYS * 24 * 3600 * 1000;
+  if(!DRY_RUN) try{                                                  // (โหมดทดลองไม่เรียกฟังก์ชันที่เขียนข้อมูลเลย)
+    const probe = await rpc('nas_mark_pruned', {p_bill_id: -1, p_nas_path: ''});   // บิล -1 ไม่มีจริง — ไม่แตะข้อมูล แค่ดูรูปแบบคำตอบ
+    if(!probe || !Array.isArray(probe.safe)){ log('[!] ฐานข้อมูลยังเป็น nas_mark_pruned รุ่นเก่า — รอบนี้ไม่ลบอะไรใน Supabase (รัน mix888-nas-key-fix.sql ฉบับล่าสุด)'); return {pruned}; }
+  }catch(e){ log('[!] ตรวจฟังก์ชัน nas_mark_pruned ไม่ได้ — รอบนี้ไม่ลบอะไร: ' + e.message); return {pruned}; }
   let bills = [];
   try{ bills = await rpc('nas_export_bills', {p_since: since}); }catch(e){ log('[!] อ่านบิลเพื่อลบไฟล์ไม่ได้: ' + e.message); return {pruned}; }
   for(const b of (Array.isArray(bills) ? bills : [])){
-    if((b.ship_status || 'pending') === 'cancelled' || b.payment_status !== 'paid') continue;
+    if(b.ship_status !== 'shipped' || b.payment_status !== 'paid') continue;   // ส่งของแล้ว + จ่ายครบเท่านั้น (ยังรอส่ง = อาจถูกยกเลิก/แก้)
     if(!b.paid_at || new Date(b.paid_at).getTime() > cutoff) continue;
     const files = CFG.KEEP_A4_PAGES ? billFiles(b) : billFiles(b).concat((Array.isArray(b.page_urls) ? b.page_urls : []).map(u => [u, null, 'page']));
     if(!files.length) continue;                                     // ไม่มีไฟล์ค้างใน Supabase แล้ว
@@ -596,6 +628,7 @@ async function pruneBills(ROOT){
     if(!billDir){ keep('ยังไม่มีโฟลเดอร์บน NAS'); continue; }
     // ทุกไฟล์ (ยกเว้นหน้า A4 ที่ไม่ได้เก็บ — เนื้อหาเดียวกับรูปบิลเต็ม) ต้องมีบน NAS และตรงกับต้นฉบับทุกไบต์
     const man = readManifest(billDir); let dirty = false;
+    if(files.some(([u, n]) => n && !onNas(path.join(billDir, nasFileFor(billDir, man, u, n).name)))){ keep('ไฟล์ยังไม่อยู่บน NAS ครบ'); continue; }
     const names = [];
     let okAll = true, reason = '';
     for(const [u, name0] of files){
@@ -620,7 +653,11 @@ async function pruneBills(ROOT){
     if(!okAll){ keep(reason); continue; }
     const rel = path.relative(ROOT, billDir);
     if(DRY_RUN){ pruned++; tally('ลบไฟล์บิลจ่ายครบออกจาก Supabase', 'pruned'); log('  (ทดลอง) จะลบไฟล์ใน Supabase ของบิล ' + b.bill_no + ' (' + files.length + ' ไฟล์ ตรงกับสำเนาบน NAS ทุกไบต์ · ' + rel + ')'); continue; }
-    man.__pruned__ = names; writeManifest(billDir, man);              // จำว่าตอนลบ บิลนี้มีไฟล์ไหนบ้าง (ใช้ตอน --restore-bill)
+    const nameOf = u => (u && typeof man[u] === 'string') ? man[u] : null;
+    man.__pruned__ = names;                                           // จำว่าตอนลบ บิลนี้มีไฟล์ไหนบ้าง และสลิปไหนเป็นของการชำระครั้งไหน (ใช้ตอน --restore-bill)
+    man.__pruned_layout__ = {image: nameOf(b.image_url), slip_url: nameOf(b.slip_url),
+      payments: (Array.isArray(b.payments) ? b.payments : []).map(p => (Array.isArray(p.slips) ? p.slips : []).map(nameOf).filter(Boolean))};
+    writeManifest(billDir, man);
     // ลำดับสำคัญ: บันทึกในฐานข้อมูลก่อน (ล้างลิงก์รูป + จดโฟลเดอร์ NAS) แล้วค่อยลบไฟล์
     // ถ้าบันทึกไม่ได้ (รหัสผิด/เน็ตหลุด) = ไม่ลบอะไรเลย — ไม่งั้นจะเกิด "ไฟล์หายแต่ลิงก์ยังอยู่" หลังบ้านเปิดสลิปไม่ได้ (เคยเกิดแล้ว)
     let res;
@@ -678,28 +715,60 @@ async function verifyBackups(ROOT){
         if(h.ok){
           noteOk(url);
           const len = Number(h.headers.get('content-length') || 0), size = fs.statSync(dest).size;
-          if(len > 0 && len === size){ if(!f.known){ man[url] = f.name; dirty = true; } }       // ขนาดตรง = ใบเดียวกัน (ยืนยันในแผนผัง)
-          else if(len > 0){                                                                     // ขนาดไม่ตรง → โหลดต้นฉบับมาดูว่าโหลดค้าง หรือเป็นสลิปอีกใบ
+          let same;
+          if(f.known) same = !(len > 0 && len !== size);                                  // ยืนยันแล้ว: เช็คแค่ขนาด (ไม่ต้องอ่านไฟล์ทุกวัน)
+          else{
+            const etag = String(h.headers.get('etag') || '').replace(/^W\//, '').replace(/"/g, '').toLowerCase();
+            same = /^[0-9a-f]{32}$/.test(etag) ? md5Of(dest) === etag : false;            // ยังไม่ยืนยัน: ลายนิ้วมือ (ETag = MD5) ต้องตรง · ไม่มี = เทียบทุกไบต์ด้านล่าง
+          }
+          if(same){ if(!f.known){ man[url] = f.name; dirty = true; } }
+          else{
+            // ลายนิ้วมือไม่ตรง / ยังไม่เคยยืนยัน → โหลดต้นฉบับมาเทียบทุกไบต์ (ไฟล์ของลิงก์นี้ที่ค้าง = เขียนทับ · สลิปอีกใบ = เก็บชื่อใหม่)
             try{
-              const w = storeMismatch(billDir, man, url, name0, f, await fetchBuf(url)); dirty = true; st.refreshed++;
-              log(w.overwrote ? '  [ซ่อม] สำเนาไม่ครบ โหลดใหม่: ' + b.bill_no + ' ' + w.name
-                              : '  [เก็บเพิ่ม] ' + b.bill_no + ' ' + w.name + ' (ชื่อเดิมเป็นสลิปอีกใบ ไม่เขียนทับ)');
+              const remote = await fetchBuf(url);
+              if(remote.equals(fs.readFileSync(dest))){ if(!f.known){ man[url] = f.name; dirty = true; } }
+              else{
+                const w = storeMismatch(billDir, man, url, name0, f, remote); dirty = true; st.refreshed++;
+                log(w.overwrote ? '  [ซ่อม] สำเนาไม่ครบ โหลดใหม่: ' + b.bill_no + ' ' + w.name
+                                : '  [เก็บเพิ่ม] ' + b.bill_no + ' ' + w.name + ' (ชื่อเดิมเป็นสลิปอีกใบ ไม่เขียนทับ)');
+              }
             }catch(e){}
           }
           continue;
         }
         if(h.status !== 404 && h.status !== 400) continue;
+        if(!f.known){
+          // ไฟล์เก็บก่อนมีแผนผัง ยืนยันไม่ได้ว่าเป็นใบเดียวกัน (ชื่อตามลำดับอาจเลื่อน) → ไม่กู้อัตโนมัติ ให้คนเปิดดูภาพก่อน
+          const rel = path.relative(ROOT, dest);
+          ISSUES.set(url, {kind, ref: b.bill_no, url, reason: 'nas_unverified', detail: ('NAS มีไฟล์ ' + rel).slice(0, 200)});
+          log('  [ตรวจเอง] ' + b.bill_no + ' ' + f.name + ' — ไฟล์ในระบบหาย · NAS มีไฟล์ชื่อตรงแต่ยืนยันไม่ได้ว่าใบเดียวกัน: ' + rel);
+          continue;
+        }
         // ในระบบหาย แต่ NAS มี → กู้กลับ
         if(DRY_RUN){ st.restored++; log('  (ทดลอง) จะกู้จาก NAS กลับขึ้นระบบ: ' + b.bill_no + ' ' + f.name); continue; }
         try{
-          const bucket = bucketOf(url) || (kind === 'slip' ? 'slips' : 'bills');
-          const prefix = kind === 'slip' ? 'slip_' : 'bill_';
-          const nu = await uploadObject(bucket, prefix + safeName(b.bill_no) + '_' + Date.now() + '-' + rndTag(10) + path.extname(f.name).toLowerCase(), dest);
-          const n = await rpc('nas_relink', {p_old: url, p_new: nu});
-          delete man[url]; man[nu] = f.name; dirty = true;
-          st.restored++; noteOk(url);
-          RESTORED.push((KIND_TH[kind] || kind) + ' ' + b.bill_no + (f.known ? '' : ' (สำเนาเก่า — เปิดดูภาพยืนยันอีกครั้ง)'));
-          log('  [กู้คืนอัตโนมัติ] ' + b.bill_no + ' ' + f.name + ' — ไฟล์ในระบบหาย ใช้สำเนาจาก NAS แทน (แก้ลิงก์ ' + n + ' จุด)' + (f.known ? '' : ' · ไฟล์เก็บก่อนมีแผนผัง ยืนยันไม่ได้ 100%'));
+          let first = false;
+          if(!RESTORE_MAP.has(url)){
+            first = true;
+            RESTORE_MAP.set(url, (async () => {
+              const bucket = bucketOf(url) || (kind === 'slip' ? 'slips' : 'bills');
+              const prefix = kind === 'slip' ? 'slip_' : 'bill_';
+              const objName = prefix + safeName(b.bill_no) + '_' + Date.now() + '-' + rndTag(10) + path.extname(f.name).toLowerCase();
+              const nu = await uploadObject(bucket, objName, dest);
+              let n = 0;
+              try{ n = await rpc('nas_relink', {p_old: url, p_new: nu}); }
+              catch(e){ try{ await deleteObject(bucket, objName); }catch(x){} throw e; }
+              if(!n){ try{ await deleteObject(bucket, objName); }catch(e){} throw new Error('ไม่มีรายการอ้างลิงก์เดิมแล้ว (แก้ไปก่อนหน้า) — ลบไฟล์ที่เพิ่งอัปทิ้ง'); }
+              return {nu, n};
+            })());
+          }
+          const {nu, n} = await RESTORE_MAP.get(url);                  // สลิปโอนรวม: บิลอื่นรอผลเดียวกัน ไม่อัปซ้ำ
+          delete man[url]; man[nu] = f.name; dirty = true; noteOk(url);
+          if(first){
+            st.restored++;
+            RESTORED.push((KIND_TH[kind] || kind) + ' ' + b.bill_no + (f.known ? '' : ' (สำเนาเก่า — เปิดดูภาพยืนยันอีกครั้ง)'));
+            log('  [กู้คืนอัตโนมัติ] ' + b.bill_no + ' ' + f.name + ' — ไฟล์ในระบบหาย ใช้สำเนาจาก NAS แทน (แก้ลิงก์ ' + n + ' จุด)' + (f.known ? '' : ' · ไฟล์เก็บก่อนมีแผนผัง ยืนยันไม่ได้ 100%'));
+          }
         }catch(e){ log('  [!] กู้ ' + b.bill_no + ' ' + f.name + ' กลับไม่ได้: ' + e.message); }
         continue;
       }
@@ -713,6 +782,30 @@ async function verifyBackups(ROOT){
   return st;
 }
 const STATE_FILE = path.join(__dirname, 'archiver-state.json');
+// ทำงานทีละรอบเท่านั้น: รอบทุกชั่วโมง (--once) กับที่สั่งเอง (--check / --restore-*) ห้ามชนกัน — แผนผังไฟล์/การกู้คืนจะซ้ำซ้อน
+const LOCK_FILE = path.join(__dirname, 'archiver.lock');
+let lockHeld = false;
+function acquireLock(tries){
+  tries = tries || 0;
+  try{
+    const fd = fs.openSync(LOCK_FILE, 'wx');
+    fs.writeSync(fd, JSON.stringify({pid: process.pid, at: Date.now()})); fs.closeSync(fd);
+    lockHeld = true; return true;
+  }catch(e){
+    if(e.code !== 'EEXIST') return true;                           // สร้างไฟล์ล็อกไม่ได้ด้วยเหตุอื่น — ไม่บล็อกการทำงาน
+    let info = {}; try{ info = JSON.parse(fs.readFileSync(LOCK_FILE, 'utf8')); }catch(x){}
+    let alive = false;
+    if(info.pid){ try{ process.kill(info.pid, 0); alive = true; }catch(x){ alive = x.code === 'EPERM'; } }
+    const stale = !info.at || Date.now() - info.at > 6 * 3600 * 1000;
+    if((!alive || stale) && tries < 2){ try{ fs.unlinkSync(LOCK_FILE); }catch(x){} return acquireLock(tries + 1); }
+    log('[ข้าม] มีโปรแกรมอีกรอบกำลังทำงานอยู่ (pid ' + (info.pid || '?') + ' เริ่ม ' + (info.at ? thDateTimeStr(new Date(info.at).toISOString()) : '?') + ') — รอบนี้ไม่ทำอะไร');
+    return false;
+  }
+}
+function releaseLock(){ if(!lockHeld) return; try{ const info = JSON.parse(fs.readFileSync(LOCK_FILE, 'utf8')); if(info.pid === process.pid) fs.unlinkSync(LOCK_FILE); }catch(e){} lockHeld = false; }
+process.on('exit', releaseLock);
+process.on('SIGINT', () => { releaseLock(); process.exit(130); });
+process.on('SIGTERM', () => { releaseLock(); process.exit(143); });
 function readState(){ try{ return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); }catch(e){ return {}; } }
 function writeState(s){ try{ fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 1)); }catch(e){} }
 
@@ -723,6 +816,7 @@ async function syncMedia(ROOT){
   const base = path.join(ROOT, MEDIA_DIR);
   const D = await loadData();
   const canPrune = D._via === 'rpc' && Array.isArray(D.products) && D.products.length > 0;   // รู้รายการสินค้าแน่ ๆ ถึงจะลบอะไรได้
+  if(canPrune) FULL_KINDS.add('product');
   if(!canPrune) log('[!] ยังอ่านรายการสินค้าไม่ได้ (BAD_KEY/0 แถว) — รอบนี้เก็บสื่ออย่างเดียว ไม่ลบอะไรใน Supabase');
   const products = (D.products || []).filter(p => p.image_url);
   const pdir = path.join(base, 'สินค้า'); fs.mkdirSync(pdir, {recursive: true});
@@ -763,6 +857,7 @@ async function syncMedia(ROOT){
 async function syncExpenses(ROOT){
   let saved = 0, skipped = 0, failed = 0;
   const D = await loadData();
+  if(D._via === 'rpc') FULL_KINDS.add('receipt');
   const cats = {}; (D.expense_categories || []).forEach(c => cats[c.id] = c.name);
   const rows = [...(D.petty_cash || [])].sort((a, b) => String(a.spent_at || '').localeCompare(String(b.spent_at || '')));
   if(!rows.length) return {saved, skipped, failed};
@@ -773,14 +868,15 @@ async function syncExpenses(ROOT){
     const dir = path.join(ROOT, EXP_DIR, ym.slice(0, 4), ym);
     const csvPath = path.join(dir, 'รายจ่าย_' + ym + '.csv');
     const monthsAgo = (Number(curYm.slice(0,4)) - Number(ym.slice(0,4))) * 12 + (Number(curYm.slice(5,7)) - Number(ym.slice(5,7)));
-    if(fs.existsSync(csvPath) && monthsAgo > 1){ skipped += list.length; continue; }   // เดือนเก่ากว่า 1 เดือนที่มี CSV แล้ว ไม่ต้องทำซ้ำ
+    const receiptName = r => safeName(String(r.spent_at || '').slice(0, 10) + '_' + (cats[r.category_id] || 'ไม่ระบุหมวด') + '_' + Number(r.amount || 0) + '_' + r.id) + extOf(r.receipt_url);
+    if(fs.existsSync(csvPath) && monthsAgo > 1 && list.every(r => !r.receipt_url || onNas(path.join(dir, receiptName(r))))){ skipped += list.length; continue; }   // เดือนเก่าที่มี CSV และใบเสร็จครบแล้ว ไม่ต้องทำซ้ำ
     fs.mkdirSync(dir, {recursive: true});
     const head = ['วันที่','หมวด','รายละเอียด','ร้านค้า','จำนวนเงิน','วิธีจ่าย','ผู้จ่าย','เลขอ้างอิง','หมายเหตุ','บันทึกโดย','ไฟล์ใบเสร็จ'];
     const lines = [head.map(csvCell).join(',')]; let total = 0;
     for(const r of list){
       let rname = '';
       if(r.receipt_url){
-        rname = safeName(String(r.spent_at || '').slice(0, 10) + '_' + (cats[r.category_id] || 'ไม่ระบุหมวด') + '_' + Number(r.amount || 0) + '_' + r.id) + extOf(r.receipt_url);
+        rname = receiptName(r);
         const dest = path.join(dir, rname);
         if(!fs.existsSync(dest)){
           try{ await download(r.receipt_url, dest); saved++; noteOk(r.receipt_url); tally('ใบเสร็จรายจ่าย', 'new'); }
@@ -916,20 +1012,47 @@ async function restoreBills(billNos){
       slipFiles = files.filter(f => f.startsWith(base + '_สลิป') && IMG.test(f) && !legacy.has(f) && onNas(path.join(dir, f))).sort((a, b) => verOf(a, /_สลิป(\d+)/) - verOf(b, /_สลิป(\d+)/) || a.localeCompare(b));
     }
     if(!billFiles.length && !slipFiles.length){ fail++; log('[!] ' + billNo + ': โฟลเดอร์ ' + path.relative(ROOT, dir) + ' ไม่มีรูปบิล/สลิป'); continue; }
+    const L = man.__pruned_layout__;
+    const useLayout = L && Array.isArray(L.payments);
+    if(DRY_RUN){
+      okN++;
+      log('(ทดลอง) ' + billNo + ': จะอัปโหลดรูปบิล ' + (useLayout ? (L.image ? 1 : 0) : billFiles.length ? 1 : 0) + ' · สลิป '
+          + (useLayout ? [...new Set([].concat(...L.payments, L.slip_url ? [L.slip_url] : []))].length + ' (คืนตรงครั้งที่ชำระเดิม)' : slipFiles.length + ' (บิลเก็บก่อนมีการจด — ใส่ตามจำนวน)') + ' จาก ' + path.relative(ROOT, dir));
+      continue;
+    }
     try{
       const stamp = Date.now();
-      let imageUrl = null; const slips = [];
-      if(billFiles.length){ const f = billFiles[billFiles.length - 1]; imageUrl = await uploadObject('bills', 'bill_' + base + '_' + stamp + '-' + rndTag(10) + path.extname(f).toLowerCase(), path.join(dir, f)); }
-      for(const f of slipFiles) slips.push(await uploadObject('slips', 'slip_' + base + '_' + stamp + '-' + rndTag(10) + path.extname(f).toLowerCase(), path.join(dir, f)));
-      const r = await rpc('nas_restore_bill', {p_bill_no: billNo, p_image_url: imageUrl, p_slips: slips});
+      const up = {};
+      const upl = async n => {                                       // อัปโหลดไฟล์ละครั้ง (สลิปเดียวใช้หลายที่ได้)
+        if(!n || !IMG.test(n) || !onNas(path.join(dir, n))) return null;
+        if(!up[n]){
+          const isSlip = n.startsWith(base + '_สลิป');
+          up[n] = await uploadObject(isSlip ? 'slips' : 'bills', (isSlip ? 'slip_' : 'bill_') + base + '_' + stamp + '-' + rndTag(10) + path.extname(n).toLowerCase(), path.join(dir, n));
+        }
+        return up[n];
+      };
+      let args;
+      if(useLayout){
+        const pays = [];
+        for(const arr of L.payments){ const us = []; for(const n of arr){ const u = await upl(n); if(u) us.push(u); } pays.push(us); }
+        args = {p_bill_no: billNo, p_image_url: await upl(L.image), p_slips: pays, p_bill_slip: await upl(L.slip_url)};
+      }else{
+        const slips = [];
+        for(const n of slipFiles) slips.push(await upl(n));
+        args = {p_bill_no: billNo, p_image_url: billFiles.length ? await upl(billFiles[billFiles.length - 1]) : null, p_slips: slips.filter(Boolean)};
+      }
+      const r = await rpc('nas_restore_bill', args);
       okN++;
-      log('[กู้คืน] ' + billNo + ' — รูปบิล ' + (imageUrl ? 1 : 0) + ' · สลิป ' + slips.length + ' · จาก ' + path.relative(ROOT, dir)
+      log('[กู้คืน] ' + billNo + ' — อัปโหลด ' + Object.keys(up).length + ' ไฟล์ จาก ' + path.relative(ROOT, dir)
+          + (useLayout ? ' (คืนสลิปตรงครั้งที่ชำระเดิม)' : ' (บิลเก็บก่อนมีการจด — ใส่สลิปตามจำนวน เฉพาะครั้งที่ยังว่าง)')
           + (r && r.payments_updated != null ? ' · ใส่สลิปคืนในประวัติชำระ ' + r.payments_updated + ' รายการ' : ''));
     }catch(e){
       fail++;
       log('[!] ' + billNo + ': กู้คืนไม่สำเร็จ — ' + e.message
           + (/HTTP 40[13]/.test(e.message) ? ' (รัน mix888-nas-key-fix.sql ฉบับล่าสุดเพื่อเปิดสิทธิ์อัปโหลด bills/slips หรือยัง?)' : '')
           + (/NO_BILL/.test(e.message) ? ' (ไม่มีบิลเลขนี้ในระบบ)' : '')
+          + (/NOT_ARCHIVED/.test(e.message) ? ' (บิลนี้ไม่ได้ถูกเก็บแทน Supabase — สลิปที่หายให้ใช้ \u{1F4CE} แนบสลิปแทน ในหลังบ้านทีละใบ)' : '')
+          + (/LAYOUT_MISMATCH/.test(e.message) ? ' (จำนวนครั้งที่ชำระเปลี่ยนไปจากตอนเก็บ — แนบสลิปเองในหลังบ้าน)' : '')
           + (/ 404/.test(e.message) && /nas_restore_bill/.test(e.message) ? ' (Supabase ยังไม่มีฟังก์ชัน nas_restore_bill — รัน mix888-nas-key-fix.sql ฉบับล่าสุด)' : ''));
     }
   }
@@ -955,7 +1078,7 @@ async function syncOnce(){
     log('ปลายทาง: ' + ROOT);
     if(!(await preflight())){ running = false; flushLog(); return false; }
     DATA = null;   // โหลดข้อมูลตารางใหม่ทุกรอบ
-    ISSUES.clear(); OK_URLS.clear(); RESTORED.length = 0;
+    ISSUES.clear(); OK_URLS.clear(); RESTORED.length = 0; FULL_KINDS.clear(); RESTORE_MAP.clear();
     const since = new Date(Date.now() - CFG.DAYS_BACK * 24 * 3600 * 1000).toISOString();
     const bills = await fetchBills(since);
     log('พบบิล ' + bills.length + ' ใบ (ย้อนหลัง ' + CFG.DAYS_BACK + ' วัน)');
@@ -1038,7 +1161,7 @@ async function syncOnce(){
       catch(e){ log('[!] ตรวจสำรองเต็มรอบไม่สำเร็จ: ' + (e.message || e) + ' (จะลองใหม่รอบหน้า)'); }
     }
     // รายงานไฟล์ที่สำรองไม่ได้ → Supabase + กลุ่มรีพอร์ต (ไฟล์พวกนี้จะไม่ถูกลบออกจาก Supabase)
-    try{ await reportIssues(fullKinds); }
+    try{ await reportIssues(fullKinds.concat([...FULL_KINDS])); }
     catch(e){ log('[!] รายงานไฟล์ที่สำรองไม่ได้ไม่สำเร็จ: ' + (e.message || e)); }
     try{ await pruneBills(ROOT); }
     catch(e){ log('[!] ลบไฟล์บิลจ่ายครบไม่สำเร็จ: ' + (e.message || e)); }
@@ -1069,6 +1192,7 @@ console.log('  ซิงก์ย้อนหลัง ' + CFG.DAYS_BACK + ' ว
 console.log('  เปิดหน้าต่างนี้ทิ้งไว้ (ย่อได้ อย่าปิด) — ปิดแล้วเปิดใหม่ก็ซิงก์ต่อจากเดิมได้');
 console.log('==========================================================');
 const rbIdx = process.argv.indexOf('--restore-bill');
+if(!acquireLock()){ flushLog(); process.exit(0); }
 if(rbIdx >= 0){
   const list = String(process.argv[rbIdx + 1] || '').split(',').map(s => s.trim()).filter(Boolean);
   if(!list.length){ console.log('ใช้: node mix888-nas-archiver.js --restore-bill IV2609250013   (หลายใบคั่นด้วย , ไม่เว้นวรรค)'); process.exit(1); }
@@ -1079,5 +1203,5 @@ if(rbIdx >= 0){
   syncOnce().then(ok => process.exit(ok ? 0 : 1));   // โหมด Task Scheduler: ทำรอบเดียวแล้วจบ (ล้ม = สถานะผิดปกติ)
 }else{
   syncOnce();
-  setInterval(syncOnce, CFG.EVERY_MIN * 60 * 1000); // โหมดเปิดค้าง: ทำซ้ำเองเรื่อย ๆ
+  setInterval(syncOnce, CFG.EVERY_MIN * 60 * 1000); // โหมดเปิดค้าง: ทำซ้ำเองเรื่อย ๆ (ถือล็อกไว้ตลอด — ห้ามตั้ง Task Scheduler คู่กัน)
 }
