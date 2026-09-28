@@ -1384,6 +1384,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="fbtn" data-f="all" onclick="setFilter('all')">ทั้งหมด</button>
       <button class="fbtn" data-f="slip" onclick="setFilter('slip')">🧾 มีสลิป</button>
       <button class="fbtn" onclick="openSlipAudit()">🕵️ สลิปตกค้าง</button>
+      <button class="fbtn" id="sc-btn" onclick="openSlipCheck()" title="หาสลิป/ไฟล์ที่เปิดไม่ได้ + รายงานจากโปรแกรม NAS ว่าไฟล์ไหนสำรองไม่ได้">🔍 ตรวจสลิป/ไฟล์หาย</button>
       <button class="fbtn" id="ebr-btn" onclick="openEditApprovals()" style="display:none">🛎️ คำขอแก้บิล</button>
       <select id="ac-sale" onchange="renderAccount()" title="กรองตามเซลล์">
         <option value="">เซลล์: ทั้งหมด</option>
@@ -1720,6 +1721,30 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <p class="hint" style="margin:0 0 12px">นี่คือสิ่งที่จะถูกส่งจริงถ้ากดส่งสรุป ตรวจดูให้เรียบร้อยก่อน</p>
     <div id="pv-body"></div>
     <div style="margin-top:12px"><button class="btn-g" onclick="document.getElementById('preview-modal').style.display='none'">ปิด</button></div>
+  </div>
+</div>
+<!-- ตรวจสลิป/ไฟล์หาย: สแกนลิงก์สลิปที่เปิดไม่ได้ + รายงานจากโปรแกรม NAS -->
+<div id="slipcheck-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#fff;border-radius:14px;max-width:900px;width:100%;padding:18px;margin:14px auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h3 style="margin:0;font-size:16px">🔍 ตรวจสลิป/ไฟล์หาย</h3>
+      <button class="btn-g mini" onclick="document.getElementById('slipcheck-modal').style.display='none'">ปิด</button>
+    </div>
+    <div style="background:#fdf6e3;border:1px solid #f0e0b8;border-radius:10px;padding:9px 12px;font-size:12.5px;line-height:1.65;margin:10px 0">
+      ไฟล์ใน Supabase ที่ถูกลบไปแล้ว <b>กู้จาก Supabase ไม่ได้</b> (ไม่มีถังขยะ) — ทางกู้คืนมี 2 ทาง:<br>
+      ① <b>NAS เคยเก็บไว้</b> → โปรแกรม NAS กู้กลับให้เองในรอบตรวจประจำวัน (หรือรัน <code>--check</code> เพื่อตรวจเดี๋ยวนี้)<br>
+      ② <b>NAS ไม่มี</b> → เปิดแชทไลน์ของร้าน เซฟรูปสลิป แล้วกด <b>📎 แนบสลิปแทน</b> — หลักฐานการจ่าย (ยอด · ref · SlipOK) ยังอยู่ในระบบครบ ไม่ต้องกังวลเรื่องยอด
+    </div>
+    <h4 style="margin:12px 0 6px;font-size:14px">📦 รายงานจากโปรแกรม NAS (ไฟล์ที่สำรองไม่ได้ — ยังไม่ถูกลบออกจาก Supabase)</h4>
+    <div id="sc-nas"><div class="empty">กำลังโหลด…</div></div>
+    <h4 style="margin:16px 0 6px;font-size:14px">🔎 สแกนสลิปในระบบตอนนี้</h4>
+    <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="sc-range"><option value="90">ย้อนหลัง 90 วัน</option><option value="365">ย้อนหลัง 1 ปี</option><option value="0">ทั้งหมด</option></select>
+      <button class="btn-p mini" id="sc-scan-btn" onclick="scScan(this)">🔎 สแกน</button>
+      <span id="sc-prog" style="font-size:12.5px;color:var(--muted)"></span>
+      <button class="btn-g mini" id="sc-copy" style="display:none;margin-left:auto" onclick="scCopyMissing()" title="คัดลอกเลขบิลที่สลิปหาย ไว้ใช้กับคำสั่ง --restore-bill">📋 คัดลอกเลขบิลที่หาย</button>
+    </div>
+    <div id="sc-body" style="margin-top:8px"></div>
   </div>
 </div>
 <!-- เช็คสลิปตกค้าง: สลิปที่อยู่ในระบบแต่ยังไม่ถูกใช้ตัดบิล -->
@@ -11011,9 +11036,40 @@ async function phImgErr(img){
   if(r&&r.fixed)return;                                            // ซ่อมได้ → showPayHistory วาดใหม่แล้ว
   d.innerHTML=(r&&r.missing?'🗑 ไฟล์นี้ถูกลบออกจาก Supabase แล้ว (ไม่ใช่แค่ย้ายชื่อ)':'⚠️ เปิดรูปสลิปไม่ได้ (เช็คเน็ต แล้วลองใหม่)')
     +'<div style="color:var(--muted);word-break:break-all">'+esc(p.name||'')+'</div>'
-    +(r&&r.missing?'<div>ถ้าเก็บลง NAS ไว้ กู้กลับได้ด้วยโปรแกรม NAS: <code>--restore-bill '+esc((bills.find(x=>x.id===billId)||{}).bill_no||'')+'</code></div>':'')
+    +(r&&r.missing?'<div>ถ้า NAS เคยเก็บไว้ โปรแกรม NAS จะกู้กลับให้เองในรอบตรวจประจำวัน (หรือรัน <code>--restore-bill '+esc(phBillNo(billId))+'</code>)'
+      +' · ถ้าไม่มี: ขอสลิปจากแชทไลน์ร้าน แล้วกดแนบแทน</div>'
+      +'<button class="btn-s mini" style="margin:4px 0" data-bill="'+billId+'" data-url="'+esc(url)+'" onclick="phAttachReplace(this)">📎 แนบสลิปแทน</button><br>':'')
     +'<a href="javascript:void(0)" onclick="phRepair('+billId+')" style="color:var(--accent)">🔧 ตรวจอีกครั้ง</a>'
     +' · <a href="'+esc(url)+'" target="_blank" rel="noopener" style="color:var(--muted)">เปิดลิงก์เดิม</a>';
+}
+function phBillNo(billId){return (bills.find(x=>x.id===billId)||{}).bill_no||(window._phBill&&window._phBill.id===billId?window._phBill.bill_no:'')||'';}
+/** สลิปเดิมหายถาวร → แนบรูปสลิปใหม่แทน (เช่น เซฟจากแชทไลน์ร้าน) · เปลี่ยนลิงก์ทุกจุดที่อ้างไฟล์เดิม + จดหมายเหตุในประวัติชำระ */
+function phAttachReplace(btn){
+  const billId=Number(btn.dataset.bill), oldUrl=btn.dataset.url;
+  const inp=document.createElement('input');inp.type='file';inp.accept='image/*,application/pdf';
+  inp.onchange=async()=>{
+    const file=inp.files&&inp.files[0];if(!file)return;
+    btn.disabled=true;btn.textContent='กำลังแนบ…';
+    try{
+      const bn=phBillNo(billId)||('bill'+billId);
+      const ext=(file.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'')||'jpg';
+      const path='slip_'+bn+'_'+Date.now()+'-'+rndTag(10)+'.'+ext;
+      const {error:ue}=await db.storage.from('slips').upload(path,file,{upsert:false});
+      if(ue)throw new Error('อัปโหลดไม่สำเร็จ: '+ue.message);
+      const newUrl=db.storage.from('slips').getPublicUrl(path).data.publicUrl;
+      const n=await stgRelink('slips',oldUrl,newUrl);
+      if(!n)throw new Error('ไม่พบรายการที่อ้างไฟล์เดิม (อาจถูกแก้ไปแล้ว) — ปิดแล้วเปิดประวัติการชำระใหม่');
+      const who=currentUser?(currentUser.display_name||currentUser.username):'';
+      const stamp=new Date().toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+      const {data:ps}=await db.from('payments').select('id,note').contains('slips',JSON.stringify([newUrl]));
+      for(const p of (ps||[]))await db.from('payments').update({note:[p.note,'📎 แนบสลิปแทนไฟล์เดิมที่หาย โดย '+who+' '+stamp].filter(Boolean).join(' · ')}).eq('id',p.id);
+      try{await db.rpc('nas_issues_resolve_url',{p_url:oldUrl,p_note:'แนบสลิปแทนจากหลังบ้าน โดย '+who});}catch(e){}
+      toast('📎 แนบสลิปแทนแล้ว — แก้ลิงก์ '+n+' จุด');
+      showPayHistory(billId);
+      if(document.getElementById('slipcheck-modal').style.display==='flex')scRenderResults();
+    }catch(e){toast(e.message||String(e));btn.disabled=false;btn.textContent='📎 แนบสลิปแทน';}
+  };
+  inp.click();
 }
 let phRepairP=null;
 /** ตรวจลิงก์สลิปทุกใบของบิล: ไฟล์ถูกย้ายชื่อ → แก้ลิงก์ในระบบให้ · ไฟล์หายจริง → บอก
@@ -11050,9 +11106,11 @@ async function showPayHistory(billId){
   document.getElementById('payhist-modal').style.display='flex';
   const [{data,error},{data:bx}]=await Promise.all([
     db.from('payments').select('*').eq('bill_id',billId).order('created_at',{ascending:true}),
-    db.from('bills').select('id,total,archived_at,nas_path').eq('id',billId).maybeSingle()]);
+    db.from('bills').select('id,bill_no,total,archived_at,nas_path,customers(name)').eq('id',billId).maybeSingle()]);
   if(error){box.innerHTML='<div class="empty">โหลดไม่ได้: '+esc(error.message)+' (รัน payments.sql หรือยัง?)</div>';return;}
   const bi=bx||{}, archived=!!bi.archived_at;
+  window._phBill={id:billId,bill_no:b.bill_no||bi.bill_no||''};
+  if(!b.bill_no&&bi.bill_no)document.getElementById('ph-title').textContent=bi.bill_no+' · '+((bi.customers&&bi.customers.name)||'');
   const rows=data||[];
   const paid=rows.reduce((s,r)=>s+Number(r.amount||0),0);
   const left=Number(b.total||bi.total||0)-paid;
@@ -11062,7 +11120,7 @@ async function showPayHistory(billId){
     +'<div style="flex:1;min-width:110px;border:1px solid var(--line,#eee);border-left:4px solid '+(left>0.009?'#b52020':'#159b78')+';border-radius:10px;padding:8px 10px"><div style="font-size:11.5px;color:var(--muted)">คงค้าง</div><div style="font-size:16px;font-weight:700;color:'+(left>0.009?'#b52020':'#159b78')+'">'+fmt(Math.max(0,left))+'</div></div></div>';
   if(archived)h+='<div style="background:#fdf6e3;border:1px solid #f0e0b8;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:12.5px">'
     +'🗄️ บิลนี้เก็บลง NAS แล้ว และลบรูปบิล/สลิปออกจาก Supabase เพื่อประหยัดพื้นที่ — ดูไฟล์ได้ที่ NAS โฟลเดอร์ <b>'+esc(bi.nas_path||'(ไม่ระบุ)')+'</b>'
-    +'<div style="color:var(--muted)">อยากให้กลับมาดูในระบบ: รันโปรแกรม NAS ด้วย <code>--restore-bill '+esc(b.bill_no||'')+'</code></div></div>';
+    +'<div style="color:var(--muted)">อยากให้กลับมาดูในระบบ: รันโปรแกรม NAS ด้วย <code>--restore-bill '+esc(b.bill_no||bi.bill_no||'')+'</code></div></div>';
   if(!rows.length)h+='<div class="empty">ยังไม่มีประวัติการชำระ</div>';
   else h+=rows.map((r,i)=>{
     const d=new Date(r.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'});
@@ -11079,6 +11137,122 @@ async function showPayHistory(billId){
       +'</div>';
   }).join('');
   box.innerHTML=h;
+}
+/* ---------- 🔍 ตรวจสลิป/ไฟล์หาย ---------- */
+const SC_KIND={slip:'สลิป',bill:'รูปบิล',receipt:'ใบเสร็จรายจ่าย',doc:'เอกสารเครดิต',statement:'ใบวางบิล',product:'รูปสินค้า'};
+let scResults=[];
+async function openSlipCheck(){
+  document.getElementById('slipcheck-modal').style.display='flex';
+  scLoadNas();
+  if(scResults.length)scRenderResults();
+}
+async function scLoadNas(){
+  const box=document.getElementById('sc-nas');
+  const {data,error}=await db.from('nas_issues').select('*').is('resolved_at',null).order('id',{ascending:false}).limit(500);
+  if(error){box.innerHTML='<div class="empty">ยังอ่านรายงานไม่ได้: '+esc(error.message)+' (รัน mix888-nas-key-fix.sql ฉบับล่าสุด)</div>';return;}
+  const rows=(data||[]).filter(r=>!r.resolved_at);
+  nasIssueBadge(rows.length);
+  if(!rows.length){box.innerHTML='<div class="empty">✅ ไม่มีไฟล์ค้าง — โปรแกรม NAS สำรองได้ครบทุกไฟล์ที่ตรวจล่าสุด</div>';return;}
+  const d=s=>s?new Date(s).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
+  box.innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>ไฟล์</th><th>อ้างอิง</th><th>สาเหตุ</th><th>พบครั้งแรก</th><th>แจ้งไลน์</th><th></th></tr></thead><tbody>'
+    +rows.map(r=>{
+      const b=(r.kind==='slip'||r.kind==='bill')?bills.find(x=>x.bill_no===r.ref):null;
+      return '<tr><td>'+esc(SC_KIND[r.kind]||r.kind)+'</td><td><b>'+esc(r.ref||'')+'</b></td>'
+        +'<td style="font-size:12.5px">'+(r.reason==='gone'?'<span style="color:var(--danger,#b52020);font-weight:600">หายทั้งในระบบและ NAS</span>':'โหลดไม่ได้ '+Number(r.fail_count||0)+' รอบ')
+        +(r.detail?'<div style="color:var(--muted);font-size:11px">'+esc(r.detail)+'</div>':'')+'</td>'
+        +'<td style="font-size:12.5px">'+esc(d(r.first_seen))+'</td>'
+        +'<td style="font-size:12.5px">'+(r.notified_at?'✓ '+esc(d(r.notified_at)):'<span style="color:var(--muted)">รอส่ง</span>')+'</td>'
+        +'<td>'+(b?'<button class="btn-g mini" onclick="showPayHistory('+b.id+')">🧾 ประวัติชำระ</button>':'')+'</td></tr>';
+    }).join('')+'</tbody></table></div>';
+}
+/** สแกนลิงก์สลิปทุกใบในช่วงที่เลือก: เปิดไม่ได้ → ลองหาไฟล์ที่ถูกย้ายชื่อ (ซ่อมให้เอง) · หายจริง → รายการให้แนบแทน */
+async function scScan(btn){
+  const days=Number(document.getElementById('sc-range').value)||0;
+  const since=days?new Date(Date.now()-days*86400000).toISOString():null;
+  const prog=document.getElementById('sc-prog');
+  btn.disabled=true;scResults=[];document.getElementById('sc-body').innerHTML='';document.getElementById('sc-copy').style.display='none';
+  try{
+    prog.textContent='กำลังโหลดประวัติการชำระ…';
+    const pays=await fetchAllPages(()=>{let q=db.from('payments').select('id,bill_id,amount,created_at,slips,bills(id,bill_no,archived_at,customers(code,name))');if(since)q=q.gte('created_at',since);return q.order('id',{ascending:true});});
+    const byUrl=new Map();
+    (pays||[]).forEach(p=>(Array.isArray(p.slips)?p.slips:[]).forEach(u=>{if(u&&!byUrl.has(u))byUrl.set(u,{url:u,pay:p,bill:p.bills||{},billId:p.bill_id});}));
+    const bs=await fetchAllPages(()=>{let q=db.from('bills').select('id,bill_no,slip_url,paid_at,created_at,customers(code,name)').not('slip_url','is',null).neq('slip_url','');if(since)q=q.gte('created_at',since);return q.order('id',{ascending:true});});
+    (bs||[]).forEach(b=>{if(b.slip_url&&!byUrl.has(b.slip_url))byUrl.set(b.slip_url,{url:b.slip_url,pay:{created_at:b.paid_at||b.created_at},bill:b,billId:b.id});});
+    const list=[...byUrl.values()];
+    let done=0,bad=0;
+    const worker=async()=>{
+      while(list.length){
+        const it=list.shift();
+        let ok=false;
+        try{const h=await fetch(it.url,{method:'HEAD'});ok=h.ok;}catch(e){ok=null;}   // null = เน็ต/CORS สะดุด ไม่ตัดสิน
+        if(ok===false){
+          const nu=await stgFindMoved(it.url).catch(()=>null);
+          if(nu&&nu!==it.url){const pr=stgParseUrl(it.url);const n=await stgRelink(pr?pr.bucket:'slips',it.url,nu);it.status=n?'moved':'missing';it.newUrl=nu;}
+          else it.status='missing';
+          bad++;scResults.push(it);
+        }
+        done++;if(done%10===0||!list.length)prog.textContent='ตรวจแล้ว '+done+'/'+byUrl.size+' ไฟล์ · เปิดไม่ได้ '+bad;
+      }
+    };
+    await Promise.all(Array.from({length:6},worker));
+    prog.textContent='ตรวจครบ '+byUrl.size+' ไฟล์ · เปิดไม่ได้ '+bad+(bad?' ('+scResults.filter(x=>x.status==='moved').length+' ไฟล์แค่ย้ายชื่อ ซ่อมให้แล้ว)':'');
+    scRenderResults();
+  }catch(e){prog.textContent='สแกนไม่สำเร็จ: '+(e.message||e);}
+  btn.disabled=false;
+}
+function scRenderResults(){
+  const body=document.getElementById('sc-body');
+  const miss=scResults.filter(x=>x.status==='missing');
+  document.getElementById('sc-copy').style.display=miss.length?'':'none';
+  if(!scResults.length){body.innerHTML=document.getElementById('sc-prog').textContent.startsWith('ตรวจครบ')?'<div class="empty">✅ เปิดได้ทุกไฟล์</div>':'';return;}
+  const d=s=>s?new Date(s).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit'}):'';
+  body.innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>บิล</th><th>ร้าน</th><th>วันที่รับยอด</th><th class="num">ยอด</th><th>สถานะ</th><th></th></tr></thead><tbody>'
+    +scResults.map(x=>{
+      const c=(x.bill&&x.bill.customers)||{};
+      return '<tr><td><b>'+esc(x.bill.bill_no||'')+'</b></td><td>'+esc((c.code||'')+' '+(c.name||''))+'</td><td>'+esc(d(x.pay.created_at))+'</td>'
+        +'<td class="num">'+(x.pay.amount!=null?fmt(x.pay.amount):'')+'</td>'
+        +'<td style="font-size:12.5px">'+(x.status==='moved'?'<span style="color:var(--ok,#159b78)">🔧 ไฟล์แค่ย้ายชื่อ — แก้ลิงก์แล้ว</span>':'<span style="color:var(--danger,#b52020);font-weight:600">🗑 ไฟล์หาย</span>')+'</td>'
+        +'<td style="white-space:nowrap"><button class="btn-g mini" onclick="showPayHistory('+Number(x.billId)+')">🧾 ประวัติชำระ</button>'
+        +(x.status==='missing'?' <button class="btn-s mini" data-bill="'+Number(x.billId)+'" data-url="'+esc(x.url)+'" onclick="phAttachReplace(this)">📎 แนบสลิปแทน</button>':'')+'</td></tr>';
+    }).join('')+'</tbody></table></div>';
+}
+function scCopyMissing(){
+  const nos=[...new Set(scResults.filter(x=>x.status==='missing').map(x=>x.bill.bill_no).filter(Boolean))];
+  const t=nos.join(',');
+  try{navigator.clipboard.writeText(t);toast('คัดลอก '+nos.length+' เลขบิลแล้ว — ใช้กับ --restore-bill '+t.slice(0,40)+(t.length>40?'…':''));}catch(e){prompt('คัดลอกเลขบิล:',t);}
+}
+/* ---------- แจ้งกลุ่มรีพอร์ตแทนโปรแกรม NAS (ถ้า NAS ส่งไลน์เองไม่ได้) + ป้ายจำนวนไฟล์ค้าง ---------- */
+function nasIssueText(list){
+  const L=['⚠️ NAS สำรองไฟล์ไม่ได้ '+list.length+' ไฟล์ (ไฟล์พวกนี้ระบบจะยังไม่ลบออกจาก Supabase)'];
+  list.slice(0,15).forEach(x=>{
+    L.push('• '+(SC_KIND[x.kind]||x.kind)+(x.ref?' '+x.ref:'')+' — '+(x.reason==='gone'
+      ?'ไฟล์ไม่มีแล้วทั้งใน Supabase และ NAS'+(x.kind==='slip'?' → ขอสลิปจากแชทไลน์ร้าน แล้วกด 📎 แนบสลิปแทน ในประวัติการชำระ':x.kind==='bill'?' → กดสร้างรูปบิลใหม่ในหลังบ้าน':'')
+      :'โหลดไม่ได้ติดกัน '+x.fail_count+' รอบ ('+(x.detail||'')+')'));
+  });
+  if(list.length>15)L.push('…และอีก '+(list.length-15)+' ไฟล์');
+  L.push('ดูทั้งหมดในหลังบ้าน: บัญชี → 🔍 ตรวจสลิป/ไฟล์หาย');
+  return L.join('\n');
+}
+function nasIssueBadge(n){
+  const b=document.getElementById('sc-btn');if(!b)return;
+  b.textContent='🔍 ตรวจสลิป/ไฟล์หาย'+(n?' ('+n+')':'');
+  b.style.color=n?'var(--danger,#b52020)':'';b.style.fontWeight=n?'700':'';
+}
+let nasTickTimer=null;
+async function nasIssueTick(){
+  try{
+    const {count,error:ce}=await db.from('nas_issues').select('id',{count:'exact',head:true}).is('resolved_at',null);
+    if(ce){if(/nas_issues|relation|does not exist|PGRST/i.test(ce.message||'')){clearInterval(nasTickTimer);nasTickTimer=null;}return;}
+    nasIssueBadge(count||0);
+    const gid=appSettings&&appSettings.line_report_group;
+    if(!gid||!count)return;
+    const {data,error}=await db.rpc('nas_issues_claim');
+    if(error)return;
+    const rows=Array.isArray(data)?data:[];
+    if(!rows.length)return;
+    const r=await notifyCustomer(gid,nasIssueText(rows));
+    if(!r.ok){try{await db.rpc('nas_issues_unclaim',{p_ids:rows.map(x=>x.id)});}catch(e){}}
+  }catch(e){}
 }
 async function confirmPaid(btn){
   const b=bills.find(x=>x.id===spBillId);if(!b)return;
@@ -13667,6 +13841,8 @@ async function startApp(){
   await Promise.all([loadOrders(),loadBills()]).catch(e=>toast('โหลดข้อมูลบางส่วนไม่สำเร็จ: '+(e?.message||e)));
   dashCoreReady=true; dashLocalCards();                   // การ์ดที่อิงข้อมูลหลัก ขึ้นตอนนี้
   loadRcvHistory();loadUsers();loadTransfers();loadQuotes();loadSkuCats();refreshEditReqBadge();
+  // ไฟล์ที่ NAS สำรองไม่ได้: ป้ายจำนวนบนปุ่ม + ส่งไลน์กลุ่มรีพอร์ตแทน ถ้าโปรแกรม NAS ส่งเองไม่ได้ (เช็คทุก 15 นาที)
+  if(!nasTickTimer){setTimeout(nasIssueTick,45000);nasTickTimer=setInterval(nasIssueTick,15*60000);}
 }
 (async function(){
   initRtimeSelects();

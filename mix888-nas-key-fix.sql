@@ -218,6 +218,149 @@ drop policy if exists nas_delete_media on storage.objects;
 create policy nas_delete_media on storage.objects for delete to anon, authenticated
   using (bucket_id in ('bills', 'products', 'slips'));
 
+-- 7) ตรวจการสำรอง: ไฟล์ที่ "สำรองไม่ได้" → แจ้งกลุ่มรีพอร์ต + ไม่ลบออกจาก Supabase จนกว่าจะมีสำเนาครบ
+--    โปรแกรม NAS ส่งรายการทุกรอบ · แจ้งไลน์ครั้งเดียวต่อไฟล์ · ถ้าโปรแกรม NAS ส่งไลน์เองไม่ได้ หลังบ้านที่เปิดอยู่จะส่งแทน
+create table if not exists nas_issues (
+  id            bigserial primary key,
+  kind          text not null,                 -- slip / bill / receipt / doc / statement / product
+  ref           text,                          -- เลขบิล / รหัสลูกค้า / รายการ
+  file_url      text not null unique,
+  reason        text not null,                 -- gone = ไม่มีทั้งใน Supabase และ NAS แล้ว · error = โหลดไม่ได้ (อาจชั่วคราว)
+  detail        text,
+  fail_count    int not null default 1,
+  first_seen    timestamptz not null default now(),
+  last_seen     timestamptz not null default now(),
+  notified_at   timestamptz,
+  notified_by   text,
+  resolved_at   timestamptz,
+  resolved_note text
+);
+alter table nas_issues enable row level security;
+revoke all on nas_issues from anon;
+grant select on nas_issues to authenticated;
+drop policy if exists nas_issues_read on nas_issues;
+create policy nas_issues_read on nas_issues for select to authenticated using (true);
+
+-- 7a) โปรแกรม NAS ส่งรายการที่สำรองไม่ได้ / ที่กลับมาสำรองได้แล้ว → คืนรายการที่ต้องแจ้งไลน์ตอนนี้ (จองไว้ให้แล้ว กันส่งซ้ำ)
+--     p_full_kinds = ประเภทที่รอบนี้ "ตรวจครบทุกไฟล์" → เรื่องเก่าของประเภทนั้นที่ไม่เจอแล้ว (เช่น แนบสลิปใหม่แทน) ปิดให้เอง
+create or replace function nas_report_issues(p_key text, p_items jsonb, p_ok_urls jsonb default '[]'::jsonb, p_full_kinds jsonb default '[]'::jsonb)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+declare it jsonb; v_items jsonb := coalesce(p_items, '[]'::jsonb); v_notify jsonb;
+begin
+  perform nas_check_key(p_key);
+  if jsonb_typeof(v_items) <> 'array' then v_items := '[]'::jsonb; end if;
+  update nas_issues set resolved_at = now(), resolved_note = 'สำรองได้แล้ว'
+   where resolved_at is null
+     and file_url in (select jsonb_array_elements_text(case when jsonb_typeof(p_ok_urls) = 'array' then p_ok_urls else '[]'::jsonb end));
+  if jsonb_typeof(p_full_kinds) = 'array' and jsonb_array_length(p_full_kinds) > 0 then
+    update nas_issues set resolved_at = now(), resolved_note = 'ไม่พบปัญหาแล้วในรอบตรวจเต็ม'
+     where resolved_at is null
+       and kind in (select jsonb_array_elements_text(p_full_kinds))
+       and not exists (select 1 from jsonb_array_elements(v_items) x where x->>'url' = nas_issues.file_url);
+  end if;
+  for it in select * from jsonb_array_elements(v_items) loop
+    continue when coalesce(it->>'url', '') = '';
+    insert into nas_issues (kind, ref, file_url, reason, detail)
+    values (coalesce(it->>'kind', 'file'), it->>'ref', it->>'url', coalesce(it->>'reason', 'error'), left(it->>'detail', 300))
+    on conflict (file_url) do update set
+      kind        = excluded.kind,
+      ref         = excluded.ref,
+      reason      = excluded.reason,
+      detail      = excluded.detail,
+      fail_count  = case when nas_issues.resolved_at is null then nas_issues.fail_count + 1 else 1 end,
+      first_seen  = case when nas_issues.resolved_at is null then nas_issues.first_seen else now() end,
+      notified_at = case when nas_issues.resolved_at is null then nas_issues.notified_at else null end,
+      notified_by = case when nas_issues.resolved_at is null then nas_issues.notified_by else null end,
+      last_seen   = now(),
+      resolved_at = null, resolved_note = null;
+  end loop;
+  -- จองรายการที่ถึงเวลาแจ้ง: หายถาวร (gone) แจ้งทันที · โหลดไม่ได้ (error) แจ้งเมื่อพลาดติดกัน 3 รอบ
+  with c as (
+    select id from nas_issues
+     where resolved_at is null and notified_at is null and (reason <> 'error' or fail_count >= 3)
+     order by id for update skip locked),
+  u as (
+    update nas_issues i set notified_at = now(), notified_by = 'nas-sending' from c where i.id = c.id returning i.*)
+  select coalesce(jsonb_agg(to_jsonb(u) order by u.id), '[]'::jsonb) into v_notify from u;
+  return jsonb_build_object(
+    'notify', v_notify,
+    'open', (select count(*) from nas_issues where resolved_at is null),
+    'report_group', (select value from settings where key = 'line_report_group' limit 1));
+end $$;
+
+-- 7b) ผลการส่งไลน์ของโปรแกรม NAS: ส่งได้ = จบ · ส่งไม่ได้ = ปล่อยคืน ให้หลังบ้านส่งแทน
+create or replace function nas_notify_result(p_key text, p_ids jsonb, p_ok boolean)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  perform nas_check_key(p_key);
+  update nas_issues
+     set notified_at = case when p_ok then notified_at else null end,
+         notified_by = case when p_ok then 'nas' else null end
+   where notified_by = 'nas-sending'
+     and id in (select (jsonb_array_elements_text(case when jsonb_typeof(p_ids) = 'array' then p_ids else '[]'::jsonb end))::bigint);
+end $$;
+
+-- 7c) กู้ไฟล์จาก NAS กลับขึ้น Supabase แล้ว (ชื่อไฟล์ใหม่) → เปลี่ยนลิงก์ทุกจุดที่อ้างไฟล์เดิม
+create or replace function nas_relink(p_key text, p_old text, p_new text)
+returns int language plpgsql security definer set search_path = public, pg_temp as $$
+declare n int := 0; c int;
+begin
+  perform nas_check_key(p_key);
+  if coalesce(p_old, '') = '' or coalesce(p_new, '') = '' or p_old = p_new then return 0; end if;
+  update bills set image_url = p_new where image_url = p_old; get diagnostics c = row_count; n := n + c;
+  update bills set slip_url  = p_new where slip_url  = p_old; get diagnostics c = row_count; n := n + c;
+  update bills set page_urls = (select jsonb_agg(case when e = to_jsonb(p_old) then to_jsonb(p_new) else e end order by o)
+                                  from jsonb_array_elements(page_urls) with ordinality t(e, o))
+   where jsonb_typeof(page_urls) = 'array' and page_urls @> jsonb_build_array(p_old);
+  get diagnostics c = row_count; n := n + c;
+  begin
+    update payments set slips = (select jsonb_agg(case when e = to_jsonb(p_old) then to_jsonb(p_new) else e end order by o)
+                                   from jsonb_array_elements(slips) with ordinality t(e, o))
+     where jsonb_typeof(slips) = 'array' and slips @> jsonb_build_array(p_old);
+    get diagnostics c = row_count; n := n + c;
+  exception when undefined_table then null;
+  end;
+  begin update slip_log set image_path = p_new where image_path = p_old; get diagnostics c = row_count; n := n + c;
+  exception when undefined_table or undefined_column then null; end;
+  begin update petty_cash set receipt_url = p_new where receipt_url = p_old; get diagnostics c = row_count; n := n + c;
+  exception when undefined_table or undefined_column then null; end;
+  update nas_issues set resolved_at = now(), resolved_note = 'กู้จาก NAS อัตโนมัติ' where file_url = p_old and resolved_at is null;
+  return n;
+end $$;
+
+-- 7d) หลังบ้านช่วยส่งไลน์แทน (กรณีโปรแกรม NAS ส่งเองไม่ได้) — ต้องล็อกอินเท่านั้น
+create or replace function nas_issues_claim()
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+declare r jsonb;
+begin
+  with c as (
+    select id from nas_issues
+     where resolved_at is null and notified_at is null and (reason <> 'error' or fail_count >= 3)
+     order by id for update skip locked),
+  u as (
+    update nas_issues i set notified_at = now(), notified_by = 'web' from c where i.id = c.id returning i.*)
+  select coalesce(jsonb_agg(to_jsonb(u) order by u.id), '[]'::jsonb) into r from u;
+  return r;
+end $$;
+create or replace function nas_issues_unclaim(p_ids bigint[])
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  update nas_issues set notified_at = null, notified_by = null where notified_by = 'web' and id = any(p_ids);
+end $$;
+-- 7e) หลังบ้านแนบสลิปแทนไฟล์ที่หาย → ปิดเรื่องของไฟล์เดิม
+create or replace function nas_issues_resolve_url(p_url text, p_note text)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  update nas_issues set resolved_at = now(), resolved_note = left(coalesce(p_note, 'แก้จากหลังบ้าน'), 200)
+   where file_url = p_url and resolved_at is null;
+end $$;
+revoke execute on function nas_issues_claim() from public, anon;
+revoke execute on function nas_issues_unclaim(bigint[]) from public, anon;
+revoke execute on function nas_issues_resolve_url(text, text) from public, anon;
+grant execute on function nas_issues_claim() to authenticated;
+grant execute on function nas_issues_unclaim(bigint[]) to authenticated;
+grant execute on function nas_issues_resolve_url(text, text) to authenticated;
+
 -- ============================================================
 --  ผลลัพธ์: ค่านี้คือ NAS_EXPORT_KEY — ก๊อปไปใส่ใน archiver.config.json บน NAS ให้ตรงทุกตัวอักษร
 -- ============================================================
