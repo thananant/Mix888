@@ -32,6 +32,7 @@
       Task Scheduler รันทุกชั่วโมง:  node /volume1/.../mix888-nas-archiver.js --once
       (--once = ซิงก์ครั้งเดียวแล้วจบ ให้ Task Scheduler เป็นคนเรียกซ้ำ)
       ลองก่อน:  node archiver.js --once --dry-run   = เก็บลง NAS จริง แต่ "ไม่ลบ/ไม่แก้อะไรใน Supabase" แล้วสรุปท้ายรอบว่าเก็บอะไรบ้าง
+      กู้บิล:   node archiver.js --restore-bill IV2609250013   = เอารูปบิล+สลิปของบิลนี้จาก NAS อัปโหลดกลับ Supabase (หลังบ้านเปิดดูได้อีก)
    ② บนคอม Windows: ติดตั้ง Node.js แล้วดับเบิลคลิก mix888-nas-archiver.bat
       เปิดทิ้งไว้ โปรแกรมจะซิงก์ทุก ๆ 30 นาทีอัตโนมัติ
    ============================================================ */
@@ -45,7 +46,7 @@
 const NAS_ROOT   = '';                // เว้นว่าง = หาโฟลเดอร์ Mix888 บน NAS อัตโนมัติ (volume1-6) / หรือระบุเอง เช่น '/volume2/Mix888' หรือ 'Z:\\Mix888'
 const DAYS_BACK  = 45;                // ซิงก์บิลย้อนหลังกี่วัน (รอบแรกแนะนำตั้งเยอะ ๆ เช่น 400 แล้วค่อยลดลง)
 const EVERY_MIN  = 30;                // ซิงก์ซ้ำทุกกี่นาที
-const SUPABASE_URL = 'https://eqbzpgynzgdwvouuzfwt.supabase.co';
+let   SUPABASE_URL = 'https://eqbzpgynzgdwvouuzfwt.supabase.co';   // (ทับได้ใน archiver.config.json — ใช้ตอนทดสอบเท่านั้น)
 const SUPABASE_KEY = 'sb_publishable_HqLNQDwR4omYcb7BNUEKIw_vyHCo4N-';
 const NAS_EXPORT_KEY = 'PASTE_NAS_EXPORT_KEY_HERE';   // รหัสลับ = ค่าในตาราง nas_config (select export_key from nas_config) — ใส่ใน archiver.config.json
 const KEEP_A4_PAGES  = false;         // true = เก็บไฟล์บิลแบบแบ่งหน้า A4 ด้วย (เนื้อหาซ้ำกับใบเต็ม ปกติไม่จำเป็น)
@@ -62,7 +63,7 @@ const fs   = require('fs');
 const path = require('path');
 // ---- อ่านค่าตั้งค่าจาก archiver.config.json (ถ้ามี) ทับค่าคงที่ด้านบน ----
 const CFG = (() => {
-  const c = {NAS_ROOT, DAYS_BACK, EVERY_MIN, NAS_EXPORT_KEY, KEEP_A4_PAGES, PRUNE_PAID_BILLS, PRUNE_PAID_AFTER_DAYS, PRUNE_DAYS_BACK, PRUNE_BROADCAST_DAYS, BACKUP_EVERY_DAYS, ORDER_HISTORY_DAYS};
+  const c = {NAS_ROOT, DAYS_BACK, EVERY_MIN, NAS_EXPORT_KEY, KEEP_A4_PAGES, PRUNE_PAID_BILLS, PRUNE_PAID_AFTER_DAYS, PRUNE_DAYS_BACK, PRUNE_BROADCAST_DAYS, BACKUP_EVERY_DAYS, ORDER_HISTORY_DAYS, SUPABASE_URL};
   try{
     const f = path.join(__dirname, 'archiver.config.json');
     if(fs.existsSync(f)){
@@ -74,6 +75,7 @@ const CFG = (() => {
   }catch(e){ console.log('[!] อ่าน archiver.config.json ไม่ได้: ' + e.message + ' — ใช้ค่าในไฟล์สคริปต์แทน'); }
   return c;
 })();
+if(CFG.SUPABASE_URL && /^https?:\/\//.test(CFG.SUPABASE_URL)) SUPABASE_URL = CFG.SUPABASE_URL.replace(/\/+$/, '');
 const DRY_RUN = process.argv.includes('--dry-run');   // เก็บลง NAS ตามปกติ แต่ไม่ลบไฟล์/ไม่แก้ข้อมูลใน Supabase
 const REPORT = {};                                    // สรุปท้ายรอบ: หมวด → {new, have, fail, pruned}
 function tally(section, key, n = 1){ const r = REPORT[section] || (REPORT[section] = {new: 0, have: 0, fail: 0, pruned: 0}); r[key] += n; }
@@ -482,15 +484,19 @@ async function pruneBills(ROOT){
       needSlips -= missingRemote;
     }
     if(!hasBill || nSlipNas < needSlips){ kept++; continue; }   // ยังเก็บไม่ครบ รอรอบหน้า
-    let okAll = true;
+    const rel = path.relative(ROOT, billDir);
+    if(DRY_RUN){ pruned++; tally('ลบไฟล์บิลจ่ายครบออกจาก Supabase', 'pruned'); log('  (ทดลอง) จะลบไฟล์ใน Supabase ของบิล ' + b.bill_no + ' (' + urls.length + ' ไฟล์ · สำเนาอยู่ ' + rel + ')'); continue; }
+    // ลำดับสำคัญ: บันทึกในฐานข้อมูลก่อน (ล้างลิงก์รูป + จดโฟลเดอร์ NAS) แล้วค่อยลบไฟล์
+    // ถ้าบันทึกไม่ได้ (รหัสผิด/เน็ตหลุด) = ไม่ลบอะไรเลย — ไม่งั้นจะเกิด "ไฟล์หายแต่ลิงก์ยังอยู่" หลังบ้านเปิดสลิปไม่ได้ (เคยเกิดแล้ว)
+    try{ await rpc('nas_mark_pruned', {p_bill_id: b.id, p_nas_path: rel}); }
+    catch(e){ kept++; log('  [!] บันทึกสถานะบิล ' + b.bill_no + ' ไม่ได้ — ไม่ลบไฟล์รอบนี้: ' + e.message); continue; }
+    let nDel = 0, nFail = 0;
     for(const [bucket, u] of urls){
       const op = objPathOf(u, bucket); if(!op) continue;
-      try{ await deleteObject(bucket, op); }catch(e){ okAll = false; log('  [!] ' + e.message); break; }
+      try{ await deleteObject(bucket, op); nDel++; }catch(e){ nFail++; log('  [!] ' + e.message); }
     }
-    if(!okAll){ kept++; continue; }
-    if(DRY_RUN){ pruned++; tally('ลบไฟล์บิลจ่ายครบออกจาก Supabase', 'pruned'); continue; }
-    try{ await rpc('nas_mark_pruned', {p_bill_id: b.id, p_nas_path: path.relative(ROOT, billDir)}); pruned++; tally('ลบไฟล์บิลจ่ายครบออกจาก Supabase', 'pruned'); log('  [ลบใน Supabase] ลบไฟล์ใน Supabase ของบิล ' + b.bill_no + ' (จ่ายครบ · สำเนาอยู่ ' + path.relative(ROOT, billDir) + ')'); }
-    catch(e){ log('  [!] บันทึกสถานะบิล ' + b.bill_no + ' ไม่ได้: ' + e.message); }
+    pruned++; tally('ลบไฟล์บิลจ่ายครบออกจาก Supabase', 'pruned');
+    log('  [ลบใน Supabase] บิล ' + b.bill_no + ' (จ่ายครบ · สำเนาอยู่ ' + rel + ') — ล้างลิงก์แล้ว ลบไฟล์ ' + nDel + (nFail ? ' · ลบไม่ได้ ' + nFail + ' ไฟล์ (ค้างในถัง ไม่กระทบระบบ จะไม่ถูกอ้างถึงแล้ว)' : ''));
   }
   if(pruned || kept) log('ประหยัดพื้นที่: ลบไฟล์บิลจ่ายครบแล้ว ' + pruned + ' ใบ' + (kept ? ' · รอ ' + kept + ' ใบ (ยังไม่ครบ/ยังไม่ถึงเวลา)' : ''));
   return {pruned};
@@ -639,6 +645,71 @@ async function restoreMedia(){
   return fail === 0;
 }
 
+// กู้บิลจาก NAS กลับเข้า Supabase (ใช้เมื่อรูปบิล/สลิปถูกลบออกจาก Supabase แล้วอยากดูในระบบอีก):
+//   node archiver.js --restore-bill IV2609250013            (หลายใบคั่นด้วย , ไม่เว้นวรรค)
+//   อัปโหลดรูปบิลเวอร์ชันล่าสุด + สลิปทุกใบจากโฟลเดอร์บิลบน NAS แล้วใส่ลิงก์คืนในบิล/ประวัติการชำระ (RPC nas_restore_bill)
+function findBillDir(ROOT, billNo){
+  const base = safeName(billNo);
+  const re = new RegExp('^' + base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(_.*)?$');
+  const ls = d => { try{ return fs.readdirSync(d); }catch(e){ return []; } };
+  for(const y of ls(ROOT).filter(n => /^\d{4}$/.test(n))){
+    for(const m of ls(path.join(ROOT, y)).filter(n => /^\d{2}$/.test(n))){
+      for(const d of ls(path.join(ROOT, y, m)).filter(n => /^\d{8}$/.test(n))){
+        const dd = path.join(ROOT, y, m, d);
+        for(const name of ls(dd)){
+          const p = path.join(dd, name);
+          if(re.test(name) && fs.statSync(p).isDirectory()) return p;
+        }
+      }
+    }
+  }
+  return null;
+}
+const rndTag = n => { const s = 'abcdefghijklmnopqrstuvwxyz0123456789'; let o = ''; for(let i = 0; i < n; i++) o += s[Math.floor(Math.random() * s.length)]; return o; };
+async function uploadObject(bucket, objPath, file){
+  const ext = path.extname(file).slice(1).toLowerCase();
+  const enc = objPath.split('/').map(encodeURIComponent).join('/');
+  const r = await fetch(SUPABASE_URL + '/storage/v1/object/' + bucket + '/' + enc, {
+    method: 'POST', headers: {apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Content-Type': MIME[ext] || 'application/octet-stream', 'x-upsert': 'true'},
+    body: fs.readFileSync(file)});
+  if(!r.ok) throw new Error('อัปโหลด ' + bucket + '/' + objPath + ' ไม่ได้ HTTP ' + r.status + ' ' + (await r.text()).slice(0, 120));
+  return SUPABASE_URL + '/storage/v1/object/public/' + bucket + '/' + enc;
+}
+const verOf = (f, re) => { const m = f.match(re); return m ? parseInt(m[1], 10) : 0; };
+async function restoreBills(billNos){
+  if(!(await preflight())){ flushLog(); return false; }
+  const ROOT = resolveNasRoot(); if(!ROOT){ log('[X] หาโฟลเดอร์ปลายทางไม่เจอ'); flushLog(); return false; }
+  let okN = 0, fail = 0;
+  for(const raw of billNos){
+    const billNo = String(raw || '').trim(); if(!billNo) continue;
+    const dir = findBillDir(ROOT, billNo);
+    if(!dir){ fail++; log('[!] ' + billNo + ': ไม่พบโฟลเดอร์บิลบน NAS (ค้นใน ' + ROOT + '/ปี/เดือน/วัน)'); continue; }
+    const base = safeName(billNo), files = fs.readdirSync(dir);
+    const billFiles = files.filter(f => f.startsWith(base + '_บิล_v')).sort((a, b) => verOf(a, /_v(\d+)\./) - verOf(b, /_v(\d+)\./));
+    const slipFiles = files.filter(f => f.startsWith(base + '_สลิป')).sort((a, b) => verOf(a, /_สลิป(\d+)\./) - verOf(b, /_สลิป(\d+)\./));
+    if(!billFiles.length && !slipFiles.length){ fail++; log('[!] ' + billNo + ': โฟลเดอร์ ' + path.relative(ROOT, dir) + ' ไม่มีรูปบิล/สลิป'); continue; }
+    try{
+      const stamp = Date.now();
+      let imageUrl = null; const slips = [];
+      if(billFiles.length){ const f = billFiles[billFiles.length - 1]; imageUrl = await uploadObject('bills', 'bill_' + base + '_' + stamp + '-' + rndTag(10) + path.extname(f).toLowerCase(), path.join(dir, f)); }
+      for(const f of slipFiles) slips.push(await uploadObject('slips', 'slip_' + base + '_' + stamp + '-' + rndTag(10) + path.extname(f).toLowerCase(), path.join(dir, f)));
+      const r = await rpc('nas_restore_bill', {p_bill_no: billNo, p_image_url: imageUrl, p_slips: slips});
+      okN++;
+      log('[กู้คืน] ' + billNo + ' — รูปบิล ' + (imageUrl ? 1 : 0) + ' · สลิป ' + slips.length + ' · จาก ' + path.relative(ROOT, dir)
+          + (r && r.payments_updated != null ? ' · ใส่สลิปคืนในประวัติชำระ ' + r.payments_updated + ' รายการ' : ''));
+    }catch(e){
+      fail++;
+      log('[!] ' + billNo + ': กู้คืนไม่สำเร็จ — ' + e.message
+          + (/HTTP 40[13]/.test(e.message) ? ' (รัน mix888-nas-key-fix.sql ฉบับล่าสุดเพื่อเปิดสิทธิ์อัปโหลด bills/slips หรือยัง?)' : '')
+          + (/NO_BILL/.test(e.message) ? ' (ไม่มีบิลเลขนี้ในระบบ)' : '')
+          + (/ 404/.test(e.message) && /nas_restore_bill/.test(e.message) ? ' (Supabase ยังไม่มีฟังก์ชัน nas_restore_bill — รัน mix888-nas-key-fix.sql ฉบับล่าสุด)' : ''));
+    }
+  }
+  log('[OK] กู้คืนบิลเสร็จ — สำเร็จ ' + okN + (fail ? ' · พลาด ' + fail : ''));
+  flushLog();
+  return fail === 0;
+}
+
 let running = false;
 async function syncOnce(){
   if(running) return true;
@@ -763,7 +834,12 @@ if(!CFG.NAS_EXPORT_KEY || CFG.NAS_EXPORT_KEY === 'PASTE_NAS_EXPORT_KEY_HERE') co
 console.log('  ซิงก์ย้อนหลัง ' + CFG.DAYS_BACK + ' วัน · ทำซ้ำทุก ' + CFG.EVERY_MIN + ' นาที' + (DRY_RUN ? '  [โหมดทดลอง --dry-run: ไม่ลบ/ไม่แก้อะไรใน Supabase]' : ''));
 console.log('  เปิดหน้าต่างนี้ทิ้งไว้ (ย่อได้ อย่าปิด) — ปิดแล้วเปิดใหม่ก็ซิงก์ต่อจากเดิมได้');
 console.log('==========================================================');
-if(process.argv.includes('--restore-media')){
+const rbIdx = process.argv.indexOf('--restore-bill');
+if(rbIdx >= 0){
+  const list = String(process.argv[rbIdx + 1] || '').split(',').map(s => s.trim()).filter(Boolean);
+  if(!list.length){ console.log('ใช้: node mix888-nas-archiver.js --restore-bill IV2609250013   (หลายใบคั่นด้วย , ไม่เว้นวรรค)'); process.exit(1); }
+  restoreBills(list).then(ok => process.exit(ok ? 0 : 1));   // กู้บิลจาก NAS กลับเข้า Supabase แล้วจบ
+}else if(process.argv.includes('--restore-media')){
   restoreMedia().then(ok => process.exit(ok ? 0 : 1));   // กู้คืนไฟล์ products จาก NAS แล้วจบ
 }else if(process.argv.includes('--once')){
   syncOnce().then(ok => process.exit(ok ? 0 : 1));   // โหมด Task Scheduler: ทำรอบเดียวแล้วจบ (ล้ม = สถานะผิดปกติ)

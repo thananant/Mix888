@@ -10701,6 +10701,10 @@ async function openSlipAudit(){
     }catch(e){console.warn('อ่านบิลค้างไม่ได้',e);}
     const byGroup={};customers.forEach(c=>{if(c.line_group_id)(byGroup[c.line_group_id]=byGroup[c.line_group_id]||[]).push(c);});
     const billNoNeed=new Set();
+    // เทียบด้วย "พาธไฟล์" ไม่ใช่ข้อความลิงก์ตรงตัว — ลิงก์เดียวกันอาจถูกเก็บต่างรูปแบบ (เข้ารหัส %xx / โดเมน / ?พารามิเตอร์)
+    // ถ้าเทียบแค่ข้อความ สลิปที่ใช้ตัดบิลแล้วจะดูเหมือน "ตกค้าง" แล้วถูกกดลบทิ้ง → ประวัติการชำระเปิดสลิปไม่ได้
+    const byPath=(src)=>{const o={};Object.keys(src).forEach(u=>{const p=stgParseUrl(u);if(p&&p.bucket==='slips'&&o[p.path]===undefined)o[p.path]=src[u];});return o;};
+    const usedP=byPath(used), expUsedP=byPath(expUsed);
     saFiles=files.map(f=>{
       const url=db.storage.from('slips').getPublicUrl(f.path).data.publicUrl;
       const base=f.path.split('/').pop();
@@ -10709,7 +10713,7 @@ async function openSlipAudit(){
       let custs=log?(byGroup[log.group_id]||[]):[];
       let billNo=null;
       if(!custs.length){const m=base.match(/^slip_(.+)_\d{9,}-/);if(m){billNo=m[1];billNoNeed.add(m[1]);}}
-      return {...f,url,usedBy:used[url]||null,expDesc:expUsed[url],log,custs,billNo,
+      return {...f,url,usedBy:used[url]||usedP[f.path]||null,expDesc:expUsed[url]!==undefined?expUsed[url]:expUsedP[f.path],log,custs,billNo,
         isReceipt:/^receipt_/.test(base)};
     });
     // ชื่อไฟล์แบบ slip_<เลขบิล>_... → หาเจ้าของบิล (สลิปที่อัปตอนรับยอดในหลังบ้าน)
@@ -10914,6 +10918,18 @@ async function saDeleteSlip(idx){
     :'สลิปใบนี้ยังไม่ทราบว่ามาจากร้านไหน';
   if(!confirm(head+' จะทำอย่างไร?\n\nOK = 🗑 ลบทิ้งถาวร (กู้คืนไม่ได้)\nCancel = ค้างไว้ก่อน'))return;
   try{
+    // ด่านสุดท้ายก่อนลบถาวร: เช็คสด ๆ ว่าไม่มีบิล/ประวัติชำระอ้างถึงไฟล์นี้ (ชื่อไฟล์ตรงกัน ไม่ว่าลิงก์จะเขียนแบบไหน)
+    const nm=f.path.split('/').pop();
+    const [{data:rb},{data:rp}]=await Promise.all([
+      db.from('bills').select('bill_no').ilike('slip_url','%'+nm).limit(1),
+      db.from('payments').select('id,slips,bills(bill_no)').order('id',{ascending:false}).limit(3000)]);
+    const hitP=(rp||[]).find(p=>(Array.isArray(p.slips)?p.slips:[]).some(u=>{const q=stgParseUrl(u);return q?q.path===f.path:String(u).endsWith('/'+nm);}));
+    if((rb&&rb.length)||hitP){
+      f.usedBy=(rb&&rb[0]&&rb[0].bill_no)||(hitP&&hitP.bills&&hitP.bills.bill_no)||'?';
+      renderSlipAudit();
+      toast('ไม่ลบ — สลิปนี้ถูกใช้ตัดบิล '+f.usedBy+' อยู่แล้ว');
+      return;
+    }
     const {data:del,error}=await db.storage.from('slips').remove([f.path]);
     if(error)throw new Error(error.message);
     // Supabase ตอบ "สำเร็จ" ทั้งที่ไม่ได้ลบ ถ้าถังยังไม่เปิดสิทธิ์ลบ — เช็คผลจริงก่อนเอาออกจากจอ
@@ -10945,21 +10961,108 @@ async function logPayment(billId,amount,method,slips,ref,by,note){
     if(error)console.warn('logPayment:',error.message);
   }catch(e){console.warn('logPayment:',e);}
 }
+/* ---------- ลิงก์ไฟล์ในสตอเรจ: แยกส่วน URL · หาไฟล์ที่ถูกเปลี่ยนชื่อ · แก้ลิงก์ทุกตารางที่อ้างถึง ---------- */
+function stgParseUrl(u){                       // → {bucket,path,dir,name,base,ext} หรือ null ถ้าไม่ใช่ลิงก์สตอเรจ
+  const m=String(u||'').match(/\/storage\/v1\/object\/(?:public\/)?([^/]+)\/(.+?)(?:\?.*)?$/);
+  if(!m)return null;
+  let p;try{p=decodeURIComponent(m[2]);}catch(e){p=m[2];}
+  const i=p.lastIndexOf('/'), dir=i>=0?p.slice(0,i):'', name=i>=0?p.slice(i+1):p, j=name.lastIndexOf('.');
+  return {bucket:m[1],path:p,dir,name,base:j>0?name.slice(0,j):name,ext:j>0?name.slice(j):''};
+}
+/** แก้ลิงก์ oldUrl → newUrl ในทุกตารางที่อ้างถึงไฟล์นั้น (รูปบิล/หน้าบิล/สลิปบนบิล/ประวัติชำระ/สลิปจากไลน์/ใบเสร็จรายจ่าย) · คืนจำนวนแถวที่แก้ */
+async function stgRelink(bucket,oldUrl,newUrl){
+  let n=0;
+  const upd=async(q)=>{try{const {data}=await q.select('id');n+=(data||[]).length;}catch(e){}};
+  if(bucket==='bills'){
+    await upd(db.from('bills').update({image_url:newUrl}).eq('image_url',oldUrl));
+    const {data:pg}=await db.from('bills').select('id,page_urls').contains('page_urls',JSON.stringify([oldUrl]));
+    for(const b of (pg||[]))await upd(db.from('bills').update({page_urls:(Array.isArray(b.page_urls)?b.page_urls:[]).map(u=>u===oldUrl?newUrl:u)}).eq('id',b.id));
+  }else{
+    await upd(db.from('bills').update({slip_url:newUrl}).eq('slip_url',oldUrl));
+    const {data:ps}=await db.from('payments').select('id,slips').contains('slips',JSON.stringify([oldUrl]));
+    for(const p of (ps||[]))await upd(db.from('payments').update({slips:(Array.isArray(p.slips)?p.slips:[]).map(u=>u===oldUrl?newUrl:u)}).eq('id',p.id));
+    await upd(db.from('slip_log').update({image_path:newUrl}).eq('image_path',oldUrl));
+    await upd(db.from('petty_cash').update({receipt_url:newUrl}).eq('receipt_url',oldUrl));
+  }
+  return n;
+}
+/** ไฟล์เปิดไม่ได้: เช็คว่ายังอยู่ไหม → ถ้าไม่ ลองหาไฟล์เดิมที่ถูกย้ายไปชื่อสุ่ม (ชื่อเดิม-xxxxxxxxxx.นามสกุล โฟลเดอร์เดียวกัน)
+ *  คืน: url เดิม (ยังอยู่) · url ใหม่ (เจอตัวที่ย้าย) · null (หายจริง) */
+async function stgFindMoved(url){
+  const p=stgParseUrl(url);if(!p)return null;
+  try{const h=await fetch(url,{method:'HEAD'});if(h.ok)return url;}catch(e){}
+  const {data}=await db.storage.from(p.bucket).list(p.dir||'',{limit:100,search:p.base});
+  const rx=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const re=new RegExp('^'+rx(p.base)+'-[a-z0-9]{10}'+rx(p.ext)+'$');
+  const cands=(data||[]).filter(f=>f&&f.id!==null&&re.test(f.name));
+  if(cands.length!==1)return null;
+  return db.storage.from(p.bucket).getPublicUrl((p.dir?p.dir+'/':'')+cands[0].name).data.publicUrl;
+}
+/** รูปสลิปในประวัติการชำระโหลดไม่ขึ้น → แทนด้วยกล่องบอกสาเหตุ + ลองซ่อมลิงก์ให้เองครั้งหนึ่ง */
+async function phImgErr(img){
+  const url=img.getAttribute('src'), billId=Number(img.dataset.bill);
+  const p=stgParseUrl(url)||{name:url};
+  const d=document.createElement('div');
+  d.className='ph-missing';
+  d.style.cssText='min-width:150px;max-width:260px;border:1px dashed #d9a441;border-radius:8px;padding:6px 8px;font-size:11px;color:#7a5a00;background:#fff8e6';
+  d.innerHTML='⚠️ เปิดรูปสลิปไม่ได้ — กำลังตรวจ…<div style="color:var(--muted);word-break:break-all">'+esc(p.name||'')+'</div>';
+  img.replaceWith(d);
+  const r=await phRepair(billId,true);
+  if(r&&r.fixed)return;                                            // ซ่อมได้ → showPayHistory วาดใหม่แล้ว
+  d.innerHTML=(r&&r.missing?'🗑 ไฟล์นี้ถูกลบออกจาก Supabase แล้ว (ไม่ใช่แค่ย้ายชื่อ)':'⚠️ เปิดรูปสลิปไม่ได้ (เช็คเน็ต แล้วลองใหม่)')
+    +'<div style="color:var(--muted);word-break:break-all">'+esc(p.name||'')+'</div>'
+    +(r&&r.missing?'<div>ถ้าเก็บลง NAS ไว้ กู้กลับได้ด้วยโปรแกรม NAS: <code>--restore-bill '+esc((bills.find(x=>x.id===billId)||{}).bill_no||'')+'</code></div>':'')
+    +'<a href="javascript:void(0)" onclick="phRepair('+billId+')" style="color:var(--accent)">🔧 ตรวจอีกครั้ง</a>'
+    +' · <a href="'+esc(url)+'" target="_blank" rel="noopener" style="color:var(--muted)">เปิดลิงก์เดิม</a>';
+}
+let phRepairP=null;
+/** ตรวจลิงก์สลิปทุกใบของบิล: ไฟล์ถูกย้ายชื่อ → แก้ลิงก์ในระบบให้ · ไฟล์หายจริง → บอก
+ *  (รูปเสียหลายใบพร้อมกัน → ตรวจรอบเดียว ทุกใบรอผลเดียวกัน) */
+function phRepair(billId,auto){
+  if(phRepairP)return phRepairP;
+  phRepairP=(async()=>{
+    let fixed=0,missing=0;
+    try{
+      const {data}=await db.from('payments').select('id,slips').eq('bill_id',billId);
+      for(const p of (data||[])){
+        for(const u of (Array.isArray(p.slips)?p.slips:[])){
+          const nu=await stgFindMoved(u);
+          if(nu===u)continue;
+          if(!nu){missing++;continue;}
+          const pr=stgParseUrl(u);
+          if(await stgRelink(pr?pr.bucket:'slips',u,nu)>0)fixed++;
+        }
+      }
+      if(fixed)toast('🔧 พบไฟล์สลิปที่ถูกย้ายชื่อ แก้ลิงก์ให้แล้ว '+fixed+' ไฟล์');
+      else if(!auto)toast(missing?'ไฟล์สลิป '+missing+' ไฟล์ถูกลบออกจาก Supabase แล้ว — ถ้าเก็บลง NAS ไว้ กู้ด้วย --restore-bill':'ลิงก์สลิปทุกไฟล์ใช้ได้ปกติ');
+    }catch(e){if(!auto)toast('ตรวจไม่สำเร็จ: '+(e.message||e));return {fixed,missing,error:true};}
+    return {fixed,missing};
+  })();
+  const p=phRepairP;
+  p.then(r=>{phRepairP=null;if(r&&r.fixed)showPayHistory(billId);});   // ซ่อมได้ → วาดใหม่ด้วยลิงก์ที่ถูก
+  return p;
+}
 async function showPayHistory(billId){
   const b=bills.find(x=>x.id===billId)||{};
   document.getElementById('ph-title').textContent=(b.bill_no||'')+' · '+((b.customers&&b.customers.name)||'');
   const box=document.getElementById('ph-body');
   box.innerHTML='<div class="empty">กำลังโหลด…</div>';
   document.getElementById('payhist-modal').style.display='flex';
-  const {data,error}=await db.from('payments').select('*').eq('bill_id',billId).order('created_at',{ascending:true});
+  const [{data,error},{data:bx}]=await Promise.all([
+    db.from('payments').select('*').eq('bill_id',billId).order('created_at',{ascending:true}),
+    db.from('bills').select('id,total,archived_at,nas_path').eq('id',billId).maybeSingle()]);
   if(error){box.innerHTML='<div class="empty">โหลดไม่ได้: '+esc(error.message)+' (รัน payments.sql หรือยัง?)</div>';return;}
+  const bi=bx||{}, archived=!!bi.archived_at;
   const rows=data||[];
   const paid=rows.reduce((s,r)=>s+Number(r.amount||0),0);
-  const left=Number(b.total||0)-paid;
+  const left=Number(b.total||bi.total||0)-paid;
   let h='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
     +'<div style="flex:1;min-width:110px;border:1px solid var(--line,#eee);border-left:4px solid #7a5a00;border-radius:10px;padding:8px 10px"><div style="font-size:11.5px;color:var(--muted)">ยอดบิล</div><div style="font-size:16px;font-weight:700">'+fmt(b.total||0)+'</div></div>'
     +'<div style="flex:1;min-width:110px;border:1px solid var(--line,#eee);border-left:4px solid #159b78;border-radius:10px;padding:8px 10px"><div style="font-size:11.5px;color:var(--muted)">รับแล้ว</div><div style="font-size:16px;font-weight:700;color:#159b78">'+fmt(paid)+'</div></div>'
     +'<div style="flex:1;min-width:110px;border:1px solid var(--line,#eee);border-left:4px solid '+(left>0.009?'#b52020':'#159b78')+';border-radius:10px;padding:8px 10px"><div style="font-size:11.5px;color:var(--muted)">คงค้าง</div><div style="font-size:16px;font-weight:700;color:'+(left>0.009?'#b52020':'#159b78')+'">'+fmt(Math.max(0,left))+'</div></div></div>';
+  if(archived)h+='<div style="background:#fdf6e3;border:1px solid #f0e0b8;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:12.5px">'
+    +'🗄️ บิลนี้เก็บลง NAS แล้ว และลบรูปบิล/สลิปออกจาก Supabase เพื่อประหยัดพื้นที่ — ดูไฟล์ได้ที่ NAS โฟลเดอร์ <b>'+esc(bi.nas_path||'(ไม่ระบุ)')+'</b>'
+    +'<div style="color:var(--muted)">อยากให้กลับมาดูในระบบ: รันโปรแกรม NAS ด้วย <code>--restore-bill '+esc(b.bill_no||'')+'</code></div></div>';
   if(!rows.length)h+='<div class="empty">ยังไม่มีประวัติการชำระ</div>';
   else h+=rows.map((r,i)=>{
     const d=new Date(r.created_at).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'});
@@ -10971,8 +11074,8 @@ async function showPayHistory(billId){
       +(r.paid_by?'<div style="font-size:12px;color:var(--muted)">รับโดย '+esc(r.paid_by)+(r.trans_ref?' · ref '+esc(r.trans_ref):'')+'</div>':'')
       +(r.note?'<div style="font-size:12px;color:#a06b00">'+esc(r.note)+'</div>':'')
       +(sl.length?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">'+sl.map(u=>
-        '<img src="'+esc(u)+'" onclick="showImgView(this.src)" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:zoom-in">').join('')+'</div>'
-        :'<div style="font-size:12px;color:var(--muted);margin-top:4px">— ไม่มีสลิปแนบ —</div>')
+        '<img src="'+esc(u)+'" data-bill="'+billId+'" onerror="phImgErr(this)" onclick="showImgView(this.src)" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:zoom-in">').join('')+'</div>'
+        :'<div style="font-size:12px;color:var(--muted);margin-top:4px">'+(archived?'🗄️ สลิปเก็บที่ NAS แล้ว (ดูหมายเหตุด้านบน)':'— ไม่มีสลิปแนบ —')+'</div>')
       +'</div>';
   }).join('');
   box.innerHTML=h;
@@ -13306,13 +13409,13 @@ async function migrateStorage(btn){
       if(error){failed++;console.warn('move',f,error.message);continue;}
       moved++;
       const newUrl=db.storage.from(bucket).getPublicUrl(nf).data.publicUrl;
-      const {data:up}=await db.from('bills').update({[col]:newUrl}).eq(col,oldUrl).select('id');
-      updated+=(up||[]).length;
+      // แก้ลิงก์ทุกจุดที่อ้างไฟล์นี้ — ไม่ใช่แค่คอลัมน์หลักของบิล (ประวัติชำระ/หน้าบิล/สลิปไลน์/ใบเสร็จรายจ่าย ใช้ถังเดียวกัน)
+      updated+=await stgRelink(bucket,oldUrl,newUrl);
     }
     st.textContent=bucket+': ย้าย '+moved+' ไฟล์';
   }
   btn.disabled=false;btn.textContent='🔒 ย้ายไฟล์เก่าไปชื่อสุ่ม';
-  st.textContent='ย้าย '+moved+' ไฟล์ · อัปเดตลิงก์ในระบบ '+updated+' บิล · ข้ามที่ปลอดภัยอยู่แล้ว '+skipped+(failed?' · พลาด '+failed:'');
+  st.textContent='ย้าย '+moved+' ไฟล์ · อัปเดตลิงก์ในระบบ '+updated+' จุด · ข้ามที่ปลอดภัยอยู่แล้ว '+skipped+(failed?' · พลาด '+failed:'');
   toast(failed?('ย้ายเสร็จ '+moved+' ไฟล์ แต่พลาด '+failed+' ไฟล์'):('🔒 ย้ายไฟล์เรียบร้อย '+moved+' ไฟล์'));
   if(failed)alertOps('ย้ายไฟล์สตอเรจไม่สำเร็จบางไฟล์',failed+' ไฟล์');
 }

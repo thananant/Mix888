@@ -132,6 +132,39 @@ begin
   update payments set slips = '[]'::jsonb where bill_id = p_bill_id;
 end $$;
 
+-- 2b) กู้บิลจาก NAS กลับเข้าระบบ — โปรแกรม NAS (--restore-bill) อัปโหลดรูปบิล/สลิปกลับ bucket แล้วเรียกตัวนี้ใส่ลิงก์คืน
+--     สลิป: จำนวนเท่ากับครั้งที่ชำระ → ใส่ใบละครั้งตามลำดับ · ไม่เท่า → ใส่ทั้งหมดไว้ที่ครั้งแรก · ไม่มีประวัติชำระ → ใส่แค่ช่องสลิปบนบิล
+create or replace function nas_restore_bill(p_key text, p_bill_no text, p_image_url text, p_slips jsonb)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_id bigint; v_slips jsonb := coalesce(p_slips, '[]'::jsonb); n int := 0; pid bigint; i int := 0; cnt int := 0;
+begin
+  perform nas_check_key(p_key);
+  if jsonb_typeof(v_slips) <> 'array' then v_slips := '[]'::jsonb; end if;
+  select id into v_id from bills where bill_no = p_bill_no;
+  if v_id is null then raise exception 'NO_BILL'; end if;
+  update bills
+     set image_url   = coalesce(nullif(p_image_url, ''), image_url),
+         slip_url    = case when jsonb_array_length(v_slips) > 0 then v_slips->>0 else slip_url end,
+         archived_at = null                     -- กลับมามีไฟล์ใน Supabase แล้ว (nas_path คงไว้ — สำเนาบน NAS ยังอยู่)
+   where id = v_id;
+  begin
+    select count(*) into cnt from payments where bill_id = v_id;
+    if cnt > 0 and jsonb_array_length(v_slips) > 0 then
+      if cnt = jsonb_array_length(v_slips) then
+        for pid in select id from payments where bill_id = v_id order by id loop
+          update payments set slips = jsonb_build_array(v_slips->i) where id = pid;
+          i := i + 1; n := n + 1;
+        end loop;
+      else
+        update payments set slips = v_slips where id = (select id from payments where bill_id = v_id order by id limit 1);
+        n := 1;
+      end if;
+    end if;
+  exception when undefined_table then n := 0;   -- ยังไม่มีตาราง payments ก็ข้าม
+  end;
+  return jsonb_build_object('bill_id', v_id, 'payments_updated', n);
+end $$;
+
 -- 3) รายชื่อไฟล์ใน bucket (ไว้เก็บสื่อบรอดแคสต์ที่ไม่ได้อ้างในตารางสินค้า)
 create or replace function nas_list_objects(p_key text, p_bucket text)
 returns jsonb language plpgsql security definer set search_path = public, storage, pg_temp as $$
@@ -174,11 +207,12 @@ end $$;
 
 -- 5) ให้โปรแกรมบน NAS ลบไฟล์ใน bucket bills / products ได้ (bucket slips เปิดอยู่แล้วเพราะหลังบ้านใช้ลบสลิป)
 --    หมายเหตุ: เป็นระดับสิทธิ์เดียวกับที่หลังบ้านใช้อยู่ (anon key) — ไฟล์ต้นฉบับทุกไฟล์มีสำเนาบน NAS ก่อนลบเสมอ
--- 6) ให้โปรแกรมบน NAS อัปโหลดไฟล์กลับ bucket products ได้ (โหมดกู้คืน --restore-media)
+-- 6) ให้โปรแกรมบน NAS อัปโหลดไฟล์กลับได้: bucket products (--restore-media) และ bills / slips (--restore-bill)
+--    (หลังบ้านอัปโหลดเข้า bills/slips อยู่แล้วด้วยสิทธิ์เดียวกัน — ไม่ได้เปิดอะไรใหม่ที่หลังบ้านทำไม่ได้)
 drop policy if exists nas_upload_media on storage.objects;
-create policy nas_upload_media on storage.objects for insert to anon, authenticated with check (bucket_id in ('products'));
+create policy nas_upload_media on storage.objects for insert to anon, authenticated with check (bucket_id in ('products', 'bills', 'slips'));
 drop policy if exists nas_update_media on storage.objects;
-create policy nas_update_media on storage.objects for update to anon, authenticated using (bucket_id in ('products')) with check (bucket_id in ('products'));
+create policy nas_update_media on storage.objects for update to anon, authenticated using (bucket_id in ('products', 'bills', 'slips')) with check (bucket_id in ('products', 'bills', 'slips'));
 
 drop policy if exists nas_delete_media on storage.objects;
 create policy nas_delete_media on storage.objects for delete to anon, authenticated
