@@ -35,7 +35,9 @@
       ลองก่อน:  node archiver.js --once --dry-run   = เก็บลง NAS จริง แต่ "ไม่ลบ/ไม่แก้อะไรใน Supabase" แล้วสรุปท้ายรอบว่าเก็บอะไรบ้าง
       กู้บิล:   node archiver.js --restore-bill IV2609250013   = เอารูปบิล+สลิปของบิลนี้จาก NAS อัปโหลดกลับ Supabase (หลังบ้านเปิดดูได้อีก)
       ตรวจ:    node archiver.js --check   = ตรวจสำรองเต็มรอบเดี๋ยวนี้ (ปกติทำเองวันละครั้ง): เก็บไฟล์ที่ตกหล่น · ไฟล์ในระบบหายแต่ NAS มี = กู้กลับให้เอง
+               (บิลส่งแล้ว+จ่ายครบเกิน 30 วัน = เก็บเข้าคลัง NAS แทน ไม่อัปขึ้นใหม่ · สำเนาเก่าที่เก็บก่อนมีแผนผังต้องตรวจผ่านก่อน ไม่ผ่าน = "ตรวจเอง")
                · ไฟล์ที่หายทั้งสองที่ = แจ้งกลุ่มรีพอร์ต และไม่ลบบิลนั้นออกจาก Supabase
+      ลองดูก่อน: node archiver.js --check --dry-run = ตรวจเต็มรอบ บอกว่าจะกู้/จะเก็บเข้าคลังกี่ไฟล์ โดยไม่แก้อะไรใน Supabase
    ② บนคอม Windows: ติดตั้ง Node.js แล้วดับเบิลคลิก mix888-nas-archiver.bat
       เปิดทิ้งไว้ โปรแกรมจะซิงก์ทุก ๆ 30 นาทีอัตโนมัติ
    ============================================================ */
@@ -271,6 +273,70 @@ function relinkMoved(url, ref){
   })());
   return MOVED.get(url);
 }
+/* ไฟล์ในระบบหาย แต่ NAS มีไฟล์ชื่อตรงที่เก็บก่อนมีแผนผัง (.files.json) — ใช้สำเนานี้แทนได้ไหม
+   ที่มา: โปรแกรม NAS รุ่นก่อน (27 ก.ย. 2569) ลบสลิปของบิลจ่ายครบออกจาก Supabase หลังเช็คว่ามีไฟล์บน NAS แล้ว
+   แต่บันทึกสถานะในฐานข้อมูลไม่สำเร็จ → ไฟล์หาย ลิงก์ค้าง · สำเนาบน NAS คือไฟล์ที่โหลดจากลิงก์นั้นเองก่อนถูกลบ
+   ใช้แทนได้เมื่อพิสูจน์ได้ว่าเป็นไฟล์ของลิงก์นี้ ไม่ใช่สลิปใบอื่นของบิลเดียวกัน:
+   - เป็นไฟล์รูปจริง (ไม่ใช่ไฟล์เสีย/โหลดค้าง)
+   - สลิป: บิลนี้ไม่เคยเปลี่ยนสลิป · จำนวนสลิปบน NAS = จำนวนสลิปในระบบ (ไม่มีใบที่ถูกถอด/เพิ่ม ทำให้ลำดับ _สลิป1 _สลิป2 เลื่อน)
+           และไฟล์บน NAS ถูกเก็บ "หลัง" สลิปนี้ถูกแนบ (เก็บก่อน = เป็นสลิปใบเดิมก่อนถูกเปลี่ยน)
+   - รูปบิล: ชื่อไฟล์ผูกกับเวอร์ชันบิล (_บิล_v2) = บิลเวอร์ชันเดียวกัน
+   ไม่ผ่านข้อใดข้อหนึ่ง = ไม่ใช้ รายงาน "ตรวจเอง" ให้คนเปิดดูภาพ */
+const ADOPTED = new Set();        // ลิงก์ที่รอบนี้ใช้สำเนาเก่าบน NAS แทน (ตรวจผ่านแล้ว)
+const ARCHIVE_BILLS = new Set();  // บิลจ่ายครบเกินกำหนดที่ไฟล์ในระบบหาย → ขั้นตอนลบไฟล์บิลจ่ายครบจะเก็บเข้าคลัง NAS + ล้างลิงก์ที่เสีย
+const LEGACY_SKEW = 2 * 60 * 1000;   // เผื่อนาฬิกาเครื่องพนักงาน/NAS ต่างกัน
+function isImageFile(file){
+  try{
+    const fd = fs.openSync(file, 'r'); const h = Buffer.alloc(12); const n = fs.readSync(fd, h, 0, 12, 0); fs.closeSync(fd);
+    if(n < 4) return false;
+    const s = h.toString('latin1');
+    return (h[0] === 0xFF && h[1] === 0xD8 && h[2] === 0xFF)          // JPEG
+        || s.startsWith('\x89PNG\r\n\x1a\n') || s.startsWith('GIF8') || s.startsWith('%PDF')
+        || (s.startsWith('RIFF') && s.slice(8, 12) === 'WEBP');
+  }catch(e){ return false; }
+}
+// เวลาที่ลิงก์นี้ถูกแนบกับบิล: เวลาในชื่อไฟล์ (slip_<บิล>_<เวลา>…) → เวลาบันทึกการชำระ → เวลาจ่ายครบ
+function linkTimeOf(b, url){
+  let nm = ''; try{ nm = decodeURIComponent(String(url || '').split('?')[0].split('/').pop()); }catch(e){}
+  const m = nm.match(/^(?:slip|bill|receipt)_.*_(\d{13})(?=[-_.]|$)/);
+  if(m){ const t = Number(m[1]); if(t > Date.UTC(2024, 0, 1) && t < Date.now() + 86400000) return t; }
+  let t = null;
+  for(const p of (Array.isArray(b.payments) ? b.payments : []))
+    if(Array.isArray(p.slips) && p.slips.includes(url)){ const x = Date.parse(p.created_at); if(!isNaN(x) && (t === null || x < t)) t = x; }
+  if(t === null && url === b.slip_url && b.paid_at){ const x = Date.parse(b.paid_at); if(!isNaN(x)) t = x; }
+  return t;
+}
+// '' = ใช้แทนได้ · อื่น ๆ = เหตุผลที่ใช้ไม่ได้ (cache = ต่อบิล)
+function legacyCheck(b, files, billDir, man, url, kind, name, cache){
+  const file = path.join(billDir, name);
+  if(!isImageFile(file)) return 'ไฟล์บน NAS ไม่ใช่รูปภาพ/ไฟล์เสีย';
+  if(kind !== 'slip') return '';
+  if(Object.keys(man).some(k => k.startsWith('legacy:'))) return 'บิลนี้เคยเปลี่ยนสลิป';
+  if(cache.nasSlips === undefined){
+    const re = new RegExp('^' + safeName(b.bill_no).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '_สลิป\\d+\\.[A-Za-z0-9]+$');
+    let ls = []; try{ ls = fs.readdirSync(billDir); }catch(e){}
+    cache.nasSlips = ls.filter(n => re.test(n) && onNas(path.join(billDir, n))).length;
+  }
+  const nSys = files.filter(x => x[2] === 'slip').length;
+  if(cache.nasSlips !== nSys) return 'จำนวนสลิปบน NAS (' + cache.nasSlips + ') ไม่เท่ากับในระบบ (' + nSys + ')';
+  const t = linkTimeOf(b, url);
+  if(t === null) return 'ไม่รู้เวลาที่แนบสลิปนี้';
+  let mt = 0; try{ mt = fs.statSync(file).mtimeMs; }catch(e){}
+  if(mt < t - LEGACY_SKEW) return 'ไฟล์บน NAS เก็บไว้ก่อนสลิปนี้ถูกแนบ — อาจเป็นสลิปใบเดิมก่อนเปลี่ยน';
+  return '';
+}
+// บิลที่ขั้นตอน "ลบไฟล์บิลจ่ายครบ" จะเก็บเข้าคลัง NAS (ส่งของแล้ว + จ่ายครบเกินกำหนด)
+function prunableBill(b){
+  if(!CFG.PRUNE_PAID_BILLS || b.ship_status !== 'shipped' || b.payment_status !== 'paid' || !b.paid_at) return false;
+  return new Date(b.paid_at).getTime() <= Date.now() - CFG.PRUNE_PAID_AFTER_DAYS * 24 * 3600 * 1000;
+}
+let ARCHIVE_OK = null;   // ฐานข้อมูลพร้อมเก็บเข้าคลังไหม (nas_mark_pruned รุ่นใหม่) — ถามครั้งเดียวต่อรอบ
+function archiveReady(){
+  if(!CFG.PRUNE_PAID_BILLS) return Promise.resolve(false);
+  if(DRY_RUN) return Promise.resolve(true);
+  if(!ARCHIVE_OK) ARCHIVE_OK = rpc('nas_mark_pruned', {p_bill_id: -1, p_nas_path: ''}).then(p => !!(p && Array.isArray(p.safe)), () => false);
+  return ARCHIVE_OK;
+}
 const KIND_TH = {slip: 'สลิป', bill: 'รูปบิล', receipt: 'ใบเสร็จรายจ่าย', doc: 'เอกสารเครดิต', statement: 'ใบวางบิล', product: 'รูปสินค้า'};
 function issueText(list, open){
   const L = ['⚠️ NAS สำรองไฟล์ไม่ได้ ' + list.length + ' ไฟล์ (ไฟล์พวกนี้ระบบจะยังไม่ลบออกจาก Supabase)'];
@@ -320,6 +386,11 @@ async function reportIssues(fullKinds){
     + RESTORED.slice(0, 20).join(', ') + (RESTORED.length > 20 ? ' …' : '') + (text ? '\n\n' + text : '');
   if(RELINKED.length) text = '\u{1F527} แก้ลิงก์ไฟล์ที่ถูกย้ายชื่อให้แล้ว ' + RELINKED.length + ' ไฟล์ (ไฟล์ยังอยู่ครบ ไม่ได้หาย · เรื่องของไฟล์เหล่านี้ที่เคยแจ้งไว้ ปิดให้แล้ว): '
     + [...new Set(RELINKED)].slice(0, 20).join(', ') + (new Set(RELINKED).size > 20 ? ' …' : '') + (text ? '\n\n' + text : '');
+  if(ADOPTED.size || ARCHIVE_BILLS.size) text = '\u{1F5C4} ไฟล์ที่หายจาก Supabase แต่ NAS มีสำเนา — ใช้สำเนาบน NAS แทนแล้ว'
+    + (ADOPTED.size ? ' (สำเนาที่เก็บไว้ก่อนมีแผนผัง ตรวจแล้วว่าเป็นไฟล์เดียวกัน ' + ADOPTED.size + ' ไฟล์ · เรื่อง "ตรวจเอง" ของไฟล์เหล่านี้ปิดให้แล้ว)' : '')
+    + (ARCHIVE_BILLS.size ? '\n• บิลจ่ายครบเกิน ' + CFG.PRUNE_PAID_AFTER_DAYS + ' วัน ' + ARCHIVE_BILLS.size + ' ใบ → เก็บเข้าคลัง NAS (หลังบ้านจะขึ้นว่าเก็บที่ NAS พร้อมชื่อโฟลเดอร์ · อยากดูในระบบอีก ใช้ --restore-bill)' : '')
+    + (RESTORED.length ? '\n• บิลอื่น → อัปโหลดกลับขึ้นระบบ (รายการด้านล่าง)' : '')
+    + (text ? '\n\n' + text : '');
   if(!text) return;
   const gid = res.report_group;
   const ok = gid ? await linePush(gid, text) : false;
@@ -601,8 +672,9 @@ async function deleteObject(bucket, objPath){
   if(DRY_RUN){ log('  (ทดลอง) จะลบใน Supabase: ' + bucket + '/' + objPath); return; }
   const r = await fetch(SUPABASE_URL + '/storage/v1/object/' + bucket + '/' + objPath.split('/').map(encodeURIComponent).join('/'), {
     method: 'DELETE', headers: {apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY}});
-  if(r.status === 404 || r.status === 400) return;   // ไม่มีไฟล์แล้ว (เช่น สลิปใบเดียวกันผูกหลายบิล ลบไปตอนบิลก่อนหน้า)
+  if(r.status === 404 || r.status === 400) return false;   // ไม่มีไฟล์แล้ว (เช่น สลิปใบเดียวกันผูกหลายบิล ลบไปตอนบิลก่อนหน้า)
   if(!r.ok) throw new Error('ลบไฟล์ ' + bucket + '/' + objPath + ' ไม่ได้ (' + r.status + ') — รัน mix888-nas-key-fix.sql หรือยัง?');
+  return true;
 }
 const onNas = p => { try{ return fs.statSync(p).size > 0; }catch(e){ return false; } };
 const maskKey = k => !k ? '(ว่าง)' : (k.length <= 6 ? k[0] + '***' : k.slice(0, 4) + '***' + k.slice(-2) + ' (' + k.length + ' ตัวอักษร)');
@@ -709,7 +781,7 @@ async function pruneBills(ROOT){
     const man = readManifest(billDir); let dirty = false;
     if(files.some(([u, n]) => n && !onNas(path.join(billDir, nasFileFor(billDir, man, u, n).name)))){ keep('ไฟล์ยังไม่อยู่บน NAS ครบ'); continue; }
     const names = [];
-    let okAll = true, reason = '';
+    let okAll = true, reason = '', nLost = 0;
     for(const [u, name0] of files){
       if(!name0) continue;
       const f = nasFileFor(billDir, man, u, name0);
@@ -717,7 +789,11 @@ async function pruneBills(ROOT){
       if(!onNas(dest)){ okAll = false; reason = 'ไฟล์ยังไม่อยู่บน NAS ครบ'; break; }
       let remote;
       try{ remote = await fetchBuf(u); }
-      catch(e){ okAll = false; reason = isGone(e) ? 'ต้นฉบับหายไปแล้ว (ไม่ลบที่เหลือ)' : 'โหลดต้นฉบับมาเทียบไม่ได้'; break; }
+      catch(e){
+        // ไฟล์ในระบบหายไปแล้ว แต่สำเนาบน NAS ยืนยันแล้วว่าเป็นไฟล์ของลิงก์นี้ (แผนผัง / ตรวจสำเนาเก่าผ่าน) = สำเนาเดียวที่เหลือ → เก็บเข้าคลังได้
+        if(isGone(e) && (f.known || ADOPTED.has(u))){ nLost++; names.push(f.name); continue; }
+        okAll = false; reason = isGone(e) ? 'ต้นฉบับหายไปแล้ว และสำเนาบน NAS ยังยืนยันไม่ได้' : 'โหลดต้นฉบับมาเทียบไม่ได้'; break;
+      }
       if(!remote.equals(fs.readFileSync(dest))){
         try{
           const w = storeMismatch(billDir, man, u, name0, f, remote); dirty = true;
@@ -731,7 +807,7 @@ async function pruneBills(ROOT){
     if(dirty) writeManifest(billDir, man);
     if(!okAll){ keep(reason); continue; }
     const rel = path.relative(ROOT, billDir);
-    if(DRY_RUN){ pruned++; tally('ลบไฟล์บิลจ่ายครบออกจาก Supabase', 'pruned'); log('  (ทดลอง) จะลบไฟล์ใน Supabase ของบิล ' + b.bill_no + ' (' + files.length + ' ไฟล์ ตรงกับสำเนาบน NAS ทุกไบต์ · ' + rel + ')'); continue; }
+    if(DRY_RUN){ pruned++; tally('ลบไฟล์บิลจ่ายครบออกจาก Supabase', 'pruned'); log('  (ทดลอง) จะลบไฟล์ใน Supabase ของบิล ' + b.bill_no + ' (' + files.length + ' ไฟล์ ตรงกับสำเนาบน NAS ทุกไบต์' + (nLost ? ' · ' + nLost + ' ไฟล์หายจากระบบแล้ว ใช้สำเนาบน NAS' : '') + ' · ' + rel + ')'); continue; }
     const nameOf = u => (u && typeof man[u] === 'string') ? man[u] : null;
     man.__pruned__ = names;                                           // จำว่าตอนลบ บิลนี้มีไฟล์ไหนบ้าง และสลิปไหนเป็นของการชำระครั้งไหน (ใช้ตอน --restore-bill)
     man.__pruned_layout__ = {image: nameOf(b.image_url), slip_url: nameOf(b.slip_url),
@@ -750,10 +826,11 @@ async function pruneBills(ROOT){
       if(!safe || !safe.has(u)){ if(safe) nShared++; continue; }
       const bucket = bucketOf(u) || 'bills';
       const op = objPathOf(u, bucket); if(!op) continue;
-      try{ await deleteObject(bucket, op); nDel++; }catch(e){ nFail++; log('  [!] ' + e.message); }
+      try{ if(await deleteObject(bucket, op)) nDel++; }catch(e){ nFail++; log('  [!] ' + e.message); }
     }
     pruned++; tally('ลบไฟล์บิลจ่ายครบออกจาก Supabase', 'pruned');
     log('  [ลบใน Supabase] บิล ' + b.bill_no + ' (จ่ายครบ · สำเนาตรงทุกไบต์อยู่ ' + rel + ') — ล้างลิงก์แล้ว ลบไฟล์ ' + nDel
+        + (nLost ? ' · ' + nLost + ' ไฟล์หายจากระบบไปก่อนแล้ว (เก็บเข้าคลังด้วยสำเนาบน NAS)' : '')
         + (nShared ? ' · ไม่ลบ ' + nShared + ' ไฟล์ที่บิลอื่นยังใช้อยู่ (สลิปโอนรวม)' : '')
         + (nFail ? ' · ลบไม่ได้ ' + nFail + ' ไฟล์ (ค้างในถัง ไม่กระทบระบบ จะไม่ถูกอ้างถึงแล้ว)' : ''));
   }
@@ -780,10 +857,11 @@ async function verifyBackups(ROOT){
     const billDir = fs.existsSync(dayDir) ? ensureBillDir(dayDir, b) : path.join(dayDir, safeName(b.bill_no) + paySuffix(b));
     items.push({b, files, billDir});
   }
-  const st = {files: 0, fetched: 0, restored: 0, refreshed: 0, moved: 0, gone: 0, error: 0};
+  const st = {files: 0, fetched: 0, restored: 0, refreshed: 0, moved: 0, adopted: 0, archive: 0, unverified: 0, why: {}, gone: 0, error: 0};
   // ทีละบิล (ไฟล์ในบิลเดียวกันทำตามลำดับ — แผนผังของโฟลเดอร์ไม่ชนกัน) · หลายบิลพร้อมกัน 6 งาน
   await pool(items, 6, async ({b, files, billDir}) => {
     const man = readManifest(billDir); let dirty = false;
+    const lc = {};                                                    // ผลนับสลิปบน NAS ของบิลนี้ (ใช้ตรวจสำเนาเก่า)
     for(const [url, name0, kind] of files){
       st.files++;
       const f = nasFileFor(billDir, man, url, name0);
@@ -830,15 +908,28 @@ async function verifyBackups(ROOT){
           }
           continue;
         }
+        let adopted = false;
         if(!f.known){
-          // ไฟล์เก็บก่อนมีแผนผัง ยืนยันไม่ได้ว่าเป็นใบเดียวกัน (ชื่อตามลำดับอาจเลื่อน) → ไม่กู้อัตโนมัติ ให้คนเปิดดูภาพก่อน
+          // ไฟล์เก็บก่อนมีแผนผัง → ตรวจว่าเป็นไฟล์ของลิงก์นี้จริงไหม (legacyCheck) · ไม่ผ่าน = ไม่ใช้ ให้คนเปิดดูภาพก่อน
+          const why = ADOPTED.has(url) ? '' : legacyCheck(b, files, billDir, man, url, kind, f.name, lc);
           const rel = path.relative(ROOT, dest);
-          ISSUES.set(url, {kind, ref: b.bill_no, url, reason: 'nas_unverified', detail: ('NAS มีไฟล์ ' + rel).slice(0, 200)});
-          log('  [ตรวจเอง] ' + b.bill_no + ' ' + f.name + ' — ไฟล์ในระบบหาย · NAS มีไฟล์ชื่อตรงแต่ยืนยันไม่ได้ว่าใบเดียวกัน: ' + rel);
+          if(why){
+            const wk = why.replace(/\s*\([^)]*\)/g, ''); st.unverified++; st.why[wk] = (st.why[wk] || 0) + 1;
+            if(!ADOPTED.has(url)) ISSUES.set(url, {kind, ref: b.bill_no, url, reason: 'nas_unverified', detail: ('NAS มีไฟล์ ' + rel + ' · ' + why).slice(0, 200)});
+            log('  [ตรวจเอง] ' + b.bill_no + ' ' + f.name + ' — ไฟล์ในระบบหาย · NAS มีไฟล์ชื่อตรงแต่ยืนยันไม่ได้ว่าใบเดียวกัน (' + why + '): ' + rel);
+            continue;
+          }
+          adopted = true; st.adopted++; ADOPTED.add(url); noteOk(url);
+          if(!DRY_RUN){ man[url] = f.name; dirty = true; }            // จดในแผนผังว่าเป็นไฟล์ของลิงก์นี้ (ตรวจแล้ว)
+        }
+        // บิลส่งแล้ว + จ่ายครบเกินกำหนด → ไม่ต้องอัปขึ้นใหม่ (เดี๋ยวก็ถูกลบตามรอบ) · ขั้นตอนลบไฟล์บิลจ่ายครบจะเก็บเข้าคลัง NAS + ล้างลิงก์ที่เสียให้
+        if(prunableBill(b) && await archiveReady()){
+          st.archive++; noteOk(url); ARCHIVE_BILLS.add(b.bill_no);
+          log('  ' + (DRY_RUN ? '(ทดลอง) ' : '') + '[เก็บเข้าคลัง NAS] ' + b.bill_no + ' ' + f.name + ' — ไฟล์ในระบบหาย ใช้สำเนาบน NAS' + (adopted ? ' (สำเนาเก่า ตรวจแล้วตรงเงื่อนไข)' : '') + ' · บิลจ่ายครบเกิน ' + CFG.PRUNE_PAID_AFTER_DAYS + ' วัน');
           continue;
         }
         // ในระบบหาย แต่ NAS มี → กู้กลับ
-        if(DRY_RUN){ st.restored++; log('  (ทดลอง) จะกู้จาก NAS กลับขึ้นระบบ: ' + b.bill_no + ' ' + f.name); continue; }
+        if(DRY_RUN){ st.restored++; log('  (ทดลอง) จะกู้จาก NAS กลับขึ้นระบบ: ' + b.bill_no + ' ' + f.name + (adopted ? ' (สำเนาเก่า ตรวจแล้วตรงเงื่อนไข)' : '')); continue; }
         try{
           let first = false;
           if(!RESTORE_MAP.has(url)){
@@ -859,8 +950,8 @@ async function verifyBackups(ROOT){
           delete man[url]; man[nu] = f.name; dirty = true; noteOk(url);
           if(first){
             st.restored++;
-            RESTORED.push((KIND_TH[kind] || kind) + ' ' + b.bill_no + (f.known ? '' : ' (สำเนาเก่า — เปิดดูภาพยืนยันอีกครั้ง)'));
-            log('  [กู้คืนอัตโนมัติ] ' + b.bill_no + ' ' + f.name + ' — ไฟล์ในระบบหาย ใช้สำเนาจาก NAS แทน (แก้ลิงก์ ' + n + ' จุด)' + (f.known ? '' : ' · ไฟล์เก็บก่อนมีแผนผัง ยืนยันไม่ได้ 100%'));
+            RESTORED.push((KIND_TH[kind] || kind) + ' ' + b.bill_no);
+            log('  [กู้คืนอัตโนมัติ] ' + b.bill_no + ' ' + f.name + ' — ไฟล์ในระบบหาย ใช้สำเนาจาก NAS แทน (แก้ลิงก์ ' + n + ' จุด)' + (adopted ? ' · สำเนาเก่า ตรวจแล้วตรงเงื่อนไข' : ''));
           }
         }catch(e){ log('  [!] กู้ ' + b.bill_no + ' ' + f.name + ' กลับไม่ได้: ' + e.message); }
         continue;
@@ -881,6 +972,10 @@ async function verifyBackups(ROOT){
   });
   log('[ตรวจสำรอง] ไฟล์บิล+สลิป ' + st.files + ' ไฟล์ (ย้อนหลัง ' + CFG.PRUNE_DAYS_BACK + ' วัน) · เก็บตกหล่น ' + st.fetched + ' · กู้คืนอัตโนมัติ ' + st.restored
       + ' · เก็บใหม่/ซ่อม ' + st.refreshed + ' · ไฟล์ถูกย้ายชื่อ (แก้ลิงก์) ' + st.moved + ' · หายถาวร ' + st.gone + ' · โหลดไม่ได้ ' + st.error);
+  if(st.adopted || st.archive || st.unverified)
+    log('[ตรวจสำรอง] ไฟล์ในระบบหายแต่ NAS มีสำเนา: สำเนาเก่าตรวจแล้วใช้แทนได้ ' + st.adopted + ' · เก็บเข้าคลัง NAS (บิลจ่ายครบเกิน ' + CFG.PRUNE_PAID_AFTER_DAYS + ' วัน) ' + st.archive + ' ไฟล์ '
+        + ARCHIVE_BILLS.size + ' ใบ · ' + (DRY_RUN ? 'จะ' : '') + 'อัปโหลดกลับขึ้นระบบ ' + st.restored + ' · ยืนยันไม่ได้ (ตรวจเอง) ' + st.unverified
+        + (st.unverified ? ' (' + Object.entries(st.why).map(([k, v]) => k + ' ' + v).join(' · ') + ')' : ''));
   return st;
 }
 const STATE_FILE = path.join(__dirname, 'archiver-state.json');
@@ -1181,6 +1276,7 @@ async function syncOnce(){
     if(!(await preflight())){ running = false; flushLog(); return false; }
     DATA = null;   // โหลดข้อมูลตารางใหม่ทุกรอบ
     ISSUES.clear(); OK_URLS.clear(); RESTORED.length = 0; FULL_KINDS.clear(); RESTORE_MAP.clear(); MOVED.clear(); OBJ_INDEX.clear(); TABLE_CACHE.clear(); RELINKED.length = 0;
+    ADOPTED.clear(); ARCHIVE_BILLS.clear(); ARCHIVE_OK = null;
     const since = new Date(Date.now() - CFG.DAYS_BACK * 24 * 3600 * 1000).toISOString();
     const bills = await fetchBills(since);
     log('พบบิล ' + bills.length + ' ใบ (ย้อนหลัง ' + CFG.DAYS_BACK + ' วัน)');
