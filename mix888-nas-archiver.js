@@ -946,9 +946,11 @@ async function verifyBackups(ROOT){
     }
     if(dirty) writeManifest(billDir, man);
   });
-  await resolveGone(ROOT, GONE, st);
+  const NIDX = checkNasIndex(ROOT, st);                              // แผนผังทั้ง NAS: หาสำเนาในโฟลเดอร์บิลอื่น + ตรวจสำเนาของลิงก์เดียวกันที่ไม่ตรงกัน
+  await resolveGone(ROOT, GONE, st, NIDX);
   log('[ตรวจสำรอง] ไฟล์บิล+สลิป ' + st.files + ' ไฟล์ (ย้อนหลัง ' + CFG.PRUNE_DAYS_BACK + ' วัน) · เก็บตกหล่น ' + st.fetched + ' · ' + (DRY_RUN ? '(ทดลอง) จะกู้คืน ' : 'กู้คืนอัตโนมัติ ') + st.restored
-      + ' · เก็บใหม่/ซ่อม ' + st.refreshed + ' · ไฟล์ถูกย้ายชื่อ (แก้ลิงก์) ' + st.moved + ' · หายถาวร ' + st.gone + ' · โหลดไม่ได้ ' + st.error);
+      + ' · เก็บใหม่/ซ่อม ' + st.refreshed + ' · ไฟล์ถูกย้ายชื่อ (แก้ลิงก์) ' + st.moved + ' · หายถาวร ' + st.gone + ' · โหลดไม่ได้ ' + st.error
+      + (st.conflict ? ' · สำเนาลิงก์เดียวกันไม่ตรงกัน ' + st.conflict + ' (ตรวจเอง)' : ''));
   if(st.adopted || st.archive || st.unverified || st.restoreFail || st.unsure)
     log('[ตรวจสำรอง] ไฟล์ในระบบหายแต่ NAS มีสำเนา: สำเนาเก่าตรวจแล้วใช้แทนได้ ' + st.adopted + ' · เก็บเข้าคลัง NAS (บิลจ่ายครบเกิน ' + CFG.PRUNE_PAID_AFTER_DAYS + ' วัน) ' + st.archive + ' ไฟล์ '
         + ARCHIVE_BILLS.size + ' ใบ · ' + (DRY_RUN ? 'จะ' : '') + 'อัปโหลดกลับขึ้นระบบ ' + st.restored
@@ -958,6 +960,40 @@ async function verifyBackups(ROOT){
   return st;
 }
 
+// ดัชนีแผนผังทั้ง NAS: ลิงก์ → [ไฟล์บน NAS ที่จดไว้ว่าเป็นของลิงก์นั้น] จาก .files.json ของทุกโฟลเดอร์บิล (รวมบิลที่เก็บเข้าคลังแล้ว / นอกช่วงตรวจ)
+//   ใช้หา "สำเนาในโฟลเดอร์บิลอื่น" ของสลิปโอนรวมที่หาย · และตรวจความถูกต้อง: ลิงก์เดียวกันจดไว้หลายโฟลเดอร์ต้องเป็นไฟล์เดียวกันทุกไบต์
+//   ไม่ตรงกัน = มีโฟลเดอร์หนึ่งจดผิดใบ → รายงานให้คนเปิดดู (ไม่แก้เอง)
+function checkNasIndex(ROOT, st){
+  const idx = new Map();
+  const ls = d => { try{ return fs.readdirSync(d); }catch(e){ return []; } };
+  for(const y of ls(ROOT).filter(n => /^\d{4}$/.test(n)))
+    for(const m of ls(path.join(ROOT, y)).filter(n => /^\d{2}$/.test(n)))
+      for(const d of ls(path.join(ROOT, y, m)).filter(n => /^\d{8}$/.test(n)))
+        for(const bd of ls(path.join(ROOT, y, m, d))){
+          const dir = path.join(ROOT, y, m, d, bd);
+          if(!fs.existsSync(path.join(dir, MANIFEST))) continue;
+          for(const [u, n] of Object.entries(readManifest(dir))){
+            if(typeof n !== 'string' || !/^https?:\/\//.test(u)) continue;
+            const p = path.join(dir, n); if(!onNas(p)) continue;
+            if(!idx.has(u)) idx.set(u, []);
+            if(!idx.get(u).includes(p)) idx.get(u).push(p);
+          }
+        }
+  let bad = 0;
+  for(const [u, ps] of idx){
+    if(ps.length < 2) continue;
+    const first = fs.readFileSync(ps[0]);
+    if(ps.every(p => { try{ return fs.readFileSync(p).equals(first); }catch(e){ return false; } })) continue;
+    bad++; st.conflict = (st.conflict || 0) + 1;
+    const rels = ps.map(p => path.relative(ROOT, p)), refs = [...new Set(ps.map(p => path.basename(path.dirname(p)).replace(/_.*$/, '')))];
+    ISSUES.set(u, {kind: /_สลิป/.test(ps[0]) ? 'slip' : 'bill', ref: refs.join(','), url: u, reason: 'nas_unverified',
+      detail: ('ลิงก์เดียวกันแต่สำเนาบน NAS ไม่ตรงกัน: ' + rels.join(' | ')).slice(0, 200)});
+    log('  [ตรวจเอง] สลิป/รูปบิลลิงก์เดียวกัน แต่สำเนาบน NAS ไม่ตรงกัน (' + refs.join(', ') + '): ' + rels.join(' | '));
+  }
+  if(bad) log('[!] พบสำเนาของลิงก์เดียวกันที่ไม่ตรงกัน ' + bad + ' ลิงก์ — เปิดดูภาพทั้งสองไฟล์ว่าใบไหนถูก');
+  return idx;
+}
+
 // (1c) ไฟล์ที่หายจาก Supabase — ตัดสินทีละ "ลิงก์" หลังตรวจครบทุกบิล (สลิปโอนรวม 1 ใบผูกหลายบิล ทุกบิลต้องได้ผลเดียวกัน)
 //   สำเนาต้นทาง = ไฟล์บน NAS ที่ยืนยันแล้วว่าเป็นของลิงก์นี้: จดในแผนผังแล้ว หรือสำเนาเก่าที่ตรวจผ่าน "ในโฟลเดอร์ของตัวเอง"
 //     สำเนาของบิลอื่นใช้ได้เฉพาะเมื่อตรงกับสำเนาต้นทางทุกไบต์ · สำเนาเก่าที่ผ่านเกณฑ์หลายโฟลเดอร์แต่เนื้อไม่ตรงกัน = ไม่รู้ใบไหนถูก → ตรวจเอง
@@ -965,7 +1001,7 @@ async function verifyBackups(ROOT){
 //     → เก็บเข้าคลัง NAS (ขั้นตอนลบไฟล์บิลจ่ายครบล้างลิงก์ที่เสียให้ ไม่ต้องอัปขึ้นใหม่)
 //   - นอกนั้น → อัปโหลดสำเนาต้นทางกลับ + แก้ลิงก์ทุกจุด (บิลที่ไม่มีสำเนา/สำเนาไม่ตรง ได้ไฟล์ที่ถูกต้องไปด้วย · สำเนาที่ไม่ตรงไม่ถูกแตะ)
 //   - ไม่มีสำเนาที่ยืนยันได้เลย → รายงาน (ตรวจเอง / หายทั้งสองที่)
-async function resolveGone(ROOT, GONE, st){
+async function resolveGone(ROOT, GONE, st, NIDX){
   if(!GONE.length) return;
   const canArchive = await archiveReady();
   const MANS = new Map();                // แผนผังของแต่ละโฟลเดอร์: แก้ในหน่วยความจำ เขียนทีเดียวตอนจบ (หลายลิงก์ในโฟลเดอร์เดียวกันไม่ทับกัน)
@@ -1045,9 +1081,26 @@ async function resolveGone(ROOT, GONE, st){
     const passed = copies.filter(g => !g.why);
     let src = passed.find(g => g.known) || passed[0] || null;
     if(src && !src.known && passed.some(g => g !== src && !sameBytes(g.dest, src.dest))) src = null;   // สำเนาเก่าหลายโฟลเดอร์ผ่านเกณฑ์แต่ไม่ตรงกัน
+    let elsewhere = null;
+    if(!src && NIDX && NIDX.has(url)){
+      // ไม่มีสำเนาที่ยืนยันได้ในโฟลเดอร์ของบิลที่ใช้ลิงก์นี้ → หาในโฟลเดอร์บิลอื่นที่จดลิงก์นี้ไว้ (เช่น บิลที่เก็บเข้าคลังแล้วของสลิปโอนรวม)
+      elsewhere = NIDX.get(url).filter(p => !group.some(g => g.dest === p));
+      const first = elsewhere[0];
+      if(first && elsewhere.every(p => sameBytes(p, first))){
+        const dir = path.dirname(first);
+        src = {url, b: {bill_no: path.basename(dir).replace(/_.*$/, '')}, billDir: dir, kind: group[0].kind, name0: path.basename(first), name: path.basename(first), dest: first, known: true, other: true};
+      }
+    }
     if(!src){
       for(const g of copies) unverified(g, g.why || 'สำเนาของบิลที่ใช้สลิปเดียวกัน (โอนรวม) ไม่ตรงกัน');
-      if(!copies.length){ noteIssue(noCopy[0].kind, noCopy[0].b.bill_no, url, noCopy[0].err); st.gone += noCopy.length; }
+      if(!copies.length){
+        if(elsewhere && elsewhere.length){                              // มีสำเนาในโฟลเดอร์บิลอื่นแต่ไม่ตรงกัน → ให้คนเปิดดู ไม่ใช่ "หายทั้งสองที่"
+          const g = noCopy[0], rels = elsewhere.map(p => path.relative(ROOT, p));
+          const wk = 'สำเนาในโฟลเดอร์บิลอื่นไม่ตรงกัน'; st.unverified++; st.why[wk] = (st.why[wk] || 0) + 1;
+          ISSUES.set(url, {kind: g.kind, ref: g.b.bill_no, url, reason: 'nas_unverified', detail: ('ไฟล์ในระบบหาย · NAS มีสำเนาในโฟลเดอร์บิลอื่นแต่ไม่ตรงกัน: ' + rels.join(' | ')).slice(0, 200)});
+          log('  [ตรวจเอง] ' + g.b.bill_no + ' — ไฟล์ในระบบหาย · มีสำเนาในโฟลเดอร์บิลอื่นแต่ไม่ตรงกัน: ' + rels.join(' | '));
+        }else{ noteIssue(noCopy[0].kind, noCopy[0].b.bill_no, url, noCopy[0].err); st.gone += noCopy.length; }
+      }
       return;
     }
     const ok = [], bad = [];
@@ -1061,7 +1114,7 @@ async function resolveGone(ROOT, GONE, st){
     }
     const bills = [...new Set(group.map(g => g.b.bill_no))];
     const ctx = {url, src, ok, bad, noCopy, bills, group,
-      tag: (src.known ? '' : ' (สำเนาเก่า ตรวจแล้วตรงเงื่อนไข)') + (bills.length > 1 ? ' · สลิปนี้ใช้กับบิล ' + bills.join(', ') : '')};
+      tag: (src.known ? '' : ' (สำเนาเก่า ตรวจแล้วตรงเงื่อนไข)') + (src.other ? ' · ใช้สำเนาที่เก็บไว้ในโฟลเดอร์บิล ' + src.b.bill_no + ' (สลิปเดียวกัน)' : '') + (bills.length > 1 ? ' · สลิปนี้ใช้กับบิล ' + bills.join(', ') : '')};
     if(canArchive && !bad.length && group.every(g => prunableBill(g.b))) ARCH.push(ctx);   // บิลที่ไม่มีสำเนา → เขียนสำเนาให้ตอนยืนยันเก็บเข้าคลัง
     else await restore(ctx);
   });
