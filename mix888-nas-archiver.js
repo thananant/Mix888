@@ -298,10 +298,10 @@ function isImageFile(file){
     const at = needle => { const i = t.lastIndexOf(needle); return i < 0 ? -1 : size - tl + i; };   // ตำแหน่งจริงในไฟล์ของตัวที่พบท้ายสุด
     const s = h.toString('latin1');
     if(h[0] === 0xFF && h[1] === 0xD8 && h[2] === 0xFF) return at(Buffer.from([0xFF, 0xD9])) >= size / 2;   // JPEG: จุดจบ (EOI) ต้องอยู่ช่วงท้าย (ไม่ใช่ของรูปย่อหัวไฟล์)
-    if(s.startsWith('\x89PNG\r\n\x1a\n')) return at('IEND') >= size - 1024;
+    if(s.startsWith('\x89PNG\r\n\x1a\n')){ const i = at('IEND'); return i >= 0 && i >= size - 1024; }
     if(s.startsWith('GIF8')) return t.subarray(Math.max(0, tl - 16)).includes(0x3B);
     if(s.startsWith('RIFF') && s.slice(8, 12) === 'WEBP') return h.readUInt32LE(4) + 8 <= size;
-    if(s.startsWith('%PDF')) return at('%%EOF') >= size - 1024;
+    if(s.startsWith('%PDF')){ const i = at('%%EOF'); return i >= 0 && i >= size - 1024; }
     return false;
   }catch(e){ return false; }
   finally{ if(fd !== null) try{ fs.closeSync(fd); }catch(e){} }
@@ -806,8 +806,9 @@ async function pruneBills(ROOT){
       let remote;
       try{ remote = await fetchBuf(u); }
       catch(e){
-        // ไฟล์ในระบบหายไปแล้ว แต่สำเนาบน NAS ยืนยันแล้วว่าเป็นไฟล์ของลิงก์นี้ (แผนผัง / ตรวจสำเนาเก่าผ่าน) = สำเนาเดียวที่เหลือ → เก็บเข้าคลังได้
-        if(isGone(e) && (f.known || ADOPTED_AT.has(billDir + '\0' + u))){ nLost++; names.push(f.name); continue; }
+        // ไฟล์ในระบบหายไปแล้ว → เก็บเข้าคลังได้เฉพาะเมื่อรอบตรวจเต็มรอบนี้ (resolveGone) อนุมัติทั้งกลุ่มแล้ว (ทุกบิลที่ใช้ลิงก์นี้มีสำเนาที่ถูกต้อง)
+        // รอบรายชั่วโมง/กู้กลับไม่สำเร็จ = ยังไม่เก็บ รอตรวจเต็มรอบถัดไป (ไม่งั้นบิลอื่นที่ใช้สลิปเดียวกันจะเสียโอกาสได้สำเนาที่ถูกต้อง)
+        if(isGone(e) && ADOPTED_AT.has(billDir + '\0' + u)){ nLost++; names.push(f.name); continue; }
         okAll = false; reason = isGone(e) ? 'ต้นฉบับหายไปแล้ว และสำเนาบน NAS ยังยืนยันไม่ได้' : 'โหลดต้นฉบับมาเทียบไม่ได้'; break;
       }
       if(!remote.equals(fs.readFileSync(dest))){
@@ -976,10 +977,23 @@ async function resolveGone(ROOT, GONE, st){
     ISSUES.set(g.url, {kind: g.kind, ref: g.b.bill_no, url: g.url, reason: 'nas_unverified', detail: ('NAS มีไฟล์ ' + rel(g) + ' · ' + why).slice(0, 200)});
     log('  [ตรวจเอง] ' + g.b.bill_no + ' ' + g.name + ' — ไฟล์ในระบบหาย · NAS มีไฟล์ชื่อตรงแต่ยืนยันไม่ได้ว่าใบเดียวกัน (' + why + '): ' + rel(g));
   };
+  // บิลที่ไม่มีสำเนาของตัวเอง → เก็บสำเนาที่ยืนยันแล้วลงโฟลเดอร์บิลนั้น แล้วจดในแผนผังด้วยลิงก์ที่ให้มา (ทำแม้กู้กลับไม่สำเร็จ — รอบรายชั่วโมงจะไม่แจ้งว่าหายทั้งสองที่)
+  const giveCopy = (g, src, urls) => {
+    if(DRY_RUN) return true;
+    try{
+      const M = manOf(g.billDir), buf = fs.readFileSync(src.dest);
+      let t = nasFileFor(g.billDir, M.man, urls[0], g.name0);
+      const p0 = path.join(g.billDir, t.name);
+      if(onNas(p0) && !fs.readFileSync(p0).equals(buf)){ M.man['legacy:' + t.name] = t.name; t = nasFileFor(g.billDir, M.man, urls[0], g.name0); }   // ชื่อนี้มีไฟล์อื่นอยู่แล้ว → ไม่ทับ ใช้ชื่อใหม่
+      fs.mkdirSync(g.billDir, {recursive: true}); writeFileAtomic(path.join(g.billDir, t.name), buf);
+      for(const u of urls) M.man[u] = t.name;
+      M.dirty = true; st.fetched++; return true;
+    }catch(e){ return false; }
+  };
   // กู้กลับ: อัปโหลดสำเนาต้นทางครั้งเดียว แล้วแก้ลิงก์ทุกจุดที่อ้างลิงก์เดิม
   const restore = async ({url, src, ok, bad, noCopy, bills, tag}) => {
     if(DRY_RUN){
-      st.restored++;
+      st.restored++; noteOk(url);                                      // ทำเหมือนกู้สำเร็จ ให้ผลทดลองตรงกับรอบจริง
       log('  (ทดลอง) จะกู้จาก NAS กลับขึ้นระบบ: ' + src.b.bill_no + ' ' + src.name + tag);
       for(const [g, why] of bad) log('    ↳ บิล ' + g.b.bill_no + ' ใช้สลิปเดียวกัน แต่สำเนาในโฟลเดอร์นั้นไม่ตรง (' + why + ') — จะไม่แตะไฟล์นั้น ใช้สำเนาของบิล ' + src.b.bill_no + ' แทน');
       return;
@@ -1002,6 +1016,7 @@ async function resolveGone(ROOT, GONE, st){
     }
     if(err){
       st.restoreFail++; RESTORE_FAILED.push(src.b.bill_no); OK_URLS.delete(url);
+      for(const g of noCopy) giveCopy(g, src, [url]);
       ISSUES.set(url, {kind: src.kind, ref: src.b.bill_no, url, reason: 'error', detail: ('ไฟล์ในระบบหาย NAS มีสำเนา แต่กู้กลับไม่ได้: ' + (err.message || err)).slice(0, 200)});
       log('  [!] กู้ ' + src.b.bill_no + ' ' + src.name + ' กลับไม่ได้: ' + (err.message || err) + ' — ลองใหม่รอบตรวจถัดไป');
       return;
@@ -1009,19 +1024,14 @@ async function resolveGone(ROOT, GONE, st){
     if(unsure){
       st.unsure++; OK_URLS.delete(url);
       for(const g of ok){ const M = manOf(g.billDir); M.man[nu] = g.name; M.dirty = true; }   // ลิงก์ใดลิงก์หนึ่งเป็นของจริง — จดไว้ทั้งคู่ รอบหน้ารู้เอง
+      for(const g of noCopy) giveCopy(g, src, [url, nu]);
       ISSUES.set(url, {kind: src.kind, ref: src.b.bill_no, url, reason: 'error', detail: 'ไม่แน่ใจว่าแก้ลิงก์สำเร็จ (เก็บไฟล์ที่อัปไว้แล้ว) — รอบตรวจถัดไปจะตรวจซ้ำ'});
       log('  [!] ' + src.b.bill_no + ' ' + src.name + ' — อัปโหลดแล้วแต่ไม่แน่ใจว่าแก้ลิงก์สำเร็จ (เน็ต/เซิร์ฟเวอร์สะดุด) · เก็บไฟล์ที่อัปไว้ รอบหน้าตรวจซ้ำ');
       return;
     }
     if(!n){ noteOk(url); log('  [ข้าม] ' + src.b.bill_no + ' ' + src.name + ' — ไม่มีรายการอ้างลิงก์เดิมแล้ว (แก้ไปก่อนหน้า) ลบไฟล์ที่เพิ่งอัปทิ้ง'); return; }
     for(const g of ok){ const M = manOf(g.billDir); delete M.man[url]; M.man[nu] = g.name; M.dirty = true; }
-    for(const g of noCopy){                                              // บิลที่ไม่มีสำเนาของตัวเอง → เก็บสำเนาที่ถูกต้องลงโฟลเดอร์บิลนั้นด้วย
-      try{
-        const M = manOf(g.billDir), t = nasFileFor(g.billDir, M.man, nu, g.name0);
-        fs.mkdirSync(g.billDir, {recursive: true}); writeFileAtomic(path.join(g.billDir, t.name), fs.readFileSync(src.dest));
-        M.man[nu] = t.name; M.dirty = true; st.fetched++;
-      }catch(e){}
-    }
+    for(const g of noCopy) giveCopy(g, src, [nu]);
     noteOk(url); noteOk(nu); st.restored++;
     RESTORED.push((KIND_TH[src.kind] || src.kind) + ' ' + bills.join(','));
     log('  [กู้คืนอัตโนมัติ] ' + src.b.bill_no + ' ' + src.name + ' — ไฟล์ในระบบหาย ใช้สำเนาจาก NAS แทน (แก้ลิงก์ ' + n + ' จุด)' + tag);
@@ -1052,21 +1062,30 @@ async function resolveGone(ROOT, GONE, st){
     const bills = [...new Set(group.map(g => g.b.bill_no))];
     const ctx = {url, src, ok, bad, noCopy, bills, group,
       tag: (src.known ? '' : ' (สำเนาเก่า ตรวจแล้วตรงเงื่อนไข)') + (bills.length > 1 ? ' · สลิปนี้ใช้กับบิล ' + bills.join(', ') : '')};
-    if(canArchive && !bad.length && !noCopy.length && group.every(g => prunableBill(g.b))) ARCH.push(ctx);
+    if(canArchive && !bad.length && group.every(g => prunableBill(g.b))) ARCH.push(ctx);   // บิลที่ไม่มีสำเนา → เขียนสำเนาให้ตอนยืนยันเก็บเข้าคลัง
     else await restore(ctx);
   });
   // บิลที่จะเก็บเข้าคลังต้องไม่มีไฟล์อื่นที่สำรองไม่ได้ (ขั้นตอนลบไฟล์บิลจ่ายครบข้ามบิลนั้น → ลิงก์ที่เสียจะค้างไปเรื่อย ๆ) → กู้กลับแทน
+  //   ถ้าลิงก์ใดของบิลต้องกู้กลับแทน ลิงก์อื่นของบิลเดียวกันก็กู้กลับด้วย (บิลนั้นเก็บเข้าคลังรอบนี้ไม่ได้อยู่ดี) — ไล่จนไม่เปลี่ยน
   const blocked = ctx => ctx.group.some(g => billFiles(g.b).some(([u]) => u !== ctx.url && ISSUES.has(u)));
-  const later = [];
+  const billsOf = ctx => ctx.group.map(g => g.b.bill_no);
+  const later = new Set();
+  for(let changed = true; changed; ){
+    changed = false;
+    const badBills = new Set([...later].flatMap(billsOf));
+    for(const ctx of ARCH) if(!later.has(ctx) && (blocked(ctx) || billsOf(ctx).some(n => badBills.has(n)))){ later.add(ctx); changed = true; }
+  }
   for(const ctx of ARCH){
-    if(blocked(ctx)){ later.push(ctx); continue; }
+    if(later.has(ctx)) continue;
+    if(!ctx.noCopy.every(g => giveCopy(g, ctx.src, [ctx.url]))){ later.add(ctx); continue; }   // เขียนสำเนาให้บิลที่ไม่มีไม่ได้ → กู้กลับแทน
+    for(const g of ctx.noCopy){ st.archive++; ARCHIVE_BILLS.add(g.b.bill_no); ADOPTED_AT.add(g.billDir + '\0' + ctx.url); log('  ' + (DRY_RUN ? '(ทดลอง) ' : '') + '[เก็บเข้าคลัง NAS] ' + g.b.bill_no + ' — ไม่มีสำเนาในโฟลเดอร์ตัวเอง ใช้สำเนาของบิล ' + ctx.src.b.bill_no + ' (สลิปเดียวกัน) · บิลจ่ายครบเกิน ' + CFG.PRUNE_PAID_AFTER_DAYS + ' วัน'); }
     for(const g of ctx.ok){
       st.archive++; ARCHIVE_BILLS.add(g.b.bill_no); ADOPTED_AT.add(g.billDir + '\0' + ctx.url);
       log('  ' + (DRY_RUN ? '(ทดลอง) ' : '') + '[เก็บเข้าคลัง NAS] ' + g.b.bill_no + ' ' + g.name + ' — ไฟล์ในระบบหาย ใช้สำเนาบน NAS' + (g.known ? '' : ' (สำเนาเก่า ตรวจแล้วตรงเงื่อนไข)') + ' · บิลจ่ายครบเกิน ' + CFG.PRUNE_PAID_AFTER_DAYS + ' วัน');
     }
     noteOk(ctx.url);
   }
-  await pool(later, 6, restore);
+  await pool([...later], 6, restore);
   for(const [dir, M] of MANS) if(M.dirty) writeManifest(dir, M.man);
 }
 const STATE_FILE = path.join(__dirname, 'archiver-state.json');
