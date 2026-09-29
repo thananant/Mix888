@@ -89,7 +89,8 @@ function tally(section, key, n = 1){ const r = REPORT[section] || (REPORT[sectio
 
 const logLines = [];
 const log = (...a) => {
-  const line = new Date().toLocaleString('th-TH', {timeZone:'Asia/Bangkok'}) + ' ' + a.join(' ');
+  // ตัดอีโมจิ (อักขระ 4 ไบต์) ออกจาก log — หน้าจอ/ไฟล์ log บน NAS แสดงผิดแล้วลามทำให้ภาษาไทยช่วงถัดไปเพี้ยน (ข้อความที่ส่งไลน์ยังมีอีโมจิครบ)
+  const line = new Date().toLocaleString('th-TH', {timeZone:'Asia/Bangkok'}) + ' ' + a.join(' ').replace(/[\u{10000}-\u{10FFFF}]\uFE0F?/gu, '');
   console.log(line);
   logLines.push(line);
 };
@@ -369,8 +370,10 @@ async function linePush(to, text){
       headers: {apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json'},
       body: JSON.stringify({to, messages: [{type: 'text', text: String(text).slice(0, 4900)}]})});
     let d = null; try{ d = await r.json(); }catch(e){}
-    return r.ok && d && (d.status === 200 || d.ok === true);
-  }catch(e){ return false; }
+    if(r.ok && d && (d.status === 200 || d.ok === true)) return true;
+    log('  [!] line-push ตอบกลับ HTTP ' + r.status + ': ' + String(JSON.stringify(d) || '(ไม่มีเนื้อหา)').slice(0, 300));   // บอกสาเหตุ (กลุ่มไลน์ผิด/บอทไม่อยู่ในกลุ่ม/สิทธิ์)
+    return false;
+  }catch(e){ log('  [!] ติดต่อ line-push ไม่ได้: ' + (e.message || e)); return false; }
 }
 // ส่งรายการที่สำรองไม่ได้ขึ้น Supabase (nas_issues) → ได้รายการที่ต้องแจ้งตอนนี้ → ส่งกลุ่มรีพอร์ต (ส่งเองไม่ได้ = หลังบ้านส่งแทน)
 async function reportIssues(fullKinds){
