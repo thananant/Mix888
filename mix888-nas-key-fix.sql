@@ -273,6 +273,8 @@ create table if not exists nas_issues (
   resolved_at   timestamptz,
   resolved_note text
 );
+alter table nas_issues add column if not exists accepted_at timestamptz;   -- กด "ช่างมัน" แล้ว (ยอมรับว่าหายถาวร) → ไม่เปิดเรื่อง/ไม่แจ้งไฟล์นี้อีก
+alter table nas_issues add column if not exists accepted_by text;
 alter table nas_issues enable row level security;
 revoke all on nas_issues from anon;
 grant select on nas_issues to authenticated;
@@ -310,7 +312,8 @@ begin
       notified_at = case when nas_issues.resolved_at is null then nas_issues.notified_at else null end,
       notified_by = case when nas_issues.resolved_at is null then nas_issues.notified_by else null end,
       last_seen   = now(),
-      resolved_at = null, resolved_note = null;
+      resolved_at = null, resolved_note = null
+    where nas_issues.accepted_at is null;                -- กด "ช่างมัน" แล้ว = ไม่เปิดเรื่องใหม่ ไม่แจ้งซ้ำ (โปรแกรม NAS รุ่นเก่าที่ยังส่งมาก็ไม่มีผล)
   end loop;
   -- จองรายการที่ถึงเวลาแจ้ง: หายถาวร (gone) แจ้งทันที · โหลดไม่ได้ (error) แจ้งเมื่อพลาดติดกัน 3 รอบ
   -- (จองค้าง "กำลังส่ง" เกิน 1 ชั่วโมง = โปรแกรม/เบราว์เซอร์ดับกลางทาง → จองใหม่ได้ ไม่ค้างเงียบตลอดไป)
@@ -400,12 +403,37 @@ begin
   update nas_issues set resolved_at = now(), resolved_note = left(coalesce(p_note, 'แก้จากหลังบ้าน'), 200)
    where file_url = p_url and resolved_at is null;
 end $$;
+-- 7f) "ช่างมัน" — ไฟล์ที่หายถาวร (หาสลิปไม่ได้แล้ว / ไม่ต้องการแล้ว) → ปิดเรื่องถาวร
+--     ต่างจาก 7e: 7e ปิดชั่วคราว (ยังหายอยู่ รอบตรวจหน้าเปิดใหม่) · 7f ไม่เปิดเรื่อง/ไม่แจ้งไลน์ไฟล์นี้อีก
+--     โปรแกรม NAS อ่านรายการนี้ (nas_accepted_urls) → ไม่นับเป็นปัญหา · บิลที่เหลือไฟล์นี้ไฟล์เดียว เก็บเข้าคลัง NAS ได้ตามปกติ
+--     เฉพาะ gone / nas_unverified — โหลดไม่ได้ชั่วคราว (error) ช่างมันไม่ได้ (อาจเป็นเน็ต/เซิร์ฟเวอร์ ไฟล์ยังอยู่)
+create or replace function nas_issues_accept(p_url text, p_note text)
+returns int language plpgsql security definer set search_path = public, pg_temp as $$
+declare n int;
+begin
+  update nas_issues
+     set accepted_at   = now(),
+         accepted_by   = left(coalesce(p_note, ''), 200),
+         resolved_at   = coalesce(resolved_at, now()),
+         resolved_note = left('ช่างมัน (ไม่ต้องตามแล้ว)' || coalesce(' · ' || nullif(p_note, ''), ''), 200)
+   where file_url = p_url and accepted_at is null and reason in ('gone', 'nas_unverified');
+  get diagnostics n = row_count;
+  return n;
+end $$;
+create or replace function nas_accepted_urls(p_key text)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  perform nas_check_key(p_key);
+  return coalesce((select jsonb_agg(file_url order by id) from nas_issues where accepted_at is not null), '[]'::jsonb);
+end $$;
 revoke execute on function nas_issues_claim() from public, anon;
 revoke execute on function nas_issues_unclaim(bigint[], boolean) from public, anon;
 revoke execute on function nas_issues_resolve_url(text, text) from public, anon;
+revoke execute on function nas_issues_accept(text, text) from public, anon;
 grant execute on function nas_issues_claim() to authenticated;
 grant execute on function nas_issues_unclaim(bigint[], boolean) to authenticated;
 grant execute on function nas_issues_resolve_url(text, text) to authenticated;
+grant execute on function nas_issues_accept(text, text) to authenticated;
 
 -- ============================================================
 --  ผลลัพธ์: ค่านี้คือ NAS_EXPORT_KEY — ก๊อปไปใส่ใน archiver.config.json บน NAS ให้ตรงทุกตัวอักษร

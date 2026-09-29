@@ -1733,7 +1733,8 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div style="background:#fdf6e3;border:1px solid #f0e0b8;border-radius:10px;padding:9px 12px;font-size:12.5px;line-height:1.65;margin:10px 0">
       ไฟล์ใน Supabase ที่ถูกลบไปแล้ว <b>กู้จาก Supabase ไม่ได้</b> (ไม่มีถังขยะ) — ทางกู้คืนมี 2 ทาง:<br>
       ① <b>NAS เคยเก็บไว้</b> → โปรแกรม NAS กู้กลับให้เองในรอบตรวจประจำวัน (หรือรัน <code>--check</code> เพื่อตรวจเดี๋ยวนี้) · สำเนาเก่าที่ยืนยันไม่ได้ว่าใบเดียวกัน จะขึ้นในรายงานด้านล่างพร้อมที่อยู่ไฟล์บน NAS ให้เปิดดูก่อนแนบ<br>
-      ② <b>NAS ไม่มี</b> → เปิดแชทไลน์ของร้าน เซฟรูปสลิป แล้วกด <b>📎 แนบสลิปแทน</b> — หลักฐานการจ่าย (ยอด · ref · SlipOK) ยังอยู่ในระบบครบ ไม่ต้องกังวลเรื่องยอด
+      ② <b>NAS ไม่มี</b> → เปิดแชทไลน์ของร้าน เซฟรูปสลิป แล้วกด <b>📎 แนบสลิปแทน</b> — หลักฐานการจ่าย (ยอด · ref · SlipOK) ยังอยู่ในระบบครบ ไม่ต้องกังวลเรื่องยอด<br>
+      ③ <b>หาไม่เจอแล้ว / ไม่ต้องการแล้ว</b> → กด <b>🙈 ช่างมัน</b> ในรายงานด้านล่าง = ปิดเรื่องถาวร ไม่แจ้งไลน์/ไม่ตามไฟล์นั้นอีก (บิลเก็บเข้าคลัง NAS ได้ตามปกติ)
     </div>
     <h4 style="margin:12px 0 6px;font-size:14px">📦 รายงานจากโปรแกรม NAS (ไฟล์ที่สำรองไม่ได้ — ยังไม่ถูกลบออกจาก Supabase)</h4>
     <div id="sk-nas"><div class="empty">กำลังโหลด…</div></div>
@@ -11165,9 +11166,14 @@ async function skLoadNas(){
   if(error){box.innerHTML='<div class="empty">ยังอ่านรายงานไม่ได้: '+esc(error.message)+' (รัน mix888-nas-key-fix.sql ฉบับล่าสุด)</div>';return;}
   const rows=(data||[]).filter(r=>!r.resolved_at);
   nasIssueBadge(rows.length);
-  if(!rows.length){box.innerHTML='<div class="empty">✅ ไม่มีไฟล์ค้าง — โปรแกรม NAS สำรองได้ครบทุกไฟล์ที่ตรวจล่าสุด</div>';return;}
+  let accN=0;try{const {count,error:ae}=await db.from('nas_issues').select('id',{count:'exact',head:true}).not('accepted_at','is',null);if(!ae)accN=count||0;}catch(e){}   // ยังไม่ได้รัน SQL ช่างมัน = ไม่มีคอลัมน์ → ไม่แสดง
+  const accLine=accN?'<div style="font-size:12px;color:var(--muted);margin-top:6px">🙈 ช่างมันแล้ว '+accN+' ไฟล์ — ไม่แจ้ง/ไม่ตามแล้ว</div>':'';
+  if(!rows.length){box.innerHTML='<div class="empty">✅ ไม่มีไฟล์ค้าง — โปรแกรม NAS สำรองได้ครบทุกไฟล์ที่ตรวจล่าสุด</div>'+accLine;return;}
   const d=s=>s?new Date(s).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
-  box.innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>ไฟล์</th><th>อ้างอิง</th><th>สาเหตุ</th><th>พบครั้งแรก</th><th>แจ้งไลน์</th><th></th></tr></thead><tbody>'
+  const canAcc=r=>r.reason==='gone'||r.reason==='nas_unverified';   // หาย/ยืนยันไม่ได้ = ช่างมันได้ · โหลดไม่ได้ชั่วคราว (error) ไม่ได้
+  const nAcc=rows.filter(canAcc).length;
+  box.innerHTML=(nAcc>1?'<div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="btn-g mini" onclick="skAcceptAll(this)" title="หาสลิป/ไฟล์ไม่เจอแล้ว — ปิดเรื่องถาวรทุกไฟล์ที่หาย ไม่แจ้ง/ไม่ตามอีก">🙈 ช่างมันทั้งหมดที่หาย ('+nAcc+')</button></div>':'')
+    +'<div style="overflow-x:auto"><table><thead><tr><th>ไฟล์</th><th>อ้างอิง</th><th>สาเหตุ</th><th>พบครั้งแรก</th><th>แจ้งไลน์</th><th></th></tr></thead><tbody>'
     +rows.map(r=>{
       const b=(r.kind==='slip'||r.kind==='bill')?bills.find(x=>x.bill_no===r.ref):null;
       return '<tr><td>'+esc(SK_KIND[r.kind]||r.kind)+'</td><td><b>'+esc(r.ref||'')+'</b></td>'
@@ -11177,8 +11183,40 @@ async function skLoadNas(){
         +'<td style="font-size:12.5px">'+esc(d(r.first_seen))+'</td>'
         +'<td style="font-size:12.5px">'+(r.notified_at?'✓ '+esc(d(r.notified_at)):'<span style="color:var(--muted)">รอส่ง</span>')+'</td>'
         +'<td style="white-space:nowrap">'+(b?'<button class="btn-g mini" onclick="showPayHistory('+b.id+')">🧾 ประวัติชำระ</button> ':'')
-        +'<button class="btn-g mini" data-url="'+esc(r.file_url)+'" onclick="skDismiss(this)" title="แก้แล้ว/ไม่ต้องใช้ไฟล์นี้แล้ว (เช่น เปลี่ยนรูปใหม่แทน)">✓ ปิดเรื่อง</button></td></tr>';
-    }).join('')+'</tbody></table></div>';
+        +(canAcc(r)?'<button class="btn-g mini" data-acc="1" data-url="'+esc(r.file_url)+'" onclick="skAccept(this)" title="หาไฟล์ไม่เจอแล้ว/ไม่ต้องการแล้ว — ปิดเรื่องถาวร ไม่แจ้ง/ไม่ตามไฟล์นี้อีก">🙈 ช่างมัน</button>'
+          :'<button class="btn-g mini" data-url="'+esc(r.file_url)+'" onclick="skDismiss(this)" title="แก้แล้ว/ไม่ต้องใช้ไฟล์นี้แล้ว (เช่น เปลี่ยนรูปใหม่แทน)">✓ ปิดเรื่อง</button>')+'</td></tr>';
+    }).join('')+'</tbody></table></div>'+accLine;
+}
+/** 🙈 ช่างมัน = ยอมรับว่าไฟล์หายถาวร → ปิดเรื่องถาวร: ไม่แจ้งไลน์/ไม่เปิดเรื่องใหม่ · โปรแกรม NAS ไม่นับเป็นปัญหา (เก็บบิลเข้าคลังได้ตามปกติ) */
+async function skAcceptUrls(urls,btn){
+  const who=currentUser?(currentUser.display_name||currentUser.username):'';
+  if(btn)btn.disabled=true;
+  let n=0;
+  for(const u of urls){
+    const {data,error}=await db.rpc('nas_issues_accept',{p_url:u,p_note:'โดย '+who});
+    if(error){
+      toast('ช่างมันไม่สำเร็จ: '+error.message+(/nas_issues_accept|PGRST202|does not exist|schema cache/i.test(error.message||'')?' — ยังไม่ได้รัน SQL ช่างมัน (mix888-nas-key-fix.sql ฉบับล่าสุด)':''));
+      if(btn)btn.disabled=false;
+      if(n)skLoadNas();
+      return null;
+    }
+    n+=Number(data)||0;
+  }
+  return n;
+}
+async function skAccept(btn){
+  if(!confirm('🙈 ช่างมันไฟล์นี้?\n\nระบบจะไม่แจ้งและไม่ตามไฟล์นี้อีก (ปิดเรื่องถาวร)\nบิลนั้นเก็บเข้าคลัง NAS ได้ตามปกติ'))return;
+  const n=await skAcceptUrls([btn.dataset.url],btn);
+  if(n===null)return;
+  toast('🙈 ช่างมันแล้ว — ไม่แจ้งไฟล์นี้อีก');skLoadNas();
+}
+async function skAcceptAll(btn){
+  const urls=[...new Set([...document.querySelectorAll('#sk-nas button[data-acc]')].map(b=>b.dataset.url).filter(Boolean))];
+  if(!urls.length)return;
+  if(!confirm('🙈 ช่างมันทั้งหมด '+urls.length+' ไฟล์ที่หาย?\n\nระบบจะไม่แจ้งและไม่ตามไฟล์เหล่านี้อีก (ปิดเรื่องถาวร)\nบิลเหล่านั้นเก็บเข้าคลัง NAS ได้ตามปกติ'))return;
+  const n=await skAcceptUrls(urls,btn);
+  if(n===null)return;
+  toast('🙈 ช่างมันแล้ว '+n+' ไฟล์ — ไม่แจ้งอีก');skLoadNas();
 }
 async function skDismiss(btn){
   if(!confirm('ปิดเรื่องไฟล์นี้? (ใช้เมื่อแก้แล้ว หรือไม่ต้องใช้ไฟล์นี้แล้ว — ถ้ายังหายอยู่ รอบตรวจครั้งหน้าจะรายงานใหม่)'))return;
@@ -11201,6 +11239,8 @@ async function skScan(btn){
     const bs=await fetchAllPages(()=>{let q=db.from('bills').select('id,bill_no,slip_url,paid_at,created_at,customers(code,name)').not('slip_url','is',null).neq('slip_url','');if(since)q=q.gte('created_at',since);return q.order('id',{ascending:true});});
     (bs||[]).forEach(b=>{if(b.slip_url&&!byUrl.has(b.slip_url))byUrl.set(b.slip_url,{url:b.slip_url,pay:{created_at:b.paid_at||b.created_at},bill:b,billId:b.id});});
     const list=[...byUrl.values()];
+    const acc=new Set();   // ไฟล์ที่กด 🙈 ช่างมันแล้ว → ไม่นับเป็นไฟล์หายที่ต้องตาม
+    try{const {data:ad,error:ae}=await db.from('nas_issues').select('file_url').not('accepted_at','is',null).limit(10000);if(!ae)(ad||[]).forEach(r=>acc.add(r.file_url));}catch(e){}
     let done=0,bad=0;
     const worker=async()=>{
       while(list.length){
@@ -11212,13 +11252,15 @@ async function skScan(btn){
           if(nu===it.url)continue;                                      // ตรวจซ้ำแล้วไฟล์ยังอยู่
           if(nu){const pr=stgParseUrl(it.url);const n=await stgRelink(pr?pr.bucket:'slips',it.url,nu);it.status=n?'moved':'missing';it.newUrl=nu;}
           else it.status='missing';
+          if(it.status==='missing'&&acc.has(it.url))it.status='accepted';
           bad++;skResults.push(it);
         }else if(st<200||st>=300){it.status='unknown';skResults.push(it);}   // ตรวจไม่ได้ตอนนี้ — ไม่ตัดสินว่าหาย
         done++;if(done%10===0||!list.length)prog.textContent='ตรวจแล้ว '+done+'/'+byUrl.size+' ไฟล์ · เปิดไม่ได้ '+bad;
       }
     };
     await Promise.all(Array.from({length:6},worker));
-    prog.textContent='ตรวจครบ '+byUrl.size+' ไฟล์ · เปิดไม่ได้ '+bad+(bad?' ('+skResults.filter(x=>x.status==='moved').length+' ไฟล์แค่ย้ายชื่อ ซ่อมให้แล้ว)':'');
+    const nAccS=skResults.filter(x=>x.status==='accepted').length;
+    prog.textContent='ตรวจครบ '+byUrl.size+' ไฟล์ · เปิดไม่ได้ '+bad+(bad?' ('+skResults.filter(x=>x.status==='moved').length+' ไฟล์แค่ย้ายชื่อ ซ่อมให้แล้ว'+(nAccS?' · '+nAccS+' ไฟล์ช่างมันแล้ว':'')+')':'');
     skRender();
   }catch(e){prog.textContent='สแกนไม่สำเร็จ: '+(e.message||e);}
   btn.disabled=false;
@@ -11236,9 +11278,10 @@ function skRender(){
         +'<td class="num">'+(x.pay.amount!=null?fmt(x.pay.amount):'')+'</td>'
         +'<td style="font-size:12.5px">'+(x.status==='moved'?'<span style="color:var(--ok,#159b78)">🔧 ไฟล์แค่ย้ายชื่อ — แก้ลิงก์แล้ว</span>'
           :x.status==='replaced'?'<span style="color:var(--ok,#159b78)">📎 แนบสลิปแทนแล้ว</span>'
-          :x.status==='unknown'?'<span style="color:var(--muted)">⏳ ตรวจไม่ได้ตอนนี้ (สแกนใหม่อีกครั้ง)</span>':'<span style="color:var(--danger,#b52020);font-weight:600">🗑 ไฟล์หาย</span>')+'</td>'
+          :x.status==='unknown'?'<span style="color:var(--muted)">⏳ ตรวจไม่ได้ตอนนี้ (สแกนใหม่อีกครั้ง)</span>'
+          :x.status==='accepted'?'<span style="color:var(--muted)">🙈 ไฟล์หาย · ช่างมันแล้ว</span>':'<span style="color:var(--danger,#b52020);font-weight:600">🗑 ไฟล์หาย</span>')+'</td>'
         +'<td style="white-space:nowrap"><button class="btn-g mini" onclick="showPayHistory('+Number(x.billId)+')">🧾 ประวัติชำระ</button>'
-        +(x.status==='missing'?' <button class="btn-s mini" data-bill="'+Number(x.billId)+'" data-billno="'+esc(x.bill.bill_no||'')+'" data-url="'+esc(x.url)+'" onclick="phAttachReplace(this)">📎 แนบสลิปแทน</button>':'')+'</td></tr>';
+        +(x.status==='missing'||x.status==='accepted'?' <button class="btn-s mini" data-bill="'+Number(x.billId)+'" data-billno="'+esc(x.bill.bill_no||'')+'" data-url="'+esc(x.url)+'" onclick="phAttachReplace(this)">📎 แนบสลิปแทน</button>':'')+'</td></tr>';
     }).join('')+'</tbody></table></div>';
 }
 function skCopyMissing(){
@@ -11252,8 +11295,8 @@ function nasIssueText(list){
   const L=['⚠️ NAS สำรองไฟล์ไม่ได้ '+list.length+' ไฟล์ (ไฟล์พวกนี้ระบบจะยังไม่ลบออกจาก Supabase)'];
   list.slice(0,15).forEach(x=>{
     L.push('• '+(SK_KIND[x.kind]||x.kind)+(x.ref?' '+x.ref:'')+' — '+(x.reason==='gone'
-      ?'ไฟล์ไม่มีแล้วทั้งใน Supabase และ NAS'+(x.kind==='slip'?' → ขอสลิปจากแชทไลน์ร้าน แล้วกด 📎 แนบสลิปแทน ในประวัติการชำระ':x.kind==='bill'?' → กดสร้างรูปบิลใหม่ในหลังบ้าน':'')
-      :x.reason==='nas_unverified'?'ไฟล์ในระบบหาย · '+(x.detail||'NAS มีสำเนา')+' (ยืนยันไม่ได้ว่าใบเดียวกัน) → เปิดดูภาพ ถ้าใช่ กด 📎 แนบสลิปแทน'
+      ?'ไฟล์ไม่มีแล้วทั้งใน Supabase และ NAS'+(x.kind==='slip'?' → ขอสลิปจากแชทไลน์ร้าน แล้วกด 📎 แนบสลิปแทน ในประวัติการชำระ · หาไม่เจอ กด 🙈 ช่างมัน ในหลังบ้าน (ไม่แจ้งอีก)':x.kind==='bill'?' → กดสร้างรูปบิลใหม่ในหลังบ้าน':'')
+      :x.reason==='nas_unverified'?'ไฟล์ในระบบหาย · '+(x.detail||'NAS มีสำเนา')+' (ยืนยันไม่ได้ว่าใบเดียวกัน) → เปิดดูภาพ ถ้าใช่ กด 📎 แนบสลิปแทน · ไม่ใช่/ไม่ต้องการ กด 🙈 ช่างมัน'
       :'โหลดไม่ได้ติดกัน '+x.fail_count+' รอบ ('+(x.detail||'')+')'));
   });
   if(list.length>15)L.push('…และอีก '+(list.length-15)+' ไฟล์');
