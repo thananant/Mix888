@@ -1731,7 +1731,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <button class="btn-g mini" onclick="document.getElementById('slipcheck-modal').style.display='none'">ปิด</button>
     </div>
     <div style="background:#fdf6e3;border:1px solid #f0e0b8;border-radius:10px;padding:9px 12px;font-size:12.5px;line-height:1.65;margin:10px 0">
-      ไฟล์ใน Supabase ที่ถูกลบไปแล้ว <b>กู้จาก Supabase ไม่ได้</b> (ไม่มีถังขยะ) — ทางกู้คืนมี 2 ทาง:<br>
+      ไฟล์ใน Supabase ที่ถูกลบไปแล้ว <b>กู้จาก Supabase ไม่ได้</b> (ไม่มีถังขยะ) — ทางกู้คืนมี 2 ทาง (กู้ไม่ได้จริง ๆ ใช้ข้อ ③):<br>
       ① <b>NAS เคยเก็บไว้</b> → โปรแกรม NAS กู้กลับให้เองในรอบตรวจประจำวัน (หรือรัน <code>--check</code> เพื่อตรวจเดี๋ยวนี้) · สำเนาเก่าที่ยืนยันไม่ได้ว่าใบเดียวกัน จะขึ้นในรายงานด้านล่างพร้อมที่อยู่ไฟล์บน NAS ให้เปิดดูก่อนแนบ<br>
       ② <b>NAS ไม่มี</b> → เปิดแชทไลน์ของร้าน เซฟรูปสลิป แล้วกด <b>📎 แนบสลิปแทน</b> — หลักฐานการจ่าย (ยอด · ref · SlipOK) ยังอยู่ในระบบครบ ไม่ต้องกังวลเรื่องยอด<br>
       ③ <b>หาไม่เจอแล้ว / ไม่ต้องการแล้ว</b> → กด <b>🙈 ช่างมัน</b> ในรายงานด้านล่าง = ปิดเรื่องถาวร ไม่แจ้งไลน์/ไม่ตามไฟล์นั้นอีก (บิลเก็บเข้าคลัง NAS ได้ตามปกติ)
@@ -11147,7 +11147,7 @@ async function showPayHistory(billId){
       +(r.note?'<div style="font-size:12px;color:#a06b00">'+esc(r.note)+'</div>':'')
       +(sl.length?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">'+sl.map(u=>
         '<img src="'+esc(u)+'" data-bill="'+billId+'" onerror="phImgErr(this)" onclick="showImgView(this.src)" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:zoom-in">').join('')+'</div>'
-        :'<div style="font-size:12px;color:var(--muted);margin-top:4px">'+(archived?'🗄️ สลิปเก็บที่ NAS แล้ว (ดูหมายเหตุด้านบน)':'— ไม่มีสลิปแนบ —')+'</div>')
+        :'<div style="font-size:12px;color:var(--muted);margin-top:4px">'+(archived?(/🙈 สลิปหายถาวร/.test(r.note||'')?'🙈 สลิปที่หายถาวร (ช่างมันแล้ว) ไม่มีบน NAS · สลิปอื่นของครั้งนี้ (ถ้ามี) เก็บที่ NAS แล้ว':'🗄️ สลิปเก็บที่ NAS แล้ว (ดูหมายเหตุด้านบน)'):'— ไม่มีสลิปแนบ —')+'</div>')
       +'</div>';
   }).join('');
   box.innerHTML=h;
@@ -11168,9 +11168,10 @@ async function skLoadNas(){
   nasIssueBadge(rows.length);
   let accN=0;try{const {count,error:ae}=await db.from('nas_issues').select('id',{count:'exact',head:true}).not('accepted_at','is',null);if(!ae)accN=count||0;}catch(e){}   // ยังไม่ได้รัน SQL ช่างมัน = ไม่มีคอลัมน์ → ไม่แสดง
   const accLine=accN?'<div style="font-size:12px;color:var(--muted);margin-top:6px">🙈 ช่างมันแล้ว '+accN+' ไฟล์ — ไม่แจ้ง/ไม่ตามแล้ว</div>':'';
-  if(!rows.length){box.innerHTML='<div class="empty">✅ ไม่มีไฟล์ค้าง — โปรแกรม NAS สำรองได้ครบทุกไฟล์ที่ตรวจล่าสุด</div>'+accLine;return;}
+  if(!rows.length){box.innerHTML='<div class="empty">✅ ไม่มีไฟล์ค้าง'+(accN?'':' — โปรแกรม NAS สำรองได้ครบทุกไฟล์ที่ตรวจล่าสุด')+'</div>'+accLine;return;}
   const d=s=>s?new Date(s).toLocaleString('th-TH',{day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
-  const canAcc=r=>r.reason==='gone'||r.reason==='nas_unverified';   // หาย/ยืนยันไม่ได้ = ช่างมันได้ · โหลดไม่ได้ชั่วคราว (error) ไม่ได้
+  const hasAccSql=rows.some(r=>'accepted_at' in r);                  // ยังไม่ได้รัน SQL ช่างมัน → ใช้ปุ่มปิดเรื่องแบบเดิม
+  const canAcc=r=>hasAccSql&&(r.reason==='gone'||r.reason==='nas_unverified');   // หาย/ยืนยันไม่ได้ = ช่างมันได้ · โหลดไม่ได้ชั่วคราว (error) ไม่ได้
   const nAcc=rows.filter(canAcc).length;
   box.innerHTML=(nAcc>1?'<div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="btn-g mini" onclick="skAcceptAll(this)" title="หาสลิป/ไฟล์ไม่เจอแล้ว — ปิดเรื่องถาวรทุกไฟล์ที่หาย ไม่แจ้ง/ไม่ตามอีก">🙈 ช่างมันทั้งหมดที่หาย ('+nAcc+')</button></div>':'')
     +'<div style="overflow-x:auto"><table><thead><tr><th>ไฟล์</th><th>อ้างอิง</th><th>สาเหตุ</th><th>พบครั้งแรก</th><th>แจ้งไลน์</th><th></th></tr></thead><tbody>'
@@ -11195,20 +11196,22 @@ async function skAcceptUrls(urls,btn){
   for(const u of urls){
     const {data,error}=await db.rpc('nas_issues_accept',{p_url:u,p_note:'โดย '+who});
     if(error){
-      toast('ช่างมันไม่สำเร็จ: '+error.message+(/nas_issues_accept|PGRST202|does not exist|schema cache/i.test(error.message||'')?' — ยังไม่ได้รัน SQL ช่างมัน (mix888-nas-key-fix.sql ฉบับล่าสุด)':''));
+      toast((n?'ช่างมันไปแล้ว '+n+' ไฟล์ · ที่เหลือ':'ช่างมัน')+'ไม่สำเร็จ: '+error.message+(/nas_issues_accept|PGRST202|does not exist|schema cache/i.test(error.message||'')?' — ยังไม่ได้รัน SQL ช่างมัน (mix888-nas-key-fix.sql ฉบับล่าสุด)':''));
       if(btn)btn.disabled=false;
-      if(n)skLoadNas();
+      if(n){skLoadNas();if(skResults.length)skRender();}
       return null;
     }
     n+=Number(data)||0;
+    skResults.forEach(x=>{if(x.url===u&&x.status==='missing')x.status='accepted';});   // ผลสแกนในหน้าต่างเดียวกันเปลี่ยนตาม
   }
+  if(skResults.length)skRender();
   return n;
 }
 async function skAccept(btn){
   if(!confirm('🙈 ช่างมันไฟล์นี้?\n\nระบบจะไม่แจ้งและไม่ตามไฟล์นี้อีก (ปิดเรื่องถาวร)\nบิลนั้นเก็บเข้าคลัง NAS ได้ตามปกติ'))return;
   const n=await skAcceptUrls([btn.dataset.url],btn);
   if(n===null)return;
-  toast('🙈 ช่างมันแล้ว — ไม่แจ้งไฟล์นี้อีก');skLoadNas();
+  toast(n?'🙈 ช่างมันแล้ว — ไม่แจ้งไฟล์นี้อีก':'ไฟล์นี้เปลี่ยนสถานะไปแล้ว (เช่น กลายเป็นโหลดไม่ได้ชั่วคราว) — ยังช่างมันไม่ได้ ดูรายการใหม่อีกครั้ง');skLoadNas();
 }
 async function skAcceptAll(btn){
   const urls=[...new Set([...document.querySelectorAll('#sk-nas button[data-acc]')].map(b=>b.dataset.url).filter(Boolean))];
@@ -11216,7 +11219,7 @@ async function skAcceptAll(btn){
   if(!confirm('🙈 ช่างมันทั้งหมด '+urls.length+' ไฟล์ที่หาย?\n\nระบบจะไม่แจ้งและไม่ตามไฟล์เหล่านี้อีก (ปิดเรื่องถาวร)\nบิลเหล่านั้นเก็บเข้าคลัง NAS ได้ตามปกติ'))return;
   const n=await skAcceptUrls(urls,btn);
   if(n===null)return;
-  toast('🙈 ช่างมันแล้ว '+n+' ไฟล์ — ไม่แจ้งอีก');skLoadNas();
+  toast('🙈 ช่างมันแล้ว '+n+(n<urls.length?' จาก '+urls.length:'')+' ไฟล์ — ไม่แจ้งอีก'+(n<urls.length?' (ที่เหลือเปลี่ยนสถานะไปแล้ว ดูรายการใหม่)':''));skLoadNas();
 }
 async function skDismiss(btn){
   if(!confirm('ปิดเรื่องไฟล์นี้? (ใช้เมื่อแก้แล้ว หรือไม่ต้องใช้ไฟล์นี้แล้ว — ถ้ายังหายอยู่ รอบตรวจครั้งหน้าจะรายงานใหม่)'))return;

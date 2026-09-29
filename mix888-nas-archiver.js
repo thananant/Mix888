@@ -232,6 +232,7 @@ const isGone = e => !!e && (e.status === 400 || e.status === 404);
 const ACCEPTED = new Set();
 const ACCEPTED_SEEN = new Set();   // ไฟล์ที่ช่างมันแล้วที่เจอว่ายังหายรอบนี้ (ไว้บอกใน log)
 const isAccepted = url => { if(!ACCEPTED.has(url)) return false; ACCEPTED_SEEN.add(url); return true; };
+let FULL_OK = false;               // รอบนี้ตรวจเต็มรอบ (verifyBackups + resolveGone) สำเร็จ — ไฟล์ที่ช่างมันแล้วเก็บบิลเข้าคลังได้เฉพาะรอบแบบนี้
 function setIssue(url, it){
   if(!url) return;
   if(it.reason !== 'error' && isAccepted(url)){ ISSUES.delete(url); return; }
@@ -808,15 +809,17 @@ async function pruneBills(ROOT){
     if(!billDir){ keep('ยังไม่มีโฟลเดอร์บน NAS'); continue; }
     // ทุกไฟล์ (ยกเว้นหน้า A4 ที่ไม่ได้เก็บ — เนื้อหาเดียวกับรูปบิลเต็ม) ต้องมีบน NAS และตรงกับต้นฉบับทุกไบต์
     const man = readManifest(billDir); let dirty = false;
-    // (ไฟล์ที่กด "ช่างมัน" แล้ว ไม่ต้องมีบน NAS — ตัดสินตอนโหลดต้นฉบับด้านล่าง)
-    if(files.some(([u, n]) => n && !ACCEPTED.has(u) && !onNas(path.join(billDir, nasFileFor(billDir, man, u, n).name)))){ keep('ไฟล์ยังไม่อยู่บน NAS ครบ'); continue; }
+    // ไฟล์ที่กด "ช่างมัน" แล้ว ไม่ต้องมีบน NAS (ตัดสินตอนโหลดต้นฉบับด้านล่าง) — เฉพาะรอบตรวจเต็มรอบ: รอบรายชั่วโมงถือเป็นไฟล์หายปกติ
+    //   (resolveGone ต้องได้ดูก่อนเสมอ — สลิปโอนรวมที่บิลอื่นมีสำเนาถูกต้อง จะได้กู้/ผูกสำเนาให้ก่อนบิลนี้ถูกเก็บ)
+    const accOk = u => FULL_OK && ACCEPTED.has(u);
+    if(files.some(([u, n]) => n && !accOk(u) && !onNas(path.join(billDir, nasFileFor(billDir, man, u, n).name)))){ keep('ไฟล์ยังไม่อยู่บน NAS ครบ'); continue; }
     const names = [];
     let okAll = true, reason = '', nLost = 0, nAcc = 0;
     for(const [u, name0] of files){
       if(!name0) continue;
       const f = nasFileFor(billDir, man, u, name0);
       const dest = path.join(billDir, f.name);
-      if(!onNas(dest) && !ACCEPTED.has(u)){ okAll = false; reason = 'ไฟล์ยังไม่อยู่บน NAS ครบ'; break; }
+      if(!onNas(dest) && !accOk(u)){ okAll = false; reason = 'ไฟล์ยังไม่อยู่บน NAS ครบ'; break; }
       let remote;
       try{ remote = await fetchBuf(u); }
       catch(e){
@@ -824,7 +827,7 @@ async function pruneBills(ROOT){
         // รอบรายชั่วโมง/กู้กลับไม่สำเร็จ = ยังไม่เก็บ รอตรวจเต็มรอบถัดไป (ไม่งั้นบิลอื่นที่ใช้สลิปเดียวกันจะเสียโอกาสได้สำเนาที่ถูกต้อง)
         if(isGone(e) && ADOPTED_AT.has(billDir + '\0' + u)){ nLost++; names.push(f.name); continue; }
         // กด "ช่างมัน" แล้ว = ยอมรับว่าหายถาวร → เก็บเข้าคลังได้เลย · ไม่จดไฟล์บน NAS ที่ยืนยันไม่ได้ว่าเป็นของลิงก์นี้ (--restore-bill จะไม่เอาไปใช้ผิดใบ)
-        if(isGone(e) && isAccepted(u)){
+        if(isGone(e) && accOk(u) && isAccepted(u)){
           if(f.known && onNas(dest)){ nLost++; names.push(f.name); } else nAcc++;
           continue;
         }
@@ -1465,7 +1468,7 @@ async function syncOnce(){
     DATA = null;   // โหลดข้อมูลตารางใหม่ทุกรอบ
     ISSUES.clear(); OK_URLS.clear(); RESTORED.length = 0; FULL_KINDS.clear(); MOVED.clear(); OBJ_INDEX.clear(); TABLE_CACHE.clear(); RELINKED.length = 0;
     ADOPTED.clear(); ADOPTED_AT.clear(); ARCHIVE_BILLS.clear(); ARCHIVED_LOST.clear(); RESTORE_FAILED.length = 0; ARCHIVE_OK = null;
-    ACCEPTED.clear(); ACCEPTED_SEEN.clear();
+    ACCEPTED.clear(); ACCEPTED_SEEN.clear(); FULL_OK = false;
     try{ const a = await rpc('nas_accepted_urls'); if(Array.isArray(a)) a.forEach(u => { if(typeof u === 'string' && u) ACCEPTED.add(u); }); }   // อ่านอย่างเดียว (โหมดทดลองก็อ่าน)
     catch(e){ if(!/ 404:|PGRST202/.test(e.message)) log('[!] อ่านรายการไฟล์ที่ "ช่างมัน" ไม่ได้: ' + e.message + ' — รอบนี้ไฟล์พวกนั้นจะขึ้นเป็นปัญหาตามเดิม (ไม่แจ้งไลน์ซ้ำ)'); }   // ยังไม่ได้รัน SQL = ยังไม่มีฟังก์ชัน → ทำงานแบบเดิม
     const since = new Date(Date.now() - CFG.DAYS_BACK * 24 * 3600 * 1000).toISOString();
@@ -1558,7 +1561,7 @@ async function syncOnce(){
     const state = readState();
     const td = thDate(new Date().toISOString()), today = td.y + '-' + td.m + '-' + td.d;
     if(FORCE_CHECK || state.lastCheck !== today){
-      try{ await verifyBackups(ROOT); fullKinds = ['slip', 'bill']; if(!DRY_RUN){ state.lastCheck = today; writeState(state); } }
+      try{ await verifyBackups(ROOT); fullKinds = ['slip', 'bill']; FULL_OK = true; if(!DRY_RUN){ state.lastCheck = today; writeState(state); } }
       catch(e){ log('[!] ตรวจสำรองเต็มรอบไม่สำเร็จ: ' + (e.message || e) + ' (จะลองใหม่รอบหน้า)'); }
     }
     // ลบไฟล์บิลจ่ายครบ (ข้ามบิลที่มีไฟล์สำรองไม่ได้) แล้วค่อยรายงาน — ข้อความไลน์บอกผล "ที่ทำไปแล้วจริง" (เช่น เก็บเข้าคลังกี่ใบ)

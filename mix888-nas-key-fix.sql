@@ -418,6 +418,15 @@ begin
          resolved_note = left('ช่างมัน (ไม่ต้องตามแล้ว)' || coalesce(' · ' || nullif(p_note, ''), ''), 200)
    where file_url = p_url and accepted_at is null and reason in ('gone', 'nas_unverified');
   get diagnostics n = row_count;
+  -- จดในประวัติการชำระด้วย (หลังบิลเก็บเข้าคลัง ลิงก์สลิปถูกล้าง — หน้าประวัติชำระจะรู้ว่าใบนี้หายถาวร ไม่ใช่ "เก็บที่ NAS")
+  if n > 0 then
+    begin
+      update payments set note = concat_ws(' · ', nullif(note, ''), '🙈 สลิปหายถาวร (ช่างมัน)' || coalesce(' ' || nullif(p_note, ''), ''))
+       where jsonb_typeof(slips) = 'array' and slips @> jsonb_build_array(p_url)
+         and coalesce(note, '') not like '%🙈 สลิปหายถาวร%';
+    exception when undefined_table or undefined_column then null;
+    end;
+  end if;
   return n;
 end $$;
 create or replace function nas_accepted_urls(p_key text)
