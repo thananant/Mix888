@@ -1400,6 +1400,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <input type="date" id="ac-from" onchange="loadBills()" title="ตั้งแต่วันที่">
       <input type="date" id="ac-to" onchange="loadBills()" title="ถึงวันที่">
       <input id="ac-q" placeholder="ค้นหาเลขบิล / ลูกค้า…" style="flex:1;min-width:150px" oninput="renderAccount()">
+      <button class="btn-s mini" onclick="openPendingLine(this)" title="บิลที่ยังไม่ได้ส่งเข้าไลน์ใน 7 วันล่าสุด (เช่น ช่วงไลน์ส่งไม่ได้) — เลือกแล้วส่งทีเดียว">📲 ส่งบิลที่ค้าง</button>
       <button class="btn-p mini" id="ac-issue-sel" onclick="acIssueSelected(this)" style="display:none">🧾 ออกบิลที่เลือก</button>
       <button class="btn-p mini" id="ac-pdf-sel" onclick="acPdfSelected(this)" style="display:none">📄 โหลด PDF ที่เลือก</button>
       <button class="btn-g mini" id="ac-view-sel" onclick="acViewSelected(this)" style="display:none">👁️ ดูบิลที่เลือก (ไฟล์เดียว)</button>
@@ -2205,6 +2206,12 @@ function lineWhy(http,j){
   if(!st||st>=500)return 'ระบบส่ง LINE ขัดข้อง (ฟังก์ชัน line-push บน Supabase หรือ LINE เอง)';
   return 'ส่ง LINE ไม่สำเร็จ';
 }
+// ไลน์ส่งไม่ได้ "ทั้งระบบ" (โควตาหมด/โทเคน/ส่งถี่/ระบบล่ม) — ต่างจากปัญหาของกลุ่มเดียว (รหัสกลุ่มผิด/บอทถูกเชิญออก/ลิงก์รูปเสีย)
+function lineIsGlobal(http,j){
+  const m=String((j&&(j.message||j.error))||'');
+  const st=Number(j&&typeof j.status==='number'&&j.status!==200?j.status:(j&&typeof j.code==='number'?j.code:http))||0;
+  return /monthly limit/i.test(m)||st===401||st===403||st===429||!st||st>=500;
+}
 function lineBar(txt,detail){
   let el=document.getElementById('line-fail-bar');
   if(!txt){if(el)el.remove();return;}
@@ -2221,13 +2228,14 @@ async function lineWatchFetch(input,init){
   const isLine=/\/functions\/v1\/line-push/.test(url);
   let res;
   try{res=await fetch(input,init);}
-  catch(e){if(isLine)try{lineBar('ติดต่อระบบส่ง LINE ไม่ได้ (เน็ตหลุด/Supabase ไม่ตอบ) — ลองใหม่อีกครั้ง',String(e&&e.message||e));}catch(x){}throw e;}
+  catch(e){if(isLine)try{window.lineLast={ok:false,why:'ติดต่อระบบส่ง LINE ไม่ได้ (เน็ตหลุด/Supabase ไม่ตอบ)',global:true};lineBar('ติดต่อระบบส่ง LINE ไม่ได้ (เน็ตหลุด/Supabase ไม่ตอบ) — ลองใหม่อีกครั้ง',String(e&&e.message||e));}catch(x){}throw e;}
   try{
     if(isLine){
       let j=null;try{j=await res.clone().json();}catch(e){}
       const ok=res.ok&&j&&(j.status===200||j.ok===true);
-      if(ok)lineBar(null);
-      else lineBar(lineWhy(res.status,j),'HTTP '+res.status+' · '+(j?JSON.stringify(j):'(ไม่มีเนื้อหา)'));
+      if(ok){window.lineLast={ok:true};lineBar(null);}
+      else{const why=lineWhy(res.status,j);window.lineLast={ok:false,why,global:lineIsGlobal(res.status,j)};
+        lineBar(why,'HTTP '+res.status+' · '+(j?JSON.stringify(j):'(ไม่มีเนื้อหา)'));}
     }
   }catch(e){}
   return res;
@@ -8254,15 +8262,24 @@ async function resendBill(id,btn){
   if(!confirm('ส่งบิล '+b.bill_no+' (฿'+fmt(b.total)+') เข้ากลุ่ม LINE ของ "'+b.customers.name+'"'
     +(b.line_sent?'\n\n⚠️ บิลนี้เคยส่งแล้ว — จะส่งซ้ำอีกครั้ง':'')+' ?'))return;
   btn.disabled=true;
+  if(!b.image_url)toast('บิลนี้ยังไม่มีรูป — กำลังวาดก่อนส่ง…');
+  const r=await sendBillToLine(b);
+  btn.disabled=false;
+  if(!r.ok){toast('ส่งไม่สำเร็จ: '+r.why);return;}
+  toast('ส่งบิล '+b.bill_no+' เข้ากลุ่มแล้ว ✓');
+  loadBills();
+}
+/** ส่งรูปบิล + ยอดเข้ากลุ่มไลน์ของร้าน แล้วจดว่าส่งแล้ว → {ok} หรือ {ok:false, why, global}
+ *  global = ไลน์ส่งไม่ได้ทั้งระบบ (โควตาหมด/โทเคน/ระบบล่ม) ไม่ใช่ปัญหาของกลุ่มนี้กลุ่มเดียว */
+async function sendBillToLine(b){
+  if(!b.customers||!b.customers.line_group_id)return {ok:false,why:'ร้านยังไม่ผูกกลุ่มไลน์'};
   // บิลที่ระบบออกอัตโนมัติอาจยังไม่มีรูป — ส่งลิงก์ว่างไปไลน์จะโดนตีกลับ 400
   // วาดสดตรงนี้ก่อน แล้วค่อยส่ง (บันทึกรูปเก็บเข้าบิลด้วย)
   if(!b.image_url){
-    toast('บิลนี้ยังไม่มีรูป — กำลังวาดก่อนส่ง…');
-    try{
-      const fresh=await regenBillImages(b.id);
-      b.image_url=fresh.imageUrl;b.page_urls=fresh.pageUrls;
-    }catch(e){toast('วาดรูปบิลไม่สำเร็จ: '+(e.message||e));btn.disabled=false;return;}
+    try{const fresh=await regenBillImages(b.id);b.image_url=fresh.imageUrl;b.page_urls=fresh.pageUrls;}
+    catch(e){return {ok:false,why:'วาดรูปบิลไม่สำเร็จ: '+(e.message||e)};}
   }
+  window.lineLast=null;
   const {data:res,error}=await db.functions.invoke('line-push',{body:{
     to:b.customers.line_group_id,
     messages:[
@@ -8273,11 +8290,72 @@ async function resendBill(id,btn){
         +(Number(b.discount)?'\nส่วนลด -฿'+fmt(b.discount):'')
         +'\nยอดรวม ฿'+fmt(b.total)}
     ]}});
-  btn.disabled=false;
-  if(error||!res||res.status!==200){toast('ส่งไม่สำเร็จ: '+(error?.message||JSON.stringify(res)));return;}
-  await db.from('bills').update({line_sent:true}).eq('id',id);
-  toast('ส่งบิล '+b.bill_no+' เข้ากลุ่มแล้ว ✓');
-  loadBills();
+  if(error||!res||res.status!==200){
+    const L=window.lineLast||{};
+    return {ok:false,why:L.why||error?.message||JSON.stringify(res),global:L.global!==false};
+  }
+  await db.from('bills').update({line_sent:true}).eq('id',b.id);
+  b.line_sent=true;
+  return {ok:true};
+}
+/* 📲 ส่งบิลที่ค้างส่งไลน์ทีเดียว (เช่น ช่วงโควตาไลน์หมด) — เลือกได้ว่าจะส่งใบไหน
+   ส่งทีละใบ · ไลน์ยังส่งไม่ได้ทั้งระบบ (โควตาหมด) = หยุดทันที ไม่เปลืองโควตา · กลุ่มไหนมีปัญหา = ข้ามไปใบถัดไป */
+let plBusy=false;
+async function openPendingLine(btn){
+  if(btn)btn.disabled=true;
+  const since=new Date(Date.now()-7*86400000).toISOString();
+  const {data,error}=await db.from('bills')
+    .select('id,bill_no,total,shipping_fee,discount,revision,image_url,page_urls,created_at,ship_status,line_sent, customers(id,code,name,branch_name,line_group_id)')
+    .gte('created_at',since).not('line_sent','is',true).order('created_at',{ascending:true}).limit(500);
+  if(btn)btn.disabled=false;
+  if(error){toast('โหลดบิลไม่ได้: '+error.message);return;}
+  const list=(data||[]).filter(b=>(b.ship_status||'')!=='cancelled'&&b.customers&&b.customers.line_group_id);
+  if(!list.length){toast('✓ ไม่มีบิลค้างส่งไลน์ใน 7 วันล่าสุด');return;}
+  window._plList=list;
+  let m=document.getElementById('pl-modal');
+  if(!m){m=document.createElement('div');m.id='pl-modal';
+    m.style.cssText='display:flex;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto';
+    m.onclick=e=>{if(e.target===m&&!plBusy)m.remove();};document.body.appendChild(m);}
+  const d=s=>new Date(s).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  m.innerHTML='<div style="background:#fff;border-radius:14px;max-width:760px;width:100%;padding:18px;margin:14px auto">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0;font-size:16px">📲 บิลที่ยังไม่ได้ส่งเข้าไลน์ (7 วันล่าสุด) · '+list.length+' ใบ</h3>'
+    +'<button class="btn-g mini" id="pl-close" onclick="if(!plBusy)document.getElementById(\'pl-modal\').remove()">ปิด</button></div>'
+    +'<div class="hint" style="margin:6px 0 10px">ส่งทีละใบเข้ากลุ่มไลน์ของแต่ละร้าน (รูปบิล + ยอด เหมือนปุ่ม 📲 ส่ง LINE) · ถ้าไลน์ยังส่งไม่ได้ทั้งระบบ (เช่น โควตาหมด) จะหยุดให้ทันที ไม่เปลืองโควตา · เอาติ๊กออกได้ถ้าไม่อยากส่งใบไหน</div>'
+    +'<div style="overflow-x:auto"><table style="font-size:13px"><thead><tr><th><input type="checkbox" id="pl-all" checked onchange="document.querySelectorAll(\'.pl-cb\').forEach(x=>x.checked=this.checked);plCount()"></th><th>บิล</th><th>ร้าน</th><th>ออกบิล</th><th class="num">ยอด</th><th>ผล</th></tr></thead><tbody>'
+    +list.map((b,i)=>'<tr><td><input type="checkbox" class="pl-cb" data-i="'+i+'" checked onchange="plCount()"></td><td><b>'+esc(b.bill_no)+'</b></td>'
+      +'<td>'+esc((b.customers.code||'')+' '+(b.customers.name||''))+'</td><td style="white-space:nowrap">'+esc(d(b.created_at))+'</td>'
+      +'<td class="num">'+fmt(b.total||0)+'</td><td id="pl-st-'+i+'" style="font-size:12.5px;white-space:nowrap"></td></tr>').join('')
+    +'</tbody></table></div>'
+    +'<div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap"><button class="btn-p" id="pl-send" onclick="plSend(this)"></button><span id="pl-prog" style="font-size:13px;color:var(--muted)"></span></div></div>';
+  plCount();
+}
+function plCount(){
+  const n=document.querySelectorAll('.pl-cb:checked').length;
+  const b=document.getElementById('pl-send');if(b)b.textContent='📲 ส่งที่เลือก ('+n+' ใบ)';
+}
+async function plSend(btn){
+  if(plBusy)return;
+  const idx=[...document.querySelectorAll('.pl-cb:checked')].map(x=>Number(x.dataset.i));
+  if(!idx.length){toast('ยังไม่ได้เลือกบิล');return;}
+  if(!confirm('ส่งบิล '+idx.length+' ใบ เข้ากลุ่มไลน์ของแต่ละร้าน?'))return;
+  plBusy=true;btn.disabled=true;
+  const prog=document.getElementById('pl-prog');
+  let ok=0,fail=0,stop=null;
+  for(let k=0;k<idx.length;k++){
+    const i=idx[k],b=window._plList[i],st=document.getElementById('pl-st-'+i);
+    prog.textContent='กำลังส่ง '+(k+1)+'/'+idx.length+'…';
+    st.textContent='⏳';
+    const r=await sendBillToLine(b);
+    if(r.ok){ok++;st.innerHTML='<span style="color:var(--ok,#159b78)">✅ ส่งแล้ว</span>';const cb=document.querySelector('.pl-cb[data-i="'+i+'"]');if(cb){cb.checked=false;cb.disabled=true;}}
+    else{fail++;st.innerHTML='<span style="color:var(--danger,#b52020)">'+(r.global?'⛔ ':'❌ ')+esc(String(r.why||'').slice(0,80))+'</span>';
+      if(r.global){stop=r.why;break;}}
+    if(k+1<idx.length)await new Promise(z=>setTimeout(z,300));
+  }
+  plBusy=false;btn.disabled=false;plCount();
+  prog.textContent=stop?'⛔ หยุดแล้ว — ไลน์ยังส่งไม่ได้: '+stop+' · ส่งสำเร็จ '+ok+' ใบ (ที่เหลือกดส่งใหม่ได้เมื่อไลน์กลับมา)'
+    :'เสร็จแล้ว — ส่งสำเร็จ '+ok+' ใบ'+(fail?' · ไม่สำเร็จ '+fail+' ใบ (ดูสาเหตุในช่อง ผล)':'');
+  toast(stop?'⛔ ไลน์ยังส่งไม่ได้ — หยุดส่ง (สำเร็จ '+ok+' ใบ)':'ส่งบิลที่ค้าง สำเร็จ '+ok+' ใบ'+(fail?' · ไม่สำเร็จ '+fail:''));
+  if(ok)loadBills();
 }
 /* ==================== หน้าต้นทุนสินค้า (ล็อกรหัส 6 หลัก) ==================== */
 let costUnlocked=false, costChanges={}, lotStats={}, lotsByProd={};
