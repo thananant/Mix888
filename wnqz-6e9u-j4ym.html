@@ -8439,13 +8439,13 @@ function lbRecapTexts(orders,win){
   out.push(cur);
   return out;
 }
-async function lbBuild(ep,v){
-  const since7=new Date(Date.now()-7*86400000).toISOString();
-  const bFrom=ep&&Date.parse(ep.from)<Date.parse(since7)?ep.from:since7;
+// บิล: เฉพาะบิลที่ยังไม่ส่งในช่วงไลน์ล่ม (ที่ยืนยันแล้ว หรือที่ระบบแนะนำ) — บิลก่อนไลน์ล่มที่ไม่ได้ติ๊กส่ง (เช่น ส่งทางอื่นไปแล้ว) ไม่ขึ้น
+async function lbBuild(ep,v,sug){
   const local=lbLocalSent(), done=k=>!!(v.sent[k]||local[k]);
-  const win=ep;
+  const win=ep, bw=ep||sug;
+  if(!bw)return {items:[],orders:0};
   const rb=await db.from('bills').select('id,bill_no,total,shipping_fee,discount,revision,image_url,page_urls,created_at,ship_status,line_sent, customers(id,code,name,branch_name,line_group_id)')
-    .gt('created_at',bFrom).not('line_sent','is',true).order('created_at',{ascending:true}).limit(500);
+    .gt('created_at',bw.from).lte('created_at',bw.to).not('line_sent','is',true).order('created_at',{ascending:true}).limit(500);
   if(rb.error)throw new Error(rb.error.message);
   const items=[];
   (rb.data||[]).filter(b=>(b.ship_status||'')!=='cancelled'&&b.customers&&b.customers.line_group_id&&!done('b'+b.id))
@@ -8512,7 +8512,7 @@ async function openPendingLine(btn){
   if(btn)btn.disabled=true;
   document.querySelectorAll('#pl-modal button,#pl-modal input').forEach(x=>x.disabled=true);
   let v,sug,res;
-  try{v=await lbLoad();sug=await lbSuggest(v);res=await lbBuild(v.ep||null,v);}
+  try{v=await lbLoad();sug=await lbSuggest(v);res=await lbBuild(v.ep||null,v,sug);}
   catch(e){toast('โหลดรายการไม่ได้: '+(e.message||e));
     document.querySelectorAll('#pl-modal button,#pl-modal input').forEach(x=>{if(!x.dataset.locked)x.disabled=false;});return;}
   finally{plLoading=false;if(btn)btn.disabled=false;}
@@ -8526,16 +8526,18 @@ async function openPendingLine(btn){
   const preOn=!document.getElementById('pl-pre')||document.getElementById('pl-pre').checked;
   const cnt=k=>plItems.filter(x=>x.kind===k).length;
   const newer=!!(ep&&sug&&Date.parse(sug.from)>=Date.parse(ep.to));   // มีช่วงไลน์ล่มใหม่หลังช่วงที่ยืนยันไว้
-  const show=newer?sug:(ep||sug);   // ค่าที่ใส่ในช่องวันเวลา
+  const longer=!!(ep&&sug&&!newer&&Date.parse(sug.to)>Date.parse(ep.to)+60000);   // ไลน์ยังล่มต่อจากช่วงที่ยืนยันไว้
+  const show=newer?sug:longer?{from:ep.from,to:sug.to}:(ep||sug);   // ค่าที่ใส่ในช่องวันเวลา
   const epBox=ep
     ?'<div style="background:#eaf7f2;border:1px solid #bfe6d6;border-radius:10px;padding:8px 12px;font-size:13px;margin:8px 0">✅ ใช้ช่วงไลน์ล่ม <b>'+esc(lbT(ep.from))+' – '+esc(lbT(ep.to))+'</b>'+(ep.by?' (ยืนยันโดย '+esc(ep.by)+')':'')
       +' — รวม 🛒 รับออเดอร์ · 💰 รับยอด · 📋 สรุปย้อนหลัง ของช่วงนี้ · <a href="javascript:void(0)" onclick="plClearEp()" style="color:var(--muted)">เลิกใช้ช่วงนี้</a>'
-      +(newer?'<br>⚠️ <b>พบช่วงไลน์ส่งไม่ได้ใหม่</b> '+esc(lbT(sug.from))+' – '+esc(lbT(sug.to))+' (ใส่ในช่องด้านล่างให้แล้ว) — ถ้าใช่ กด ✓ บันทึกช่วงใหม่':'')+'</div>'
+      +(newer?'<br>⚠️ <b>พบช่วงไลน์ส่งไม่ได้ใหม่</b> '+esc(lbT(sug.from))+' – '+esc(lbT(sug.to))+' (ใส่ในช่องด้านล่างให้แล้ว) — ถ้าใช่ กด ✓ บันทึกช่วงใหม่':'')
+      +(longer?'<br>⚠️ <b>ไลน์ยังส่งไม่ได้ต่อจากช่วงที่ยืนยันไว้</b> ถึงประมาณ '+esc(lbT(sug.to))+' (ใส่ในช่อง "ถึง" ให้แล้ว) — กด ✓ บันทึกช่วงใหม่ เพื่อรวมรายการที่ค้างเพิ่ม':'')+'</div>'
     :'<div style="background:#fdf6e3;border:1px solid #f0e0b8;border-radius:10px;padding:8px 12px;font-size:13px;margin:8px 0">'
       +(sug?'⚠️ ระบบคาดว่าไลน์ส่งไม่ได้ช่วง <b>'+esc(lbT(sug.from))+' – '+esc(lbT(sug.to))+'</b>'+(sug.run?' (บิลส่งไม่ออกติดกัน '+sug.run+' ใบ)':'')+(sug.back?'':' · ยังไม่เห็นว่าไลน์กลับมา')
         +'<br>ถ้าช่วงนี้ไลน์ล่มจริง ตรวจวันเวลาด้านล่าง แล้วกด <b>✓ ใช้ช่วงนี้</b> เพื่อส่ง รับออเดอร์ · รับยอด · สรุปย้อนหลัง ที่ค้างด้วย'
-        :'ไม่พบช่วงที่ไลน์ส่งไม่ได้ — แสดงเฉพาะบิลที่ยังไม่ได้ส่ง · ถ้าไลน์ล่มจริง ใส่วันเวลาด้านล่างแล้วกด ✓ ใช้ช่วงนี้')
-      +'<br><span style="color:var(--muted)">(ยังไม่ยืนยัน = ส่งเฉพาะบิล — บิลที่ตั้งใจออกโดยไม่ส่งไลน์ ระบบแยกไม่ออก จึงไม่เดาช่วงเอง)</span></div>';
+        :'ไม่พบช่วงที่ไลน์ส่งไม่ได้ · ถ้าไลน์ล่มจริง ใส่วันเวลาด้านล่างแล้วกด ✓ ใช้ช่วงนี้')
+      +'<br><span style="color:var(--muted)">(ยังไม่ยืนยัน = แสดงเฉพาะบิลที่ยังไม่ส่งในช่วงที่คาดไว้ · บิลก่อนไลน์ล่มที่ไม่ได้ติ๊กส่ง ไม่ขึ้นที่นี่ — ส่งรายใบได้ที่ปุ่ม 📲 ในรายการบิล)</span></div>';
   m.innerHTML='<div style="background:#fff;border-radius:14px;max-width:900px;width:100%;padding:18px;margin:14px auto">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0;font-size:16px">⏪ ส่งไลน์ที่ค้าง · '+plItems.length+' รายการ</h3>'
     +'<button class="btn-g mini" onclick="if(!plBusy)document.getElementById(\'pl-modal\').remove()">ปิด</button></div>'
