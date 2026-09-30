@@ -1549,12 +1549,12 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="card">
     <h3 class="ct">⚙️ ตั้งค่าระบบ</h3>
     <div class="row">
-      <div style="flex:1;min-width:260px"><label>LINE Group ID กลุ่มกลาง (แจ้งออเดอร์ใหม่ + สรุปประจำวัน)</label><input id="st-central" style="width:100%" placeholder="Cxxxxxxxx… (พิมพ์ id ในกลุ่มกลางให้บอทตอบ)" oninput="renderGroupNameHints();autoFetchGroupName(this.value,'st-central')"></div>
+      <div style="flex:1;min-width:260px"><label>LINE Group ID กลุ่มกลาง (สรุปประจำวัน + แจ้งเตือนระบบ)</label><input id="st-central" style="width:100%" placeholder="Cxxxxxxxx… (พิมพ์ id ในกลุ่มกลางให้บอทตอบ)" oninput="renderGroupNameHints();autoFetchGroupName(this.value,'st-central')"></div>
       <div style="flex:1;min-width:260px"><label>LINE Group ID กลุ่มรีพอร์ต (สำเนาใบวางบิล + ทวงสลิป)</label><input id="st-report" style="width:100%" placeholder="Cxxxxxxxx… (สร้างกลุ่มใหม่ เชิญบอทเข้า แล้วพิมพ์ id)" oninput="renderGroupNameHints();autoFetchGroupName(this.value,'st-report')"></div>
       <button class="btn-p" onclick="saveSettings()">บันทึกตั้งค่า</button>
       <button class="btn-g" onclick="refreshLineGroupNames(this)" title="ถามชื่อกลุ่มจาก LINE">🔄 ดึงชื่อกลุ่ม</button>
     </div>
-    <p class="hint">กลุ่มกลาง = กลุ่มทีมภายใน (ต่างจากกลุ่มลูกค้าแต่ละราย) ไว้รับแจ้งเตือนออเดอร์ใหม่และสรุปออเดอร์รายวันสำหรับจัดส่ง · กลุ่มรีพอร์ต = รับสำเนาใบวางบิลอัตโนมัติและข้อความทวงสลิปทุกฉบับ</p>
+    <p class="hint">กลุ่มกลาง = กลุ่มทีมภายใน (ต่างจากกลุ่มลูกค้าแต่ละราย) ไว้รับสรุปออเดอร์รายวันสำหรับจัดส่ง (แจ้งออเดอร์ใหม่ส่งเข้ากลุ่มสรุปออเดอร์กลุ่มเดียว — ถ้ายังไม่ได้ตั้งกลุ่มสรุปออเดอร์ จะส่งเข้ากลุ่มกลางแทน) · กลุ่มรีพอร์ต = รับสำเนาใบวางบิลอัตโนมัติและข้อความทวงสลิปทุกฉบับ</p>
     <h3 class="ct" style="margin-top:18px">📄 ใบวางบิลอัตโนมัติ (ลูกค้าเครดิตตามรอบวางบิล)
       <button class="btn-g mini" style="margin-left:8px;vertical-align:middle" onclick="stmtLoad()">🔄</button>
       <button class="btn-g mini" style="vertical-align:middle" onclick="stmtCopyCode(this)" title="คัดลอกโค้ด Edge Function credit-statement ไปวางใน Supabase Dashboard">📋 คัดลอกโค้ดฟังก์ชัน</button>
