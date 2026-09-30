@@ -2191,7 +2191,48 @@ window._billLogo=null;
 const ORDER_URL    = 'https://thananant.github.io/Mix888/';
 /* =========================================== */
 
-const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+/* ส่ง LINE ไม่ได้ → อ่านเหตุผลจริงจากคำตอบของ line-push (LINE) แล้วขึ้นแถบแดงด้านบน — ครอบทุกปุ่มที่ส่งไลน์ในหลังบ้าน
+   (เดิมหลายปุ่มขึ้นแค่ "Edge Function returned a non-2xx status code" ไม่รู้สาเหตุ) · ส่งสำเร็จครั้งถัดไป = แถบหายเอง */
+function lineWhy(http,j){
+  const m=String((j&&(j.message||j.error||(j.details&&JSON.stringify(j.details))))||'');
+  const st=Number(j&&typeof j.status==='number'&&j.status!==200?j.status:(j&&typeof j.code==='number'?j.code:http))||0;
+  if(/monthly limit|reached your .*limit/i.test(m))return 'โควตาข้อความ LINE ของเดือนนี้หมดแล้ว — ส่งเข้าไลน์ไม่ได้จนกว่าจะขึ้นเดือนใหม่ หรืออัปเกรดแพ็กเกจใน LINE Official Account Manager';
+  if(st===401||/authentication failed|invalid.*token|access token/i.test(m))return 'โทเคน LINE (Channel access token) ใช้ไม่ได้แล้ว — อาจมีคนกดออกโทเคนใหม่ใน LINE Developers ต้องใส่โทเคนใหม่ใน secret ของ line-push';
+  if(st===429)return 'LINE ปฏิเสธเพราะส่งถี่เกินไป — รอสักครู่แล้วลองใหม่';
+  if(st===403)return 'บัญชี LINE ไม่มีสิทธิ์ส่งข้อความแบบนี้ (ตรวจแพ็กเกจ/การตั้งค่า Messaging API)';
+  if(st===400&&/'to'|failed to send|not found/i.test(m))return 'รหัสกลุ่มไลน์ผิด หรือบอทไม่อยู่ในกลุ่มนั้นแล้ว (ถูกเชิญออก) — เชิญบอทกลับเข้ากลุ่ม';
+  if(st===400)return 'LINE ไม่รับข้อความนี้ (รูปแบบข้อความ/ลิงก์รูปไม่ถูกต้อง)';
+  if(!st||st>=500)return 'ระบบส่ง LINE ขัดข้อง (ฟังก์ชัน line-push บน Supabase หรือ LINE เอง)';
+  return 'ส่ง LINE ไม่สำเร็จ';
+}
+function lineBar(txt,detail){
+  let el=document.getElementById('line-fail-bar');
+  if(!txt){if(el)el.remove();return;}
+  if(!el){el=document.createElement('div');el.id='line-fail-bar';
+    el.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#b52020;color:#fff;padding:8px 44px 8px 14px;font-size:13.5px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.25)';
+    document.body.appendChild(el);}
+  const t=new Date().toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});
+  el.innerHTML='⚠️ <b>ส่ง LINE ไม่ได้</b> ('+esc(t)+') — '+esc(txt)
+    +'<div style="font-size:11.5px;opacity:.85;word-break:break-all">รายละเอียดจาก LINE: '+esc(String(detail||'').slice(0,300))+'</div>'
+    +'<button onclick="lineBar(null)" style="position:absolute;top:6px;right:8px;background:none;border:0;color:#fff;font-size:20px;cursor:pointer" aria-label="ปิด">×</button>';
+}
+async function lineWatchFetch(input,init){
+  const url=typeof input==='string'?input:(input&&input.url)||String(input||'');
+  const isLine=/\/functions\/v1\/line-push/.test(url);
+  let res;
+  try{res=await fetch(input,init);}
+  catch(e){if(isLine)try{lineBar('ติดต่อระบบส่ง LINE ไม่ได้ (เน็ตหลุด/Supabase ไม่ตอบ) — ลองใหม่อีกครั้ง',String(e&&e.message||e));}catch(x){}throw e;}
+  try{
+    if(isLine){
+      let j=null;try{j=await res.clone().json();}catch(e){}
+      const ok=res.ok&&j&&(j.status===200||j.ok===true);
+      if(ok)lineBar(null);
+      else lineBar(lineWhy(res.status,j),'HTTP '+res.status+' · '+(j?JSON.stringify(j):'(ไม่มีเนื้อหา)'));
+    }
+  }catch(e){}
+  return res;
+}
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {global:{fetch:(i,o)=>lineWatchFetch(i,o)}});
 const fmt = n => Number(n).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmt0 = n => Number(n).toLocaleString('th-TH',{maximumFractionDigits:0});
 const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
