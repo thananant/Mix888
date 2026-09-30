@@ -1400,7 +1400,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <input type="date" id="ac-from" onchange="loadBills()" title="ตั้งแต่วันที่">
       <input type="date" id="ac-to" onchange="loadBills()" title="ถึงวันที่">
       <input id="ac-q" placeholder="ค้นหาเลขบิล / ลูกค้า…" style="flex:1;min-width:150px" oninput="renderAccount()">
-      <button class="btn-s mini" onclick="openPendingLine(this)" title="บิลที่ยังไม่ได้ส่งเข้าไลน์ใน 7 วันล่าสุด (เช่น ช่วงไลน์ส่งไม่ได้) — เลือกแล้วส่งทีเดียว">📲 ส่งบิลที่ค้าง</button>
+      <button class="btn-s mini" onclick="openPendingLine(this)" title="ข้อความที่ส่งไม่ออกช่วงไลน์ส่งไม่ได้ (บิล · รับออเดอร์ · รับยอด) — เลือกแล้วส่งทีเดียว เรียงตามเวลา">⏪ ส่งไลน์ที่ค้าง</button>
       <button class="btn-p mini" id="ac-issue-sel" onclick="acIssueSelected(this)" style="display:none">🧾 ออกบิลที่เลือก</button>
       <button class="btn-p mini" id="ac-pdf-sel" onclick="acPdfSelected(this)" style="display:none">📄 โหลด PDF ที่เลือก</button>
       <button class="btn-g mini" id="ac-view-sel" onclick="acViewSelected(this)" style="display:none">👁️ ดูบิลที่เลือก (ไฟล์เดียว)</button>
@@ -8296,66 +8296,229 @@ async function sendBillToLine(b){
   }
   await db.from('bills').update({line_sent:true}).eq('id',b.id);
   b.line_sent=true;
+  // ส่งซ้ำบิลเก่า (ไม่ใช่ส่งตอนออกบิล) → จดไว้ ตัวหาช่วงไลน์ล่มจะไม่นับว่า "ไลน์กลับมาแล้ว" จากบิลนี้
+  if(b.created_at&&Date.now()-Date.parse(b.created_at)>30*60000)try{await lbSave(v=>{if(!v.resent.includes(b.id))v.resent.push(b.id);});}catch(e){}
   return {ok:true};
 }
-/* 📲 ส่งบิลที่ค้างส่งไลน์ทีเดียว (เช่น ช่วงโควตาไลน์หมด) — เลือกได้ว่าจะส่งใบไหน
-   ส่งทีละใบ · ไลน์ยังส่งไม่ได้ทั้งระบบ (โควตาหมด) = หยุดทันที ไม่เปลืองโควตา · กลุ่มไหนมีปัญหา = ข้ามไปใบถัดไป */
-let plBusy=false;
-async function openPendingLine(btn){
+/* ⏪ ส่งไลน์ที่ค้าง ช่วงไลน์ส่งไม่ได้ (เช่น โควตาเดือนหมด) — ชุดเดียวกับที่ตกหล่นจริง เรียงตามเวลา
+   🛒 รับออเดอร์ → กลุ่มร้าน · 🧾 บิล → กลุ่มร้าน · 💰 รับยอด ขอบคุณ → กลุ่มร้าน · 📋 สรุปย้อนหลัง 1 ข้อความ → กลุ่มสรุปออเดอร์
+   (กลุ่มสรุปออเดอร์ไม่ส่ง "ออเดอร์ใหม่" ซ้ำทีละออเดอร์ — กันคนแพคเข้าใจผิดว่าเป็นออเดอร์ใหม่)
+   ช่วงเวลา: เริ่ม = บิลใบสุดท้ายที่ส่งเข้าไลน์ได้เอง (จดไว้ครั้งแรกที่เปิด ไม่เลื่อนตามการส่งซ้ำ)
+            จบ = บิลใบแรกที่ส่งเข้าไลน์ได้เองหลังจากนั้น (= ไลน์กลับมาแล้ว) · ยังไม่กลับ = ถึงตอนนี้
+   กันส่งซ้ำ: บิลดูจาก line_sent · อย่างอื่นจดไว้ใน settings.line_backfill
+   ไลน์ส่งไม่ได้ทั้งระบบ = หยุดทันที ไม่เปลืองโควตา · กลุ่มไหนมีปัญหา = ข้ามไปรายการถัดไป */
+let plBusy=false, plItems=[], plWin=null;
+const LB_KEY='line_backfill';
+async function lbLoad(){
+  let v={};
+  try{const {data}=await db.from('settings').select('value').eq('key',LB_KEY).maybeSingle();v=JSON.parse((data&&data.value)||'{}')||{};}catch(e){v={};}
+  if(!v||typeof v!=='object')v={};
+  if(!v.sent||typeof v.sent!=='object')v.sent={};
+  if(!Array.isArray(v.resent))v.resent=[];
+  return v;
+}
+async function lbSave(mut){
+  const v=await lbLoad();mut(v);
+  v.resent=v.resent.slice(-1000);
+  const {error}=await db.from('settings').upsert({key:LB_KEY,value:JSON.stringify(v)},{onConflict:'key'});
+  if(error)throw new Error('บันทึกว่าส่งแล้วไม่ได้: '+error.message);
+  return v;
+}
+const lbT=iso=>{const d=new Date(iso);const p=n=>String(n).padStart(2,'0');return p(d.getDate())+'/'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes());};
+const lbLocal=iso=>{const d=new Date(iso);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
+// ช่วงไลน์ล่ม — ค่าที่กรอกเองมาก่อน · ไม่งั้นใช้ที่จดไว้ · ไม่มีจด = หาใหม่แล้วจดไว้
+async function lbWindow(v,fromIn,toIn){
+  const resent=new Set(v.resent);
+  const since14=new Date(Date.now()-14*86400000).toISOString();
+  let from=fromIn||null;
+  if(from&&from!==v.from){await lbSave(x=>{x.from=from;x.back=null;});v.from=from;v.back=null;}   // แก้เวลาเริ่มเอง = จดไว้ใช้ครั้งต่อไป
+  if(!from&&v.from&&v.from>since14&&!(v.back&&Date.now()-Date.parse(v.back)>3*86400000))from=v.from;
+  if(!from){
+    // หาจากลำดับบิลของร้านที่มีกลุ่มไลน์: ช่วงที่บิล "ส่งไม่ออก" ติดกันยาวที่สุด (ยังไม่ส่ง หรือส่งซ้ำทีหลัง) = ช่วงไลน์ล่ม
+    //   เริ่ม = บิลที่ส่งได้เองใบสุดท้ายก่อนช่วงนั้น — เปิดครั้งแรกหลังไลน์กลับมาแล้วก็ยังได้ช่วงที่ถูก
+    const {data}=await db.from('bills').select('id,created_at,line_sent,ship_status, customers(line_group_id)')
+      .gte('created_at',since14).order('created_at',{ascending:true}).limit(1000);
+    const seq=(data||[]).filter(b=>(b.ship_status||'')!=='cancelled'&&b.customers&&b.customers.line_group_id)
+      .map(b=>({t:b.created_at,auto:b.line_sent===true&&!resent.has(b.id)}));
+    let best=null,run=null,prevAuto=null;
+    seq.forEach(x=>{
+      if(x.auto){if(run){if(!best||run.n>=best.n)best=run;run=null;}prevAuto=x.t;}
+      else{if(!run)run={n:0,from:prevAuto,start:x.t};run.n++;}
+    });
+    if(run&&(!best||run.n>=best.n))best=run;
+    const lastAuto=[...seq].reverse().find(x=>x.auto);
+    from=best?(best.from||new Date(Date.parse(best.start)-60000).toISOString())
+        :(lastAuto?lastAuto.t:new Date(Date.now()-86400000).toISOString());
+    await lbSave(x=>{x.from=from;x.back=null;x.sent={};});
+    v.from=from;v.sent={};v.back=null;
+  }
+  let to=toIn||null,back=null;
+  if(!to){
+    const {data}=await db.from('bills').select('id,created_at').eq('line_sent',true).gt('created_at',from).order('created_at',{ascending:true}).limit(300);
+    const first=(data||[]).find(b=>!resent.has(b.id));
+    if(first){back=first.created_at;to=back;if(v.back!==back)try{await lbSave(x=>{x.back=back;});}catch(e){}}
+    else to=new Date().toISOString();
+  }
+  return {from,to,back};
+}
+function lbOrderText(o,prefix){
+  const c=o.customers||{};
+  const shop=(c.name||'')+(c.branch_name?' • '+c.branch_name:'')+(c.code?' ('+c.code+')':'');
+  let t=(prefix?prefix+'\n':'')+'🏪 '+shop+'\n✅ รับออเดอร์ '+o.order_no+' เรียบร้อยแล้ว (สั่งเมื่อ '+lbT(o.created_at)+')\n'
+    +(o.created_by?'👤 สั่งโดย : พนักงาน '+o.created_by+' (กดสั่งให้ลูกค้า)':'📱 สั่งโดย : ลูกค้าสั่งเอง')+'\n──────────\nรายการ :';
+  (o.order_items||[]).forEach(it=>{t+='\n'+((it.products||{}).name||'?')+' '+Number(it.qty)+' '+((it.products||{}).unit||'');});
+  t+='\n\nขอบคุณที่สั่งสินค้าครับ 🙏';
+  return t.slice(0,4900);
+}
+function lbPayText(g,polite,prefix){
+  let txt;
+  if(g.bills.length>1){
+    const sum=g.bills.reduce((s,x)=>s+Number(x.total||0),0);
+    txt='✅ รับยอดโอนรวม '+g.bills.length+' บิล\n'+g.bills.map(x=>'• '+x.bill_no+' ฿'+fmt(x.total)).join('\n')+'\nรวม ฿'+fmt(sum)+' เรียบร้อย\nขอบคุณ'+polite+' 🙏';
+  }else{
+    const x=g.bills[0];
+    txt=x.paidAfter<Number(x.total||0)-0.009
+      ?'💰 รับยอดบางส่วน บิล '+x.bill_no+'\nรับแล้ว ฿'+fmt(x.paidAfter)+' / ฿'+fmt(x.total)+'\nคงเหลือ ฿'+fmt(Number(x.total)-x.paidAfter)+'\nขอบคุณ'+polite+' 🙏'
+      :'✅ รับยอดบิลเลขที่ '+x.bill_no+'\nจำนวน ฿'+fmt(x.total)+' เรียบร้อย\nขอบคุณ'+polite+' 🙏';
+  }
+  return (shopTag(g.cust)+(prefix?prefix+'\n':'')+txt).slice(0,4900);
+}
+function lbRecapTexts(orders,win){
+  const head='⏪ สรุปออเดอร์ย้อนหลัง ช่วงไลน์ส่งไม่ได้\n'+lbT(win.from)+' – '+lbT(win.to)+' · '+orders.length+' ออเดอร์\n(ไม่ใช่ออเดอร์ใหม่ — ออเดอร์เหล่านี้อยู่ในระบบครบแล้ว ส่งให้ดูย้อนหลังเท่านั้น)\n──────────';
+  const lines=orders.map((o,i)=>{const c=o.customers||{};const bill=((o.bills||[]).find(b=>b.ship_status!=='cancelled')||{}).bill_no;
+    return (i+1)+') '+o.order_no+' · '+lbT(o.created_at)+'\n   '+((c.code||'')+' '+(c.name||'')).trim()
+      +(c.hide_prices?'':' · ฿'+fmt(o.total||0))+' · '+(o.created_by?'👤 '+o.created_by:'📱 ลูกค้าสั่งเอง')+(bill?' · บิล '+bill:'');});
+  const out=[];let cur=head;
+  lines.forEach(l=>{if((cur+'\n'+l).length>4500){out.push(cur);cur='(ต่อ) สรุปออเดอร์ย้อนหลัง';}cur+='\n'+l;});
+  out.push(cur);
+  return out;
+}
+async function lbBuild(win,v){
+  const since7=new Date(Date.now()-7*86400000).toISOString();
+  const bFrom=win.from>since7?win.from:since7;
+  const [rb,ro,rp]=await Promise.all([
+    db.from('bills').select('id,bill_no,total,shipping_fee,discount,revision,image_url,page_urls,created_at,ship_status,line_sent, customers(id,code,name,branch_name,line_group_id)')
+      .gt('created_at',bFrom).not('line_sent','is',true).order('created_at',{ascending:true}).limit(500),
+    db.from('orders').select('id,order_no,created_at,total,status,created_by, customers(id,code,name,branch_name,line_group_id,hide_prices), order_items(qty, products(name,unit)), bills(bill_no,ship_status)')
+      .gt('created_at',win.from).lte('created_at',win.to).order('created_at',{ascending:true}).limit(1000),
+    db.from('payments').select('id,bill_id,amount,created_at, bills(id,bill_no,total,customer_id, customers(id,code,name,branch_name,line_group_id))')
+      .gt('created_at',win.from).lte('created_at',win.to).order('created_at',{ascending:true}).limit(1000)]);
+  const err=rb.error||ro.error||rp.error;if(err)throw new Error(err.message);
+  const polite=(document.getElementById('polite')||{value:'ครับ'}).value||'ครับ';
+  const pre=document.getElementById('pl-pre');const prefix=(!pre||pre.checked)?'⏪ แจ้งย้อนหลัง (ช่วงที่ผ่านมาไลน์ของร้านส่งข้อความไม่ได้ ขออภัย'+polite+')':'';
+  const items=[];
+  (rb.data||[]).filter(b=>(b.ship_status||'')!=='cancelled'&&b.customers&&b.customers.line_group_id)
+    .forEach(b=>items.push({kind:'bill',t:b.created_at,key:'b'+b.id,ref:b.bill_no,shop:b.customers,to:b.customers.line_group_id,bill:b,amt:b.total}));
+  const orders=(ro.data||[]).filter(o=>o.status!=='cancelled');
+  orders.filter(o=>o.customers&&o.customers.line_group_id&&!v.sent['o'+o.id])
+    .forEach(o=>items.push({kind:'order',t:o.created_at,key:'o'+o.id,ref:o.order_no,shop:o.customers,to:o.customers.line_group_id,text:lbOrderText(o,prefix),amt:o.total}));
+  // รับยอด: การชำระของร้านเดียวกันในนาทีเดียวกัน = โอนครั้งเดียว (ข้อความเดียว) · ยอดบางส่วน/ครบ ดูจากยอดสะสมถึงครั้งนั้น
+  const pays=(rp.data||[]).filter(p=>p.bills&&p.bills.customers&&p.bills.customers.line_group_id);
+  const billIds=[...new Set(pays.map(p=>p.bill_id))];
+  let allPays=[];
+  for(let i=0;i<billIds.length;i+=150){
+    const {data,error}=await db.from('payments').select('id,bill_id,amount,created_at').in('bill_id',billIds.slice(i,i+150));
+    if(error)throw new Error(error.message);allPays=allPays.concat(data||[]);
+  }
+  const groups=new Map();
+  pays.forEach(p=>{const k=p.bills.customer_id+'|'+String(p.created_at).slice(0,16);(groups.get(k)||groups.set(k,[]).get(k)).push(p);});
+  for(const ps of groups.values()){
+    const key='p'+ps.map(p=>p.id).sort((a,b)=>a-b).join('_');
+    if(v.sent[key])continue;
+    const t=ps[0].created_at;
+    const bills=[...new Map(ps.map(p=>[p.bill_id,p.bills])).values()].map(b=>({bill_no:b.bill_no,total:Number(b.total||0),
+      paidAfter:allPays.filter(q=>q.bill_id===b.id&&(q.created_at<t||ps.some(x=>x.id===q.id))).reduce((s,q)=>s+Number(q.amount||0),0)}));
+    const cust=ps[0].bills.customers;
+    items.push({kind:'pay',t,key,ref:bills.map(x=>x.bill_no).join(', '),shop:cust,to:cust.line_group_id,text:lbPayText({cust,bills},polite,prefix),amt:ps.reduce((s,p)=>s+Number(p.amount||0),0)});
+  }
+  items.sort((a,b)=>a.t<b.t?-1:a.t>b.t?1:({order:0,bill:1,pay:2}[a.kind]-{order:0,bill:1,pay:2}[b.kind]));
+  const sg=appSettings.line_summary_group||appSettings.line_central_group;
+  if(orders.length&&sg&&!v.sent.r)items.push({kind:'recap',t:win.to,key:'r',ref:orders.length+' ออเดอร์',shop:{name:'กลุ่มสรุปออเดอร์'},to:sg,texts:lbRecapTexts(orders,win)});
+  return {items,orders:orders.length,sentBefore:Object.keys(v.sent).length};
+}
+const LB_KIND={order:'🛒 รับออเดอร์',bill:'🧾 บิล',pay:'💰 รับยอด ขอบคุณ',recap:'📋 สรุปย้อนหลัง'};
+async function openPendingLine(btn,fromIn,toIn){
+  if(plBusy)return;
   if(btn)btn.disabled=true;
-  const since=new Date(Date.now()-7*86400000).toISOString();
-  const {data,error}=await db.from('bills')
-    .select('id,bill_no,total,shipping_fee,discount,revision,image_url,page_urls,created_at,ship_status,line_sent, customers(id,code,name,branch_name,line_group_id)')
-    .gte('created_at',since).not('line_sent','is',true).order('created_at',{ascending:true}).limit(500);
+  let win,res;
+  try{const v=await lbLoad();win=await lbWindow(v,fromIn,toIn);res=await lbBuild(win,v);}
+  catch(e){if(btn)btn.disabled=false;toast('โหลดรายการไม่ได้: '+(e.message||e));return;}
   if(btn)btn.disabled=false;
-  if(error){toast('โหลดบิลไม่ได้: '+error.message);return;}
-  const list=(data||[]).filter(b=>(b.ship_status||'')!=='cancelled'&&b.customers&&b.customers.line_group_id);
-  if(!list.length){toast('✓ ไม่มีบิลค้างส่งไลน์ใน 7 วันล่าสุด');return;}
-  window._plList=list;
+  plItems=res.items;plWin=win;
   let m=document.getElementById('pl-modal');
   if(!m){m=document.createElement('div');m.id='pl-modal';
     m.style.cssText='display:flex;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto';
     m.onclick=e=>{if(e.target===m&&!plBusy)m.remove();};document.body.appendChild(m);}
-  const d=s=>new Date(s).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
-  m.innerHTML='<div style="background:#fff;border-radius:14px;max-width:760px;width:100%;padding:18px;margin:14px auto">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0;font-size:16px">📲 บิลที่ยังไม่ได้ส่งเข้าไลน์ (7 วันล่าสุด) · '+list.length+' ใบ</h3>'
-    +'<button class="btn-g mini" id="pl-close" onclick="if(!plBusy)document.getElementById(\'pl-modal\').remove()">ปิด</button></div>'
-    +'<div class="hint" style="margin:6px 0 10px">ส่งทีละใบเข้ากลุ่มไลน์ของแต่ละร้าน (รูปบิล + ยอด เหมือนปุ่ม 📲 ส่ง LINE) · ถ้าไลน์ยังส่งไม่ได้ทั้งระบบ (เช่น โควตาหมด) จะหยุดให้ทันที ไม่เปลืองโควตา · เอาติ๊กออกได้ถ้าไม่อยากส่งใบไหน</div>'
-    +'<div style="overflow-x:auto"><table style="font-size:13px"><thead><tr><th><input type="checkbox" id="pl-all" checked onchange="document.querySelectorAll(\'.pl-cb\').forEach(x=>x.checked=this.checked);plCount()"></th><th>บิล</th><th>ร้าน</th><th>ออกบิล</th><th class="num">ยอด</th><th>ผล</th></tr></thead><tbody>'
-    +list.map((b,i)=>'<tr><td><input type="checkbox" class="pl-cb" data-i="'+i+'" checked onchange="plCount()"></td><td><b>'+esc(b.bill_no)+'</b></td>'
-      +'<td>'+esc((b.customers.code||'')+' '+(b.customers.name||''))+'</td><td style="white-space:nowrap">'+esc(d(b.created_at))+'</td>'
-      +'<td class="num">'+fmt(b.total||0)+'</td><td id="pl-st-'+i+'" style="font-size:12.5px;white-space:nowrap"></td></tr>').join('')
+  const preOn=!document.getElementById('pl-pre')||document.getElementById('pl-pre').checked;
+  const cnt=k=>plItems.filter(x=>x.kind===k).length;
+  m.innerHTML='<div style="background:#fff;border-radius:14px;max-width:900px;width:100%;padding:18px;margin:14px auto">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0;font-size:16px">⏪ ส่งไลน์ที่ค้าง ช่วงไลน์ส่งไม่ได้ · '+plItems.length+' รายการ</h3>'
+    +'<button class="btn-g mini" onclick="if(!plBusy)document.getElementById(\'pl-modal\').remove()">ปิด</button></div>'
+    +'<div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap;margin:8px 0">'
+    +'<div><label>ไลน์ส่งไม่ได้ตั้งแต่</label><input type="datetime-local" id="pl-from" value="'+esc(lbLocal(win.from))+'"></div>'
+    +'<div><label>ถึง</label><input type="datetime-local" id="pl-to" value="'+esc(lbLocal(win.to))+'"></div>'
+    +'<button class="btn-g mini" onclick="plReload()">↻ โหลดใหม่ตามช่วงนี้</button>'
+    +'<label style="font-size:13px;cursor:pointer;user-select:none"><input type="checkbox" id="pl-pre" '+(preOn?'checked':'')+' onchange="plReload()"> ใส่บรรทัด "⏪ แจ้งย้อนหลัง" ในข้อความถึงลูกค้า</label></div>'
+    +'<div class="hint" style="margin:0 0 10px">'+(win.back?'✅ ไลน์กลับมาส่งได้ตั้งแต่ประมาณ '+esc(lbT(win.back))+' — นับถึงเวลานั้น':'⏳ ยังไม่เห็นว่าไลน์กลับมาส่งได้ — นับถึงตอนนี้')
+    +' · ส่งเรียงตามเวลา ร้านจะได้รับตามลำดับเดิม (รับออเดอร์ → บิล → รับยอด) · กลุ่มสรุปออเดอร์ได้ "สรุปย้อนหลัง" ข้อความเดียว ไม่ใช่ออเดอร์ใหม่ทีละใบ'
+    +' · ไลน์ยังส่งไม่ได้ทั้งระบบ = หยุดทันที · ที่ส่งแล้วจะไม่ขึ้นอีก (กดซ้ำไม่ส่งซ้ำ)'+(res.sentBefore?' · ส่งไปแล้วก่อนหน้านี้ '+res.sentBefore+' รายการ':'')+'</div>'
+    +(plItems.length?'<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px;margin-bottom:6px">'
+      +['order','bill','pay','recap'].filter(k=>cnt(k)).map(k=>'<label style="cursor:pointer"><input type="checkbox" checked onchange="plKind(\''+k+'\',this.checked)"> '+LB_KIND[k]+' ('+cnt(k)+')</label>').join('')+'</div>'
+    +'<div style="overflow-x:auto"><table style="font-size:12.5px"><thead><tr><th></th><th>เวลา</th><th>ข้อความ</th><th>เลขที่</th><th>ส่งเข้า</th><th class="num">ยอด</th><th>ผล</th></tr></thead><tbody>'
+    +plItems.map((x,i)=>'<tr><td><input type="checkbox" class="pl-cb" data-i="'+i+'" data-k="'+x.kind+'" checked onchange="plCount()"></td>'
+      +'<td style="white-space:nowrap">'+esc(lbT(x.t))+'</td><td style="white-space:nowrap">'+LB_KIND[x.kind]+'</td><td>'+esc(x.ref||'')+'</td>'
+      +'<td>'+esc(((x.shop.code||'')+' '+(x.shop.name||'')).trim())+'</td><td class="num">'+(x.amt!=null&&x.kind!=='recap'?fmt(x.amt):'')+'</td>'
+      +'<td id="pl-st-'+i+'" style="white-space:nowrap"></td></tr>').join('')
     +'</tbody></table></div>'
-    +'<div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap"><button class="btn-p" id="pl-send" onclick="plSend(this)"></button><span id="pl-prog" style="font-size:13px;color:var(--muted)"></span></div></div>';
+    +'<div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap"><button class="btn-p" id="pl-send" onclick="plSend(this)"></button><span id="pl-prog" style="font-size:13px;color:var(--muted)"></span></div>'
+    :'<div class="empty">✓ ไม่มีข้อความค้างส่งในช่วงนี้</div>')+'</div>';
   plCount();
 }
+function plReload(){
+  const iso=id=>{const el=document.getElementById(id);return el&&el.value?new Date(el.value).toISOString():null;};
+  openPendingLine(null,iso('pl-from'),iso('pl-to'));
+}
+function plKind(k,on){document.querySelectorAll('.pl-cb[data-k="'+k+'"]').forEach(x=>{if(!x.disabled)x.checked=on;});plCount();}
 function plCount(){
   const n=document.querySelectorAll('.pl-cb:checked').length;
-  const b=document.getElementById('pl-send');if(b)b.textContent='📲 ส่งที่เลือก ('+n+' ใบ)';
+  const b=document.getElementById('pl-send');if(b)b.textContent='📲 ส่งที่เลือก ('+n+' รายการ)';
+}
+async function plPush(to,texts){
+  let last=null;
+  for(let i=0;i<texts.length;i+=5){
+    window.lineLast=null;
+    const {data:res,error}=await db.functions.invoke('line-push',{body:{to,messages:texts.slice(i,i+5).map(text=>({type:'text',text}))}});
+    if(error||!res||res.status!==200){const L=window.lineLast||{};return {ok:false,why:L.why||error?.message||JSON.stringify(res),global:L.global!==false};}
+    last=res;
+  }
+  return {ok:!!last};
 }
 async function plSend(btn){
   if(plBusy)return;
   const idx=[...document.querySelectorAll('.pl-cb:checked')].map(x=>Number(x.dataset.i));
-  if(!idx.length){toast('ยังไม่ได้เลือกบิล');return;}
-  if(!confirm('ส่งบิล '+idx.length+' ใบ เข้ากลุ่มไลน์ของแต่ละร้าน?'))return;
+  if(!idx.length){toast('ยังไม่ได้เลือกรายการ');return;}
+  if(!confirm('ส่ง '+idx.length+' รายการ เข้ากลุ่มไลน์ (เรียงตามเวลา)?'))return;
   plBusy=true;btn.disabled=true;
   const prog=document.getElementById('pl-prog');
   let ok=0,fail=0,stop=null;
   for(let k=0;k<idx.length;k++){
-    const i=idx[k],b=window._plList[i],st=document.getElementById('pl-st-'+i);
-    prog.textContent='กำลังส่ง '+(k+1)+'/'+idx.length+'…';
-    st.textContent='⏳';
-    const r=await sendBillToLine(b);
+    const i=idx[k],x=plItems[i],st=document.getElementById('pl-st-'+i);
+    prog.textContent='กำลังส่ง '+(k+1)+'/'+idx.length+'…';st.textContent='⏳';
+    let r;
+    try{
+      r=x.kind==='bill'?await sendBillToLine(x.bill):await plPush(x.to,x.texts||[x.text]);
+      if(r.ok&&x.kind!=='bill')await lbSave(v=>{v.sent[x.key]=Date.now();});
+    }catch(e){r={ok:false,why:String(e.message||e),global:true};}
     if(r.ok){ok++;st.innerHTML='<span style="color:var(--ok,#159b78)">✅ ส่งแล้ว</span>';const cb=document.querySelector('.pl-cb[data-i="'+i+'"]');if(cb){cb.checked=false;cb.disabled=true;}}
     else{fail++;st.innerHTML='<span style="color:var(--danger,#b52020)">'+(r.global?'⛔ ':'❌ ')+esc(String(r.why||'').slice(0,80))+'</span>';
       if(r.global){stop=r.why;break;}}
     if(k+1<idx.length)await new Promise(z=>setTimeout(z,300));
   }
   plBusy=false;btn.disabled=false;plCount();
-  prog.textContent=stop?'⛔ หยุดแล้ว — ไลน์ยังส่งไม่ได้: '+stop+' · ส่งสำเร็จ '+ok+' ใบ (ที่เหลือกดส่งใหม่ได้เมื่อไลน์กลับมา)'
-    :'เสร็จแล้ว — ส่งสำเร็จ '+ok+' ใบ'+(fail?' · ไม่สำเร็จ '+fail+' ใบ (ดูสาเหตุในช่อง ผล)':'');
-  toast(stop?'⛔ ไลน์ยังส่งไม่ได้ — หยุดส่ง (สำเร็จ '+ok+' ใบ)':'ส่งบิลที่ค้าง สำเร็จ '+ok+' ใบ'+(fail?' · ไม่สำเร็จ '+fail:''));
-  if(ok)loadBills();
+  prog.textContent=stop?'⛔ หยุดแล้ว — ไลน์ยังส่งไม่ได้: '+stop+' · ส่งสำเร็จ '+ok+' รายการ (ที่เหลือกดส่งใหม่ได้เมื่อไลน์กลับมา)'
+    :'เสร็จแล้ว — ส่งสำเร็จ '+ok+' รายการ'+(fail?' · ไม่สำเร็จ '+fail+' รายการ (ดูสาเหตุในช่อง ผล)':'');
+  toast(stop?'⛔ ไลน์ยังส่งไม่ได้ — หยุดส่ง (สำเร็จ '+ok+' รายการ)':'ส่งไลน์ที่ค้าง สำเร็จ '+ok+' รายการ'+(fail?' · ไม่สำเร็จ '+fail:''));
+  if(ok&&typeof loadBills==='function')loadBills();
 }
 /* ==================== หน้าต้นทุนสินค้า (ล็อกรหัส 6 หลัก) ==================== */
 let costUnlocked=false, costChanges={}, lotStats={}, lotsByProd={};
