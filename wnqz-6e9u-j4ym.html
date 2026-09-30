@@ -2240,6 +2240,13 @@ async function lineWatchFetch(input,init){
   }catch(e){}
   return res;
 }
+// ผลส่งไลน์ของคำขอนี้เอง (จาก {data,error} ของ invoke) — ไม่อ่าน window.lineLast เพราะข้อความอื่นที่ส่งพร้อมกัน (สรุปเซลล์/แจ้งเตือนระบบ) เขียนทับได้
+async function lineResult(data,error){
+  if(!error)return data&&(data.status===200||data.ok===true)?{ok:true}:{ok:false,why:lineWhy(200,data),global:lineIsGlobal(200,data)};
+  const r=error.context;
+  if(r&&typeof r.status==='number'){let j=null;try{j=await r.clone().json();}catch(e){}return {ok:false,why:lineWhy(r.status,j),global:lineIsGlobal(r.status,j)};}
+  return {ok:false,why:'ติดต่อระบบส่ง LINE ไม่ได้ (เน็ตหลุด/Supabase ไม่ตอบ)',global:true};
+}
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {global:{fetch:(i,o)=>lineWatchFetch(i,o)}});
 const fmt = n => Number(n).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmt0 = n => Number(n).toLocaleString('th-TH',{maximumFractionDigits:0});
@@ -2851,7 +2858,7 @@ async function fetchAllPages(makeQuery,pageSize=1000){
   const out=[];
   for(let from=0;;from+=pageSize){
     const {data,error}=await makeQuery().range(from,from+pageSize-1);
-    if(error){toast('โหลดข้อมูลไม่ครบ: '+error.message);break;}
+    if(error){toast('โหลดข้อมูลไม่ครบ: '+error.message);out.error=error;break;}
     const rows=data||[];
     out.push(...rows);
     if(rows.length<pageSize)break;
@@ -7409,7 +7416,7 @@ async function sendSummaryRange(btn,rStart,rEnd,mode){
     return true;
   });
   btn.disabled=false;btn.textContent=btn.dataset.t;
-  if(error){toast('ดึงออเดอร์ไม่สำเร็จ: '+error.message);return;}
+  if(raw.error){toast('ดึงออเดอร์ไม่ครบ ไม่ส่งสรุป (กันส่งสรุปขาด): '+raw.error.message);return;}
   if(!data.length){toast('ช่วงนี้ไม่มีออเดอร์ที่รอจัดส่ง (ส่งแล้ว/ยกเลิก ไม่นำมาสรุป)');return;}
 
   // จัดกลุ่มตามวิธีจัดส่ง
@@ -8279,7 +8286,6 @@ async function sendBillToLine(b){
     try{const fresh=await regenBillImages(b.id);b.image_url=fresh.imageUrl;b.page_urls=fresh.pageUrls;}
     catch(e){return {ok:false,why:'วาดรูปบิลไม่สำเร็จ: '+(e.message||e)};}
   }
-  window.lineLast=null;
   const {data:res,error}=await db.functions.invoke('line-push',{body:{
     to:b.customers.line_group_id,
     messages:[
@@ -8290,10 +8296,8 @@ async function sendBillToLine(b){
         +(Number(b.discount)?'\nส่วนลด -฿'+fmt(b.discount):'')
         +'\nยอดรวม ฿'+fmt(b.total)}
     ]}});
-  if(error||!res||res.status!==200){
-    const L=window.lineLast||{};
-    return {ok:false,why:L.why||error?.message||JSON.stringify(res),global:L.global!==false};
-  }
+  const lr=await lineResult(res,error);
+  if(!lr.ok)return lr;
   const {error:ue}=await db.from('bills').update({line_sent:true}).eq('id',b.id);
   b.line_sent=true;lbLocalMark('b'+b.id);
   // ส่งซ้ำบิลเก่า (ไม่ใช่ส่งตอนออกบิล) → จดไว้ ตัวหาช่วงไลน์ล่มจะไม่นับว่า "ไลน์กลับมาแล้ว" จากบิลนี้
@@ -8610,9 +8614,9 @@ function plCount(){
 }
 async function plPush(to,texts){
   for(let i=0;i<texts.length;i+=5){
-    window.lineLast=null;
     const {data:res,error}=await db.functions.invoke('line-push',{body:{to,messages:texts.slice(i,i+5).map(text=>({type:'text',text}))}});
-    if(error||!res||res.status!==200){const L=window.lineLast||{};return {ok:false,why:L.why||error?.message||JSON.stringify(res),global:L.global!==false,partial:i>0};}
+    const lr=await lineResult(res,error);
+    if(!lr.ok)return Object.assign(lr,{partial:i>0});
   }
   return {ok:true};
 }
