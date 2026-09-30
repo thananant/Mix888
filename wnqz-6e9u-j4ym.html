@@ -8307,8 +8307,10 @@ async function sendBillToLine(b){
       เพราะบิลที่ตั้งใจออกโดยไม่ส่งไลน์ก็เป็น line_sent=false เหมือนกัน เดาเองแล้วส่งซ้ำได้)
    กันส่งซ้ำ: จองก่อนส่งทุกรายการ (บิล = line_sent · อย่างอื่น = บันทึกแบบเทียบรุ่นใน settings.line_backfill) · บันทึกไม่ลบ
    สรุปย้อนหลังจดทีละออเดอร์ (แก้ช่วง/โหลดใหม่ ไม่ส่งสรุปซ้ำ) · ไลน์ล่มทั้งระบบ = หยุดทันที · กลุ่มไหนมีปัญหา = ข้ามไปรายการถัดไป */
-let plBusy=false, plLoading=false, plItems=[], plWin=null, plToken=0;
-const LB_KEY='line_backfill', LB_RUN_MIN=5;
+let plBusy=false, plLoading=false, plItems=[], plWin=null, plToken=0, lbSeqCache=[];
+const LB_KEY='line_backfill', LB_RUN_MIN=5, LB_BAD_MIN=3;
+// บิลที่ส่งเข้าไลน์ได้เอง (ไม่ใช่ส่งย้อนหลัง) ในช่วง from–to (จากข้อมูลบิล 14 วันล่าสุดที่ lbSuggest โหลดไว้) — มีหลายใบ = ตอนนั้นไลน์ยังใช้ได้
+function lbAutoIn(from,to){const f=Date.parse(from),t=Date.parse(to);return lbSeqCache.filter(x=>x.auto&&x.t>f&&x.t<=t);}
 async function lbRead(){   // อ่านไม่ได้ = โยน error (ห้ามถือว่า "ยังไม่มีบันทึก" — จะส่งซ้ำ)
   const {data,error}=await db.from('settings').select('value').eq('key',LB_KEY).maybeSingle();
   if(error)throw new Error('อ่านบันทึกการส่งไลน์ย้อนหลังไม่ได้: '+error.message);
@@ -8390,11 +8392,14 @@ async function lbSuggest(v){
   if(error)throw new Error(error.message);
   const seq=(data||[]).filter(b=>(b.ship_status||'')!=='cancelled'&&b.customers&&b.customers.line_group_id)
     .map(b=>({t:ms(b.created_at),auto:b.line_sent===true&&!resent.has(b.id)}));
-  // ช่วงบิลส่งไม่ออกติดกัน — เอาช่วงล่าสุดที่ยาวพอ (≥ 5 ใบ)
-  const runs=[];let run=null,prevAuto=null;
-  seq.forEach(x=>{if(x.auto){if(run){runs.push(run);run=null;}prevAuto=x.t;}else{if(!run)run={n:0,from:prevAuto,start:x.t};run.n++;}});
+  lbSeqCache=seq;
+  // ช่วงบิลส่งไม่ออกติดกัน — เอาช่วงล่าสุดที่ยาวพอ (≥ 5 ใบ) · ช่วงยาวสองช่วงที่คั่นด้วยบิล "ส่งได้" ใบเดียว (เช่น ส่งซ้ำทีหลัง) = ช่วงเดียวกัน
+  const runs=[];let run=null,prevAuto=null,gap=0;
+  seq.forEach(x=>{if(x.auto){if(run){runs.push(run);run=null;}prevAuto=x.t;gap++;}else{if(!run){run={n:0,from:prevAuto,start:x.t,gap};gap=0;}run.n++;}});
   if(run)runs.push(run);
-  const big=runs.filter(r=>r.n>=LB_RUN_MIN).pop()||null;
+  let bi=-1;runs.forEach((r,i)=>{if(r.n>=LB_RUN_MIN)bi=i;});
+  let big=bi>=0?Object.assign({},runs[bi]):null;
+  while(big&&bi>0&&big.gap<=1&&runs[bi-1].n>=LB_RUN_MIN){bi--;big={n:big.n+runs[bi].n,from:runs[bi].from,start:runs[bi].start,gap:runs[bi].gap};}
   let from=big?(big.from!=null?big.from:big.start-60000):null;
   const down=v.down_at&&(!v.up_at||ms(v.up_at)>ms(v.down_at)||ms(v.up_at)>Date.now()-3*86400000)?ms(v.down_at):null;
   if(from==null&&down!=null)from=down;
@@ -8511,13 +8516,16 @@ async function openPendingLine(btn){
   plLoading=true;const tok=++plToken;
   if(btn)btn.disabled=true;
   document.querySelectorAll('#pl-modal button,#pl-modal input').forEach(x=>x.disabled=true);
-  let v,sug,res;
-  try{v=await lbLoad();sug=await lbSuggest(v);res=await lbBuild(v.ep||null,v,sug);}
+  let v,sug,res,bad=null;
+  // ช่วงที่ยืนยันไว้มีบิลที่ไลน์ส่งได้ปกติหลายใบ = ยืนยันผิดช่วง → ระงับไว้ (ไม่ขึ้นรับออเดอร์/รับยอดช่วงนั้น กันส่งซ้ำ) ใช้ช่วงที่ระบบคาดแทนจนกว่าจะยืนยันใหม่
+  try{v=await lbLoad();sug=await lbSuggest(v);
+    if(v.ep){const n=lbAutoIn(v.ep.from,v.ep.to).length;if(n>=LB_BAD_MIN)bad={ep:v.ep,n};}
+    res=await lbBuild(bad?null:(v.ep||null),v,sug);}
   catch(e){toast('โหลดรายการไม่ได้: '+(e.message||e));
     document.querySelectorAll('#pl-modal button,#pl-modal input').forEach(x=>{if(!x.dataset.locked)x.disabled=false;});return;}
   finally{plLoading=false;if(btn)btn.disabled=false;}
   if(tok!==plToken||plBusy)return;
-  const ep=v.ep||null;
+  const ep=bad?null:(v.ep||null);
   plItems=res.items;plWin=ep;
   let m=document.getElementById('pl-modal');
   if(!m){m=document.createElement('div');m.id='pl-modal';
@@ -8533,7 +8541,10 @@ async function openPendingLine(btn){
       +' — รวม 🛒 รับออเดอร์ · 💰 รับยอด · 📋 สรุปย้อนหลัง ของช่วงนี้ · <a href="javascript:void(0)" onclick="plClearEp()" style="color:var(--muted)">เลิกใช้ช่วงนี้</a>'
       +(newer?'<br>⚠️ <b>พบช่วงไลน์ส่งไม่ได้ใหม่</b> '+esc(lbT(sug.from))+' – '+esc(lbT(sug.to))+' (ใส่ในช่องด้านล่างให้แล้ว) — ถ้าใช่ กด ✓ บันทึกช่วงใหม่':'')
       +(longer?'<br>⚠️ <b>ไลน์ยังส่งไม่ได้ต่อจากช่วงที่ยืนยันไว้</b> ถึงประมาณ '+esc(lbT(sug.to))+' (ใส่ในช่อง "ถึง" ให้แล้ว) — กด ✓ บันทึกช่วงใหม่ เพื่อรวมรายการที่ค้างเพิ่ม':'')+'</div>'
-    :'<div style="background:#fdf6e3;border:1px solid #f0e0b8;border-radius:10px;padding:8px 12px;font-size:13px;margin:8px 0">'
+    :(bad?'<div style="background:#fdecec;border:1px solid #f3c2c2;border-radius:10px;padding:8px 12px;font-size:13px;margin:8px 0">⛔ ช่วงที่ยืนยันไว้ <b>'+esc(lbT(bad.ep.from))+' – '+esc(lbT(bad.ep.to))+'</b>'+(bad.ep.by?' (โดย '+esc(bad.ep.by)+')':'')
+      +' <b>ผิดช่วง</b> — ในช่วงนั้นมีบิลที่ส่งเข้าไลน์ได้ปกติ '+bad.n+' ใบ = ตอนนั้นไลน์ยังใช้ได้ ลูกค้าได้ข้อความไปแล้ว'
+      +'<br>ระงับช่วงนี้ไว้ (ไม่ส่งซ้ำ) · ตรวจวันเวลาด้านล่างให้เป็นตอนที่ไลน์เริ่มส่งไม่ได้จริง แล้วกด <b>✓ ใช้ช่วงนี้</b> · <a href="javascript:void(0)" onclick="plClearEp()" style="color:var(--muted)">ลบช่วงที่ผิด</a></div>':'')
+    +'<div style="background:#fdf6e3;border:1px solid #f0e0b8;border-radius:10px;padding:8px 12px;font-size:13px;margin:8px 0">'
       +(sug?'⚠️ ระบบคาดว่าไลน์ส่งไม่ได้ช่วง <b>'+esc(lbT(sug.from))+' – '+esc(lbT(sug.to))+'</b>'+(sug.run?' (บิลส่งไม่ออกติดกัน '+sug.run+' ใบ)':'')+(sug.back?'':' · ยังไม่เห็นว่าไลน์กลับมา')
         +'<br>ถ้าช่วงนี้ไลน์ล่มจริง ตรวจวันเวลาด้านล่าง แล้วกด <b>✓ ใช้ช่วงนี้</b> เพื่อส่ง รับออเดอร์ · รับยอด · สรุปย้อนหลัง ที่ค้างด้วย'
         :'ไม่พบช่วงที่ไลน์ส่งไม่ได้ · ถ้าไลน์ล่มจริง ใส่วันเวลาด้านล่างแล้วกด ✓ ใช้ช่วงนี้')
@@ -8570,7 +8581,17 @@ async function plConfirm(){
   const from=val('pl-from'),to=val('pl-to');
   if(!from||!to){toast('ใส่วันเวลาเริ่มและจบก่อน');return;}
   if(Date.parse(from)>=Date.parse(to)){toast('เวลาเริ่มต้องก่อนเวลาจบ');return;}
-  if(!confirm('ใช้ช่วงไลน์ส่งไม่ได้ '+lbT(from)+' – '+lbT(to)+' ?\n\nรับออเดอร์ · รับยอด · สรุปย้อนหลัง ในช่วงนี้จะขึ้นให้ส่ง (ที่เคยส่งแล้วไม่ขึ้นซ้ำ)'))return;
+  // กันใส่ช่วงผิด: ในช่วงนี้มีบิลที่ส่งไลน์ได้ปกติ = ไลน์ยังใช้ได้ตอนนั้น → ข้อความช่วงนั้นส่งไปแล้ว ยืนยันไปจะส่งซ้ำ
+  const ok=lbAutoIn(from,to);
+  const days=(Date.parse(to)-Date.parse(from))/86400000;
+  let warn='';
+  const okT=ok.map(x=>lbT(new Date(x.t).toISOString())).join(', ');
+  if(ok.length>=LB_BAD_MIN)warn+='\n\n⚠️ ในช่วงนี้มีบิลที่ส่งเข้าไลน์ได้ปกติ '+ok.length+' ใบ (ล่าสุด '+lbT(new Date(ok[ok.length-1].t).toISOString())+') = ตอนนั้นไลน์ยังใช้ได้'
+    +'\nข้อความรับออเดอร์/รับยอดช่วงนั้นลูกค้าได้ไปแล้ว — ยืนยันไปจะส่งซ้ำ';
+  else if(ok.length)warn+='\n\nหมายเหตุ: มีบิลที่ส่งเข้าไลน์ได้ '+ok.length+' ใบ ('+okT+') — ถ้าช่วงนี้ไลน์ล่มจริง ตกลงได้เลย';
+  if(days>3)warn+='\n\n⚠️ ช่วงยาว '+Math.round(days)+' วัน — ตรวจวันที่เริ่มอีกครั้ง (ไลน์ล่มจริงตั้งแต่เมื่อไร)';
+  if(ok.length>=LB_BAD_MIN){alert('ช่วง '+lbT(from)+' – '+lbT(to)+' ไม่น่าใช่ช่วงไลน์ล่ม'+warn+'\n\nแก้วันเวลาเริ่มให้เป็นตอนที่ไลน์เริ่มส่งไม่ได้จริง แล้วกดใหม่');return;}
+  if(!confirm('ใช้ช่วงไลน์ส่งไม่ได้ '+lbT(from)+' – '+lbT(to)+' ?\n\nรับออเดอร์ · รับยอด · สรุปย้อนหลัง ในช่วงนี้จะขึ้นให้ส่ง (ที่เคยส่งแล้วไม่ขึ้นซ้ำ)'+warn))return;
   const who=currentUser?(currentUser.display_name||currentUser.username):'';
   try{await lbSave(v=>{v.ep={id:Date.now().toString(36),from,to,at:new Date().toISOString(),by:who};});}
   catch(e){toast(e.message||String(e));return;}
