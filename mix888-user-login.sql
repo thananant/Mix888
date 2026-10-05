@@ -5,7 +5,8 @@
 
 -- 1) ตั้งรหัสเข้าระบบของผู้ใช้ 1 คน: มีบัญชีล็อกอินแล้ว = เปลี่ยนรหัส · ยังไม่มี = สร้างให้ (แบบเดียวกับที่ Supabase สร้าง)
 --    เฉพาะ admin · ผูกรายชื่อกับบัญชีล็อกอินให้ด้วย · หลังบ้านเรียกต่อจาก app_set_user ทุกครั้งที่ใส่รหัสแล้วกดบันทึก
-create or replace function app_set_login(p_username text, p_password text)
+--    ตัวทำงานจริง (ไม่ตรวจสิทธิ์) — เรียกได้เฉพาะเจ้าของฐานข้อมูล เช่น ใน SQL Editor: select app_set_login_core('ชื่อ', 'รหัส');
+create or replace function app_set_login_core(p_username text, p_password text)
 returns jsonb language plpgsql security definer set search_path = extensions, public, pg_temp as $$   -- extensions ก่อน: crypt/gen_salt ของ pgcrypto ไม่โดนฟังก์ชันชื่อซ้ำใน public แทนที่
 declare
   v_name  text := lower(trim(coalesce(p_username, '')));
@@ -15,9 +16,6 @@ declare
   v_new   boolean := false;
   c       text;
 begin
-  if not exists (select 1 from app_users where auth_uid = auth.uid() and active and role = 'admin') then
-    raise exception 'เฉพาะ admin เท่านั้นที่ตั้งรหัสผ่านได้';
-  end if;
   if v_name = '' or v_name ~ '[[:space:]@]' then
     raise exception 'ชื่อผู้ใช้ "%" ใช้ไม่ได้ (ห้ามมีช่องว่าง หรือ @)', p_username;
   end if;
@@ -72,6 +70,16 @@ begin
   update app_users set auth_uid = null where auth_uid = v_uid and lower(username) <> v_name;
   update app_users set auth_uid = v_uid where lower(username) = v_name;
   return jsonb_build_object('user', v_name, 'created', v_new);
+end $$;
+revoke execute on function app_set_login_core(text, text) from public, anon, authenticated;
+--    ปุ่มบันทึกในหน้าผู้ใช้เรียกตัวนี้ — ตรวจว่าเป็น admin ก่อน
+create or replace function app_set_login(p_username text, p_password text)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  if not exists (select 1 from app_users where auth_uid = auth.uid() and active and role = 'admin') then
+    raise exception 'เฉพาะ admin เท่านั้นที่ตั้งรหัสผ่านได้';
+  end if;
+  return app_set_login_core(p_username, p_password);
 end $$;
 revoke execute on function app_set_login(text, text) from public, anon;
 grant execute on function app_set_login(text, text) to authenticated;
