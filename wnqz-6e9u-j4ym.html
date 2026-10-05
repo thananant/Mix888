@@ -11890,11 +11890,20 @@ let currentUser=null, users=[], editUserName=null;
 const AUTH_DOMAIN='@mf168.local';
 function authEmail(u){return String(u||'').trim().toLowerCase()+AUTH_DOMAIN;}
 const USER_COLS='id,username,display_name,role,active,auth_uid';
-/* ล็อกอินจริงผ่าน Supabase Auth — คืน row ของ app_users ถ้าผ่าน, null ถ้าไม่ผ่าน (แล้วไปใช้วิธีสำรอง) */
+/* ล็อกอินจริงผ่าน Supabase Auth — คืน row ของ app_users ถ้าผ่าน, null ถ้าไม่ผ่าน (เหตุผลอยู่ใน authWhy ให้หน้าล็อกอินบอกตรง ๆ) */
+let authWhy='';
 async function authLogin(u,p){
+  authWhy='ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
   try{
     const {data,error}=await db.auth.signInWithPassword({email:authEmail(u),password:p});
-    if(error||!data||!data.user)return null;
+    if(error||!data||!data.user){
+      const c=String((error&&(error.code||error.message))||'');
+      if(error&&error.status===429||/rate|too many/i.test(c))authWhy='ลองผิดหลายครั้งเกินไป — รอประมาณ 5 นาทีแล้วลองใหม่';
+      else if(/not.?confirmed/i.test(c))authWhy='บัญชีนี้ยังใช้ไม่ได้ (ยังไม่ยืนยัน) — แจ้ง admin';
+      else if(/banned/i.test(c))authWhy='บัญชีนี้ถูกปิดการเข้าระบบ — แจ้ง admin';
+      else if(error&&!error.status&&/fetch|network/i.test(c))authWhy='ติดต่อระบบไม่ได้ (เน็ตหลุด?) — ลองใหม่อีกครั้ง';
+      return null;
+    }
     const uid=data.user.id, uname=String(u).trim().toLowerCase();
     let r=await db.from('app_users').select(USER_COLS).eq('auth_uid',uid).limit(1);
     let rows=r.data;
@@ -11911,9 +11920,12 @@ async function authLogin(u,p){
         }
       }
     }
-    if(!rows||!rows.length||!rows[0].active){await db.auth.signOut();return null;}
+    if(!rows||!rows.length||!rows[0].active){
+      authWhy=rows&&rows.length?'บัญชี "'+uname+'" ถูกระงับอยู่ — ให้ admin กด "เปิดใช้" ในหน้าผู้ใช้':'บัญชี "'+uname+'" ไม่มีในรายชื่อผู้ใช้แล้ว — แจ้ง admin';
+      await db.auth.signOut();return null;
+    }
     return rows[0];
-  }catch(e){console.warn('authLogin:',e);return null;}
+  }catch(e){console.warn('authLogin:',e);authWhy='ติดต่อระบบไม่ได้ — ลองใหม่อีกครั้ง';return null;}
 }
 async function doLogout(){
   try{await db.auth.signOut();}catch(e){}
@@ -11929,7 +11941,7 @@ async function doLogin(){
   btn.disabled=true;btn.textContent='กำลังตรวจสอบ…';
   const au=await authLogin(u,p);
   btn.disabled=false;btn.textContent='เข้าสู่ระบบ';
-  if(!au){err.textContent='ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';err.style.display='block';return;}
+  if(!au){err.textContent=authWhy||'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';err.style.display='block';return;}
   localStorage.setItem('mix888_user',JSON.stringify(au));
   enterApp(au);
 }
@@ -12205,7 +12217,8 @@ function renderUsers(){
     <td>${u.active?'<span class="tag tag-ok">ใช้งาน</span>':'<span class="tag tag-out">ระงับ</span>'}</td>
     <td style="white-space:nowrap">
       <button class="btn-s mini" onclick="editUser('${esc(u.username)}')">แก้ไข</button>
-      ${u.username===currentUser.username?'':`<button class="btn-g mini" onclick="toggleUser('${esc(u.username)}',${!u.active})">${u.active?'ระงับ':'เปิดใช้'}</button>`}
+      ${u.username===currentUser.username?'':`<button class="btn-g mini" onclick="toggleUser('${esc(u.username)}',${!u.active})">${u.active?'ระงับ':'เปิดใช้'}</button>
+      <button class="btn-g mini" style="color:#b42318" onclick="deleteUser('${esc(u.username)}')">ลบ</button>`}
     </td></tr>`).join('');
 }
 function editUser(name){
@@ -12245,6 +12258,23 @@ async function toggleUser(name,active){
   const {error}=await db.from('app_users').update({active}).eq('username',name);
   if(error){toast('ทำไม่สำเร็จ: '+error.message);return;}
   toast((active?'เปิดใช้งาน ':'ระงับ ')+name+' แล้ว');
+  loadUsers();
+}
+// ลบผู้ใช้ถาวร (บัญชีล็อกอิน + รายชื่อ) ผ่าน RPC app_delete_user — ฝั่งฐานข้อมูลตรวจว่าเป็น admin, ไม่ใช่ตัวเอง, ไม่ใช่ admin คนสุดท้าย
+// ประวัติบิล/ออเดอร์/รับยอดเก็บชื่อคนทำเป็นข้อความ → ยังอยู่ครบหลังลบ
+async function deleteUser(name){
+  const u=users.find(x=>x.username===name);if(!u||!currentUser||name===currentUser.username)return;
+  if(!confirm('ลบผู้ใช้ "'+name+'"'+(u.display_name?' ('+u.display_name+')':'')+' ถาวร?\n\n'
+    +'• เข้าระบบด้วยชื่อนี้ไม่ได้อีก (ต้องเพิ่มใหม่ถ้าจะใช้)\n• ประวัติบิล/ออเดอร์/รับยอดที่คนนี้ทำไว้ ยังอยู่ครบ\n'
+    +(u.active?'• ผู้ใช้นี้ยัง "ใช้งาน" อยู่ — ถ้าแค่พักชั่วคราว กด "ระงับ" แทน\n':'')))return;
+  const {data,error}=await db.rpc('app_delete_user',{p_username:name});
+  if(error){
+    toast(/app_delete_user|PGRST202|42883|could not find the function/i.test((error.code||'')+' '+(error.message||''))
+      ?'ยังไม่ได้รัน SQL ปุ่มลบผู้ใช้ — รัน SQL ที่ส่งให้ในแชทก่อน':'ลบไม่สำเร็จ: '+error.message);
+    return;
+  }
+  toast('ลบผู้ใช้ '+name+' แล้ว'+(data&&data.auth===-1?' (บัญชีล็อกอินลบไม่ได้ แต่เข้าระบบไม่ได้แล้ว)':''));
+  if(editUserName===name)resetUserForm();
   loadUsers();
 }
 
