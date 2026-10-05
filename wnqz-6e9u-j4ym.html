@@ -9670,7 +9670,27 @@ async function exportCountPDF(btn){
 // ที่มาต้นทุนในไฟล์ Excel: ดูทั้งทุนที่ล็อกไว้ และสถานะส่งของบิลจริง (บิลส่งแล้วแต่ไม่มีทุนล็อก = บอกตรง ๆ ไม่เขียนว่า "ยังไม่ส่ง")
 function costSrcLabel(b,it){
   if(it.cost!=null)return 'FIFO จริง';
-  return b&&b.ship_status==='shipped'?'ส่งแล้ว · ไม่มีทุน FIFO ล็อก (ประมาณจากราคาซื้อล่าสุด)':'ประมาณ (ยังไม่ส่ง)';
+  return b&&b.ship_status==='shipped'?'ส่งแล้ว · ทุนประมาณจากลอตช่วงนั้น (ไม่มีทุนล็อก)':'ประมาณ (ยังไม่ส่ง)';
+}
+// ทุนประมาณของรายการที่ส่งแล้วแต่ไม่มีทุนล็อก (เช่น บิลแก้หลังส่ง): ทุนเฉลี่ยของลอตที่รับเข้าก่อนวันออกบิล
+// ใกล้ทุน FIFO ช่วงนั้นกว่าราคาซื้อล่าสุด · ไม่มีลอตก่อนหน้า = ใช้ราคาซื้อล่าสุดเหมือนเดิม
+async function lotCostEstimator(pids){
+  const ids=[...new Set((pids||[]).filter(v=>v!=null))];
+  if(!ids.length)return ()=>null;
+  let lots=[];
+  try{lots=await fetchAllIn(ids,part=>db.from('stock_lots').select('product_id,qty,unit_cost,created_at').in('product_id',part));}catch(e){console.warn('lots',e);}
+  const by={};(lots||[]).forEach(l=>{(by[l.product_id]=by[l.product_id]||[]).push(l);});
+  return (pid,at)=>{
+    const t=Date.parse(at);if(!isFinite(t))return null;
+    let q=0,c=0;(by[pid]||[]).forEach(l=>{const lq=Number(l.qty)||0;if(lq>0&&Date.parse(l.created_at)<=t){q+=lq;c+=lq*(Number(l.unit_cost)||0);}});
+    return q>0?c/q:null;
+  };
+}
+function estItemCost(b,it,lotEst){
+  if(it.cost!=null)return Number(it.cost);
+  const qty=Number(it.qty)||0;
+  if(b&&b.ship_status==='shipped'&&lotEst){const u=lotEst(it.product_id,b.created_at);if(u!=null)return u*qty;}
+  return Number(it.products?.last_cost||0)*qty;
 }
 async function exportMonthExcel(btn){
   const mv=document.getElementById('ac-month').value;
@@ -9689,12 +9709,13 @@ async function exportMonthExcel(btn){
     if(!bs.length){toast('เดือนนี้ไม่มีบิล');btn.disabled=false;btn.textContent='📊 Excel รายเดือน';return;}
     const orderIds=bs.map(b=>b.order_id).filter(Boolean);
     const its=await fetchAllIn(orderIds,(ids)=>db.from('order_items')
-      .select('order_id,qty,price,amount,cost,products(sku,name,unit,last_cost)')
+      .select('order_id,product_id,qty,price,amount,cost,products(sku,name,unit,last_cost)')
       .in('order_id',ids));
     const itemsByOrder={};(its||[]).forEach(it=>{(itemsByOrder[it.order_id]=itemsByOrder[it.order_id]||[]).push(it);});
     const dstr=dt=>{const d=new Date(dt);return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear();};
     // ต้นทุน: ใช้ FIFO ที่ตัดจริง (it.cost) ถ้ายังไม่ตัด (รอส่ง) ประมาณด้วยราคาซื้อล่าสุด
-    const costOfItem=it=>it.cost!=null?Number(it.cost):Number(it.products?.last_cost||0)*Number(it.qty);
+    const lotEst=await lotCostEstimator((its||[]).map(it=>it.product_id));
+    const costOfItem=(b,it)=>estItemCost(b,it,lotEst);
 
     // ===== ชีต 1: ยอดขาย (ตามฟอร์ม reportSalesDetail) =====
     // มูลค่ารายการ = ก่อนหักส่วนลด · ยอดขาย = ยอดบิลจริง
@@ -9710,7 +9731,7 @@ async function exportMonthExcel(btn){
     // ===== ชีต 2: สรุปกำไรรวม (ตามฟอร์ม totalProfitlossReport) =====
     const rows2=[];
     bs.forEach(b=>{(itemsByOrder[b.order_id]||[]).forEach(it=>{
-      const cost=costOfItem(it);
+      const cost=costOfItem(b,it);
       const amt=Number(it.amount);
       rows2.push([b.orders?.order_no||b.bill_no,(b.customers?.name||''),
         it.products?.sku||'',it.products?.name||'',dstr(b.created_at),
@@ -9754,15 +9775,16 @@ async function exportAccountXlsx(btn){
     let itemsByOrder={};
     if(orderIds.length){
       const its=await fetchAllIn(orderIds,(ids)=>db.from('order_items')
-        .select('order_id,qty,price,amount,cost,products(sku,name,unit,last_cost)')
+        .select('order_id,product_id,qty,price,amount,cost,products(sku,name,unit,last_cost)')
         .in('order_id',ids));
       (its||[]).forEach(it=>{(itemsByOrder[it.order_id]=itemsByOrder[it.order_id]||[]).push(it);});
     }
     const dstr=dt=>{const d=new Date(dt);return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear()+' '+d.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});};
 
     // ===== ชีต 1: สรุปรายบิล (+ ต้นทุน/กำไรต่อบิล) =====
-    const costItem=it=>it.cost!=null?Number(it.cost):Number(it.products?.last_cost||0)*Number(it.qty);
-    const costOf=b=>(itemsByOrder[b.order_id]||[]).reduce((s,it)=>s+costItem(it),0);
+    const lotEst=await lotCostEstimator(Object.values(itemsByOrder).flat().map(it=>it.product_id));
+    const costItem=(b,it)=>estItemCost(b,it,lotEst);
+    const costOf=b=>(itemsByOrder[b.order_id]||[]).reduce((s,it)=>s+costItem(b,it),0);
     const aoa=[['รายการบัญชี (ตามตัวกรอง) · ดึงเมื่อ '+new Date().toLocaleString('th-TH')],
       ['#','เลขที่บิล','SO','v.','ลูกค้า','เซลล์','ขนส่ง','ประเภทบิล','ยอดสินค้า','ค่าขนส่ง','ส่วนลด','ยอดบิล','ต้นทุนสินค้า','กำไรขั้นต้น','ออกเมื่อ','สถานะส่ง','ชำระ','รับยอดโดย','สลิป'],
       ...list.map((b,i)=>{
@@ -9781,7 +9803,7 @@ async function exportAccountXlsx(btn){
       ['#','เลขที่บิล','SO','วันที่','ลูกค้า','SKU','สินค้า','จำนวน','หน่วย','ราคาขาย/หน่วย','ยอดขาย','ต้นทุน/หน่วย','ต้นทุนรวม','กำไรขั้นต้น','ที่มาต้นทุน']];
     let n=0;
     list.forEach(b=>{(itemsByOrder[b.order_id]||[]).forEach(it=>{
-      const cost=costItem(it);
+      const cost=costItem(b,it);
       const amt=Number(it.amount);
       const unitCost=Number(it.qty)>0?cost/Number(it.qty):0;
       aoa2.push([++n,b.bill_no,b.orders?.order_no||'',dstr(b.created_at),
@@ -10567,6 +10589,13 @@ async function applyBillEdit(p,opts={}){
     }
   }
   const noteFinal=(!itemsChanged&&!p.editNote)?'':(p.editNote||'');
+  // ทุน FIFO ที่ล็อกไว้ตอนส่งของ — apply_bill_edit เขียนรายการสินค้าใหม่แล้วทุนหาย (บิลแก้หลังส่งไม่มีทุนเลย)
+  // → จำทุนเดิมไว้ก่อน แล้วใส่คืนหลังแก้ (ebRelockCost)
+  let costBefore=null;
+  if(shipped&&b.order_id){
+    const {data:cb,error:ce}=await db.from('order_items').select('product_id,qty,cost').eq('order_id',b.order_id);
+    if(!ce)costBefore=cb||[];
+  }
   const {data:rj,error:ae}=await db.rpc('apply_bill_edit',{
     p_bill:p.billId,p_expected_rev:p.revision||1,
     p_items:p.items.map(it=>({product_id:it.product_id,qty:it.qty,price:it.price})),
@@ -10577,10 +10606,13 @@ async function applyBillEdit(p,opts={}){
     throw new Error('แก้บิลไม่สำเร็จ: '+m+(/apply_bill_edit/.test(m)?' (admin รัน mix888-bill-edit-approval.sql เวอร์ชันล่าสุดหรือยัง?)':''));
   }
   const r=rj||{}; const newRev=r.new_rev, grand=Number(r.grand);
-  // fifo ตามส่วนที่ขายเพิ่ม (เก็บลอตให้ใกล้จริง — พลาดได้ไม่กระทบยอด)
+  // fifo ตามส่วนที่ขายเพิ่ม (เก็บลอตให้ใกล้จริง — พลาดได้ไม่กระทบยอด) · จำทุนที่ตัดเพิ่ม (ถ้าฐานข้อมูลส่งกลับมา) ไว้ใส่ทุนรายการ
+  const taken={};
   if(shipped&&r.deltas){for(const [pid,d] of Object.entries(r.deltas)){
-    if(Number(d)>0){try{await db.rpc('fifo_take',{p_product:Number(pid),p_qty:Number(d)});}catch(e){console.warn('fifo',e);}}
+    if(Number(d)>0){try{const {data:tk,error:te}=await db.rpc('fifo_take',{p_product:Number(pid),p_qty:Number(d)});
+      if(te)console.warn('fifo',te);else{const c=ebTakenCost(tk);if(c!=null)taken[pid]=c;}}catch(e){console.warn('fifo',e);}}
   }}
+  if(shipped&&costBefore){try{await ebRelockCost(b.order_id,costBefore,taken);}catch(e){console.warn('relock cost',e);}}
   let payNote='';
   if(r.payment_status&&r.prev_status&&r.payment_status!==r.prev_status){
     payNote=r.payment_status==='paid'?' · สถานะ: จ่ายครบแล้ว':' · กลับมาค้างจ่าย ฿'+fmt(Math.max(0,grand-Number(r.paid_amount||0)));
@@ -10601,6 +10633,39 @@ async function applyBillEdit(p,opts={}){
     // การแก้บิลไม่ส่งข้อความเข้ากลุ่มไลน์ลูกค้า — ถ้าต้องส่งบิลใหม่ให้ร้าน กดส่งเองจากหน้าบิล
   }catch(e){console.warn('redraw',e);toast('บันทึกบิลเรียบร้อย แต่วาดรูปบิลไม่สำเร็จ — รูปจะถูกวาดใหม่ตอนกดส่งบิลครั้งหน้า');}
   return {newRev,grand,payNote,billNo:b.bill_no};
+}
+// ทุนที่ fifo_take ตัดเพิ่ม: รองรับทั้งคืนเป็นตัวเลข / ข้อความตัวเลข / {cost} · ไม่คืนอะไร = ไม่รู้ (null)
+function ebTakenCost(tk){
+  if(typeof tk==='number')return isFinite(tk)?tk:null;
+  if(typeof tk==='string'&&tk.trim()!==''&&isFinite(+tk))return +tk;
+  if(tk&&typeof tk==='object'&&tk.cost!=null&&isFinite(+tk.cost))return +tk.cost;
+  return null;
+}
+/** ใส่ทุน FIFO คืนให้รายการของบิลที่ส่งแล้วหลังแก้บิล (เฉพาะรายการที่ทุนหาย)
+ *  จำนวนเท่าเดิม/ลดลง = ทุนต่อหน่วยเดิม × จำนวนใหม่ · เพิ่มขึ้น = ทุนเดิม + ทุนส่วนที่ตัดเพิ่ม (ไม่รู้ = ทุนต่อหน่วยเดิม)
+ *  สินค้าที่เพิ่มเข้าบิลใหม่ = ทุนที่ตัดเพิ่ม (ไม่รู้ = ปล่อยว่าง ให้ Excel ประมาณจากลอต) */
+async function ebRelockCost(orderId,before,taken){
+  const {data:after,error}=await db.from('order_items').select('id,product_id,qty,cost').eq('order_id',orderId);
+  if(error||!after)return;
+  const old={};
+  (before||[]).forEach(x=>{if(x.cost==null)return;const o=old[x.product_id]=old[x.product_id]||{qty:0,cost:0};o.qty+=Number(x.qty)||0;o.cost+=Number(x.cost)||0;});
+  const byP={};after.forEach(x=>{(byP[x.product_id]=byP[x.product_id]||[]).push(x);});
+  for(const [pid,rows] of Object.entries(byP)){
+    const miss=rows.filter(x=>x.cost==null);if(!miss.length)continue;   // ทุนยังอยู่ ไม่ต้องทำอะไร
+    const o=old[pid], newQty=rows.reduce((s,x)=>s+(Number(x.qty)||0),0);
+    let total=null;
+    if(o&&o.qty>0){const unit=o.cost/o.qty;total=newQty<=o.qty?unit*newQty:o.cost+(taken[pid]!=null?taken[pid]:unit*(newQty-o.qty));}
+    else if(!o&&taken[pid]!=null)total=taken[pid];
+    if(total==null||newQty<=0)continue;
+    const kept=rows.filter(x=>x.cost!=null).reduce((s,x)=>s+Number(x.cost),0);
+    const missQty=miss.reduce((s,x)=>s+(Number(x.qty)||0),0);
+    const rest=Math.max(0,total-kept);
+    for(const x of miss){
+      const c=missQty>0?Math.round(rest*(Number(x.qty)||0)/missQty*100)/100:0;
+      const {error:ue}=await db.from('order_items').update({cost:c}).eq('id',x.id).is('cost',null);
+      if(ue)console.warn('relock cost',ue);
+    }
+  }
 }
 
 /* ---- คำขอแก้บิล: ปุ่ม/ป้ายนับ + หน้าต่างอนุมัติของ admin ---- */
