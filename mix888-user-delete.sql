@@ -13,6 +13,8 @@ declare
   v_role text;
   v_auth int := 0;
 begin
+  -- ล็อกแถว admin ก่อน: admin สองคนกดลบกันเองพร้อมกัน → ทำทีละคน (คนที่สองจะพบว่าตัวเองถูกลบไปแล้ว) ไม่เหลือ admin ศูนย์คน
+  perform 1 from app_users where role = 'admin' order by id for update;
   select id into v_me from app_users where auth_uid = auth.uid() and active and role = 'admin' limit 1;
   if v_me is null then
     raise exception 'เฉพาะ admin เท่านั้นที่ลบผู้ใช้ได้';
@@ -51,11 +53,28 @@ grant execute on function app_delete_user(text) to authenticated;
 --    ยังไม่ยืนยันอีเมล → ยืนยันให้ (อีเมล @mf168.local เป็นอีเมลสมมติ ยืนยันทางเมลไม่ได้อยู่แล้ว)
 update auth.users set email_confirmed_at = now()
  where email like '%@mf168.local' and email_confirmed_at is null;
---    รายชื่อผูกกับบัญชีล็อกอินผิดตัว/ยังไม่ผูก → ผูกกับบัญชีชื่อเดียวกัน (ถ้าบัญชีนั้นไม่ได้ผูกกับรายชื่ออื่นอยู่)
+--    บัญชีที่สร้างด้วย SQL แล้วช่อง token ว่าง (NULL) → Supabase ล็อกอินพัง "Database error querying schema" → ใส่ค่าว่างให้
+do $$
+declare c text;
+begin
+  for c in select column_name from information_schema.columns
+            where table_schema = 'auth' and table_name = 'users' and data_type in ('character varying', 'text')
+              and column_name in ('confirmation_token', 'recovery_token', 'email_change_token_new', 'email_change',
+                                  'email_change_token_current', 'phone_change', 'phone_change_token', 'reauthentication_token')
+  loop
+    begin
+      execute format('update auth.users set %1$I = '''' where email like ''%%@mf168.local'' and %1$I is null', c);
+    exception when others then null;   -- คอลัมน์ไหนแก้ไม่ได้ ข้ามไป
+    end;
+  end loop;
+end $$;
+--    รายชื่อผูกกับบัญชีล็อกอินผิดตัว/ยังไม่ผูก → ผูกกับบัญชีชื่อเดียวกัน
+--    (เฉพาะชื่อที่ไม่ซ้ำกันเมื่อไม่สนตัวพิมพ์เล็ก/ใหญ่ และบัญชีนั้นไม่ได้ผูกกับรายชื่ออื่นอยู่)
 update app_users a set auth_uid = u.id
   from auth.users u
  where u.email = lower(a.username) || '@mf168.local'
    and a.auth_uid is distinct from u.id
+   and (select count(*) from app_users c where lower(c.username) = lower(a.username)) = 1
    and not exists (select 1 from app_users b where b.auth_uid = u.id and b.id <> a.id);
 
 -- 3) ผลตรวจ: ทุกคนควรขึ้น "✅ ปกติ" · ถ้าขึ้น ระงับ → หน้าผู้ใช้ กด "เปิดใช้"
@@ -65,6 +84,7 @@ select a.username as "ผู้ใช้",
        case when u.id is null then '❌ ไม่มีบัญชีล็อกอิน'
             when u.banned_until > now() then '⛔ ถูกแบนใน Supabase'
             when u.email_confirmed_at is null then '⚠️ ยังไม่ยืนยัน'
+            when (select count(*) from app_users c where lower(c.username) = lower(a.username)) > 1 then '⚠️ ชื่อซ้ำ (ตัวพิมพ์เล็ก/ใหญ่) — ลบอันที่ไม่ใช้'
             when a.auth_uid is distinct from u.id then '⚠️ ผูกบัญชีผิดตัว'
             else '✅ ปกติ' end as "บัญชีล็อกอิน",
        coalesce(to_char(u.last_sign_in_at at time zone 'Asia/Bangkok', 'DD/MM/YY HH24:MI'), 'ยังไม่เคยเข้า') as "เข้าล่าสุด"

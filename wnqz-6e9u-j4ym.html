@@ -11894,25 +11894,33 @@ const USER_COLS='id,username,display_name,role,active,auth_uid';
 let authWhy='';
 async function authLogin(u,p){
   authWhy='ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
+  const fail=async w=>{authWhy=w;try{await db.auth.signOut();}catch(e){}return null;};
   try{
     const {data,error}=await db.auth.signInWithPassword({email:authEmail(u),password:p});
     if(error||!data||!data.user){
-      const c=String((error&&(error.code||error.message))||'');
-      if(error&&error.status===429||/rate|too many/i.test(c))authWhy='ลองผิดหลายครั้งเกินไป — รอประมาณ 5 นาทีแล้วลองใหม่';
+      if(!error)return null;
+      const st=Number(error.status)||0, c=String((error.code||'')+' '+(error.message||''));
+      if(st===429||/rate|too many/i.test(c))authWhy='ลองผิดหลายครั้งเกินไป — รอประมาณ 5 นาทีแล้วลองใหม่';
       else if(/not.?confirmed/i.test(c))authWhy='บัญชีนี้ยังใช้ไม่ได้ (ยังไม่ยืนยัน) — แจ้ง admin';
       else if(/banned/i.test(c))authWhy='บัญชีนี้ถูกปิดการเข้าระบบ — แจ้ง admin';
-      else if(error&&!error.status&&/fetch|network/i.test(c))authWhy='ติดต่อระบบไม่ได้ (เน็ตหลุด?) — ลองใหม่อีกครั้ง';
+      else if(!st)authWhy='ติดต่อระบบไม่ได้ (เน็ตหลุด?) — ลองใหม่อีกครั้ง';                 // fetch ล้ม (ทุกเบราว์เซอร์ status = 0)
+      else if(st>=500)authWhy='ระบบล็อกอินขัดข้อง (Supabase ตอบ '+st+((error.code||error.message)?': '+(error.code||error.message):'')+') — แจ้ง admin';
+      else if(!/invalid.?(login|credentials|grant)/i.test(c))authWhy='เข้าระบบไม่ได้: '+(error.message||error.code||st);
       return null;
     }
     const uid=data.user.id, uname=String(u).trim().toLowerCase();
+    const readErr=e=>fail('อ่านรายชื่อผู้ใช้ไม่ได้ ('+(e.message||e.code)+') — ลองใหม่อีกครั้ง');
     let r=await db.from('app_users').select(USER_COLS).eq('auth_uid',uid).limit(1);
+    if(r.error)return readErr(r.error);
     let rows=r.data;
     if(!rows||!rows.length){                       // ครั้งแรก: ยังไม่ผูก → หาโดยชื่อผู้ใช้แล้วผูกให้อัตโนมัติ
       try{await db.rpc('link_my_account');}catch(e){console.warn('link:',e);}   // ผูกฝั่งฐานข้อมูล (ปลอดภัยแม้เปิด RLS แล้ว)
       const r2=await db.from('app_users').select(USER_COLS).eq('auth_uid',uid).limit(1);
+      if(r2.error)return readErr(r2.error);
       rows=r2.data;
       if(!rows||!rows.length){                                                  // สำรอง: ก่อนเปิด RLS
         const r3=await db.from('app_users').select(USER_COLS).eq('username',uname).limit(1);
+        if(r3.error)return readErr(r3.error);
         rows=r3.data;
         if(rows&&rows.length&&!rows[0].auth_uid){
           await db.from('app_users').update({auth_uid:uid}).eq('id',rows[0].id);
@@ -11920,10 +11928,8 @@ async function authLogin(u,p){
         }
       }
     }
-    if(!rows||!rows.length||!rows[0].active){
-      authWhy=rows&&rows.length?'บัญชี "'+uname+'" ถูกระงับอยู่ — ให้ admin กด "เปิดใช้" ในหน้าผู้ใช้':'บัญชี "'+uname+'" ไม่มีในรายชื่อผู้ใช้แล้ว — แจ้ง admin';
-      await db.auth.signOut();return null;
-    }
+    if(!rows||!rows.length)return fail('ไม่พบบัญชี "'+uname+'" ในรายชื่อผู้ใช้ — แจ้ง admin');
+    if(!rows[0].active)return fail('บัญชี "'+uname+'" ถูกระงับอยู่ — ให้ admin กด "เปิดใช้" ในหน้าผู้ใช้');
     return rows[0];
   }catch(e){console.warn('authLogin:',e);authWhy='ติดต่อระบบไม่ได้ — ลองใหม่อีกครั้ง';return null;}
 }
@@ -12216,9 +12222,9 @@ function renderUsers(){
     <td>${u.role==='admin'?'<span class="tag tag-ov">admin</span>':'<span class="tag tag-ok">staff</span>'}</td>
     <td>${u.active?'<span class="tag tag-ok">ใช้งาน</span>':'<span class="tag tag-out">ระงับ</span>'}</td>
     <td style="white-space:nowrap">
-      <button class="btn-s mini" onclick="editUser('${esc(u.username)}')">แก้ไข</button>
-      ${u.username===currentUser.username?'':`<button class="btn-g mini" onclick="toggleUser('${esc(u.username)}',${!u.active})">${u.active?'ระงับ':'เปิดใช้'}</button>
-      <button class="btn-g mini" style="color:#b42318" onclick="deleteUser('${esc(u.username)}')">ลบ</button>`}
+      <button class="btn-s mini" data-u="${esc(u.username)}" onclick="editUser(this.dataset.u)">แก้ไข</button>
+      ${u.username===currentUser.username?'':`<button class="btn-g mini" data-u="${esc(u.username)}" onclick="toggleUser(this.dataset.u,${!u.active})">${u.active?'ระงับ':'เปิดใช้'}</button>
+      <button class="btn-g mini" style="color:#b42318" data-u="${esc(u.username)}" onclick="deleteUser(this.dataset.u)">ลบ</button>`}
     </td></tr>`).join('');
 }
 function editUser(name){
@@ -12269,8 +12275,11 @@ async function deleteUser(name){
     +(u.active?'• ผู้ใช้นี้ยัง "ใช้งาน" อยู่ — ถ้าแค่พักชั่วคราว กด "ระงับ" แทน\n':'')))return;
   const {data,error}=await db.rpc('app_delete_user',{p_username:name});
   if(error){
-    toast(/app_delete_user|PGRST202|42883|could not find the function/i.test((error.code||'')+' '+(error.message||''))
-      ?'ยังไม่ได้รัน SQL ปุ่มลบผู้ใช้ — รัน SQL ที่ส่งให้ในแชทก่อน':'ลบไม่สำเร็จ: '+error.message);
+    const t=(error.code||'')+' '+(error.message||'');
+    toast(/PGRST202|42883|could not find the function/i.test(t)?'ยังไม่ได้รัน SQL ปุ่มลบผู้ใช้ — รัน SQL ที่ส่งให้ในแชทก่อน'
+      :/42501|permission denied/i.test(t)?'ลบไม่สำเร็จ: ไม่มีสิทธิ์ (ตั๋วเข้าระบบหมดอายุ?) — ออกจากระบบแล้วเข้าใหม่'
+      :'ลบไม่สำเร็จ: '+error.message);
+    loadUsers();
     return;
   }
   toast('ลบผู้ใช้ '+name+' แล้ว'+(data&&data.auth===-1?' (บัญชีล็อกอินลบไม่ได้ แต่เข้าระบบไม่ได้แล้ว)':''));
