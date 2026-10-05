@@ -12256,7 +12256,18 @@ async function saveUser(){
     p_display:document.getElementById('u-display').value.trim()||null,
     p_role:document.getElementById('u-role').value});
   if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
-  toast(editUserName?'อัพเดตผู้ใช้แล้ว':'เพิ่มผู้ใช้ '+name+' แล้ว');
+  // ตั้งรหัสในระบบล็อกอินจริง (Supabase Auth) ด้วย — app_set_user เดิมไม่ได้ตั้ง ทำให้ผู้ใช้ใหม่/รหัสใหม่ เข้าไม่ได้ (SQL: mix888-user-login.sql)
+  if(pass){
+    const r=await db.rpc('app_set_login',{p_username:name,p_password:pass});
+    if(r.error){
+      const t=(r.error.code||'')+' '+(r.error.message||'');
+      toast(/PGRST202|42883|could not find the function/i.test(t)
+        ?'บันทึกผู้ใช้แล้ว แต่รหัสใหม่ยังใช้เข้าระบบไม่ได้ — ต้องรัน SQL ตั้งรหัสเข้าระบบ (mix888-user-login.sql) ก่อน'
+        :'บันทึกผู้ใช้แล้ว แต่ตั้งรหัสเข้าระบบไม่สำเร็จ: '+r.error.message);
+      resetUserForm(); loadUsers(); return;
+    }
+  }
+  toast(editUserName?'อัพเดตผู้ใช้แล้ว'+(pass?' · ใช้รหัสใหม่เข้าระบบได้เลย':''):'เพิ่มผู้ใช้ '+name+' แล้ว · เข้าระบบได้เลย');
   resetUserForm(); loadUsers();
 }
 async function toggleUser(name,active){
