@@ -8240,8 +8240,12 @@ async function shipBillUI(id){
     }else toast('ทำไม่สำเร็จ: '+error.message);
     return;
   }
-  try{await db.rpc('fifo_consume_order',{p_order:b.order_id});}catch(e){console.warn('fifo',e);}
-  toast('บิล '+b.bill_no+' → ส่งแล้ว ตัดสต๊อกจาก'+whName+'เรียบร้อย');
+  // ล็อกต้นทุน FIFO ของออเดอร์นี้ — rpc ไม่ throw เมื่อพลาด ต้องดู error เอง (พลาดแล้วเงียบ = บัญชีเห็นทุนเป็น "ประมาณ")
+  let fifoWarn='';
+  try{const {error:fe}=await db.rpc('fifo_consume_order',{p_order:b.order_id});
+    if(fe){console.warn('fifo',fe);fifoWarn=' · ⚠️ ล็อกต้นทุน FIFO ไม่สำเร็จ ('+fe.message+') แจ้ง admin';}}
+  catch(e){console.warn('fifo',e);fifoWarn=' · ⚠️ ล็อกต้นทุน FIFO ไม่สำเร็จ แจ้ง admin';}
+  toast('บิล '+b.bill_no+' → ส่งแล้ว ตัดสต๊อกจาก'+whName+'เรียบร้อย'+fifoWarn);
   const r=await notifyCustomer(b.customers?.line_group_id,
     shopTag(b.customers)+'🚚 บิลเลขที่ '+b.bill_no+'\nสถานะ: จัดส่งแล้ว กำลังนำส่งถึงมือลูกค้า\nยอด ฿'+fmt(b.total));
   if(b.customers?.line_group_id&&!r.ok) toast('ส่งแล้ว แต่แจ้ง LINE ไม่สำเร็จ');
@@ -9663,6 +9667,11 @@ async function exportCountPDF(btn){
 }
 
 /* ==================== เฟส 5: Excel บัญชีรายเดือน ==================== */
+// ที่มาต้นทุนในไฟล์ Excel: ดูทั้งทุนที่ล็อกไว้ และสถานะส่งของบิลจริง (บิลส่งแล้วแต่ไม่มีทุนล็อก = บอกตรง ๆ ไม่เขียนว่า "ยังไม่ส่ง")
+function costSrcLabel(b,it){
+  if(it.cost!=null)return 'FIFO จริง';
+  return b&&b.ship_status==='shipped'?'ส่งแล้ว · ไม่มีทุน FIFO ล็อก (ประมาณจากราคาซื้อล่าสุด)':'ประมาณ (ยังไม่ส่ง)';
+}
 async function exportMonthExcel(btn){
   const mv=document.getElementById('ac-month').value;
   if(!mv){toast('เลือกเดือนก่อน (ช่องข้างปุ่ม)');return;}
@@ -9706,7 +9715,7 @@ async function exportMonthExcel(btn){
       rows2.push([b.orders?.order_no||b.bill_no,(b.customers?.name||''),
         it.products?.sku||'',it.products?.name||'',dstr(b.created_at),
         Number(it.qty),amt,cost,amt-cost,
-        it.cost!=null?'FIFO จริง':'ประมาณ (ยังไม่ส่ง)']);});});
+        costSrcLabel(b,it)]);});});
     const s2=[['สรุปกำไรรวม — ต้นทุน FIFO จริงจะล็อกตอนกดส่งสินค้า · บิลรอส่งเป็นประมาณการจากราคาซื้อล่าสุด'],
       ['#','รายการ','ลูกค้า/ผู้ติดต่อ','รหัสสินค้า','สินค้า','วันที่','จำนวน','ขาย (บาท)','ต้นทุน (บาท)','กำไร (บาท)','ที่มาต้นทุน'],
       ...rows2.map((r,i)=>[i+1,...r])];
@@ -9779,7 +9788,7 @@ async function exportAccountXlsx(btn){
         (b.customers?.name||''),it.products?.sku||'',it.products?.name||'',
         Number(it.qty),it.products?.unit||'',Number(it.price),amt,
         unitCost,cost,amt-cost,
-        it.cost!=null?'FIFO จริง':'ประมาณ (ยังไม่ส่ง)']);});});
+        costSrcLabel(b,it)]);});});
 
     const mk=a=>{const ws=XLSX.utils.aoa_to_sheet(a);
       ws['!cols']=a[1].map((c,ci)=>({wch:Math.max(9,...a.slice(1,60).map(r=>String(r[ci]??'').length+2))}));
