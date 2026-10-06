@@ -10258,8 +10258,10 @@ function tfToggleDetail(id){
 async function cancelTransfer(id){
   const t=transfers.find(x=>x.id===id);if(!t)return;
   if(!confirm('ยกเลิกใบโอน '+t.tf_no+' ? (ยังไม่มีการตัดสต๊อก)'))return;
-  const {error}=await db.from('transfers').update({status:'cancelled'}).eq('id',id);
+  // ยกเลิกได้เฉพาะใบที่ยัง "รอรับ" — ใบที่อีกเครื่องเพิ่งกดรับเข้าไปแล้ว (สต๊อกย้ายแล้ว) ห้ามกลายเป็น "ยกเลิก"
+  const {data:upd,error}=await db.from('transfers').update({status:'cancelled'}).eq('id',id).eq('status','pending').select('id');
   if(error){toast('ยกเลิกไม่สำเร็จ: '+error.message);return;}
+  if(!upd||!upd.length){toast('ใบโอน '+t.tf_no+' ไม่ได้อยู่ในสถานะรอรับแล้ว (อาจถูกรับเข้า/ยกเลิกไปแล้ว) — ไม่ได้ยกเลิก');loadTransfers();return;}
   toast('ยกเลิกใบโอน '+t.tf_no+' แล้ว');loadTransfers();
 }
 /* ---- ฝั่งรับสินค้า: รอรับเข้าจากโกดัง ---- */
