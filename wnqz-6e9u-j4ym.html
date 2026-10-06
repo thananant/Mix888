@@ -8227,11 +8227,24 @@ async function notifyCustomer(gid,text){
     return {ok:!(error||!res||res.status!==200)};
   }catch(e){return {ok:false};}
 }
+const shipBusy=new Set();   // บิลที่กำลังกด "ส่งแล้ว" อยู่ — กดซ้ำ/ดับเบิลคลิกระหว่างนั้นไม่ทำซ้ำ (เคยตัดสต๊อกบิลเดียว 2 รอบ)
 async function shipBillUI(id){
+  if(shipBusy.has(id))return;
   const b=bills.find(x=>x.id===id);if(!b)return;
   if(!whList.length){toast('ยังไม่มีคลัง — ไปเพิ่มในหน้าคลังก่อน');return;}
+  shipBusy.add(id);
+  const btns=[...document.querySelectorAll('[onclick="shipBillUI('+id+')"]')];
+  btns.forEach(x=>x.disabled=true);
+  let done=false;
+  try{
   const wid=await pickWarehouse('บิล '+b.bill_no+' — ตัดสต๊อกจากคลังไหน?');
   if(!wid)return;
+  // สถานะล่าสุดจากฐานข้อมูล — บิลอาจถูกกดส่งไปแล้ว (กดซ้ำหลังรายการยังไม่รีเฟรช / อีกเครื่อง / อีกแท็บ)
+  const {data:cur,error:ce}=await db.from('bills').select('ship_status').eq('id',id).single();
+  if(!ce&&cur&&(cur.ship_status||'pending')!=='pending'){
+    toast('บิล '+b.bill_no+' '+(cur.ship_status==='shipped'?'ส่งไปแล้ว':'ถูกยกเลิกแล้ว')+' — ไม่ตัดสต๊อกซ้ำ');
+    b.ship_status=cur.ship_status;done=true;loadBills();return;
+  }
   const whName=(whList.find(w=>w.id===wid)||{}).name||'';
   const {error}=await db.rpc('ship_bill',{p_bill_id:id,p_warehouse:wid});
   if(error){
@@ -8240,6 +8253,7 @@ async function shipBillUI(id){
     }else toast('ทำไม่สำเร็จ: '+error.message);
     return;
   }
+  b.ship_status='shipped';done=true;
   // ล็อกต้นทุน FIFO ของออเดอร์นี้ — rpc ไม่ throw เมื่อพลาด ต้องดู error เอง (พลาดแล้วเงียบ = บัญชีเห็นทุนเป็น "ประมาณ")
   let fifoWarn='';
   try{const {error:fe}=await db.rpc('fifo_consume_order',{p_order:b.order_id});
@@ -8250,6 +8264,10 @@ async function shipBillUI(id){
     shopTag(b.customers)+'🚚 บิลเลขที่ '+b.bill_no+'\nสถานะ: จัดส่งแล้ว กำลังนำส่งถึงมือลูกค้า\nยอด ฿'+fmt(b.total));
   if(b.customers?.line_group_id&&!r.ok) toast('ส่งแล้ว แต่แจ้ง LINE ไม่สำเร็จ');
   loadBills(); loadProducts();
+  }finally{
+    shipBusy.delete(id);
+    if(!done)btns.forEach(x=>{if(x.isConnected)x.disabled=false;});
+  }
 }
 async function cancelBillUI(id){
   const b=bills.find(x=>x.id===id);if(!b)return;
