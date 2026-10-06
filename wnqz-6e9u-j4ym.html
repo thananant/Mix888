@@ -3794,6 +3794,8 @@ async function wasteProduct(id){
   const wid=await pickWarehouse('ตัดของเสียจากคลังไหน?');
   if(!wid)return;
   const note=prompt('สาเหตุ (ไม่ใส่ก็ได้):','')||'';
+  if(onceBusy.has('waste:'+id))return;
+  onceBusy.add('waste:'+id);setTimeout(()=>onceBusy.delete('waste:'+id),3000);   // กันกดยืนยันซ้ำติดกัน
   const {error}=await db.rpc('record_waste',{p_product_id:id,p_qty:qty,
     p_warehouse:wid,p_note:note,
     p_by:currentUser?(currentUser.display_name||currentUser.username):null});
@@ -7693,7 +7695,13 @@ async function cancelReceive(id){
   const note=prompt('เหตุผล (ไม่ใส่ก็ได้):','รับเข้าซ้ำ')||'';
   let wh=null;
   if(!r.warehouse_id&&whList.length>1){wh=await pickWarehouse('ใบนี้รับเข้าโกดังไหน? (จะหักสต๊อกกลับจากโกดังนั้น)');if(!wh)return;}
-  const {data,error}=await db.rpc('receive_cancel',{p_receive_id:id,p_by:currentUser?.display_name||currentUser?.username||null,p_note:note||null,p_warehouse:wh});
+  if(onceBusy.has('rcvcancel:'+id))return;
+  onceBusy.add('rcvcancel:'+id);
+  let res;
+  try{res=await db.rpc('receive_cancel',{p_receive_id:id,p_by:currentUser?.display_name||currentUser?.username||null,p_note:note||null,p_warehouse:wh});}
+  finally{onceBusy.delete('rcvcancel:'+id);}
+  const {data,error}=res;
+  if(error&&onceMsg(error)){toast('ใบรับ '+r.receive_no+': '+onceMsg(error));await loadRcvHistory();return;}
   if(error){toast(/function|does not exist|schema cache/i.test(error.message||'')?'ยังไม่ได้รันไฟล์ mix888-receive-cancel.sql ใน Supabase':'ยกเลิกไม่สำเร็จ: '+error.message);return;}
   toast('↩ ยกเลิกใบรับ '+(data?.receive_no||r.receive_no)+' แล้ว — หักสต๊อกกลับ '+(data?.items||items.length)+' รายการ'+(data?.lots_reduced?' · ปรับลอต FIFO '+data.lots_reduced:''));
   await loadRcvHistory(); await loadProducts();
@@ -8228,6 +8236,9 @@ async function notifyCustomer(gid,text){
   }catch(e){return {ok:false};}
 }
 const shipBusy=new Set();   // บิลที่กำลังกด "ส่งแล้ว" อยู่ — กดซ้ำ/ดับเบิลคลิกระหว่างนั้นไม่ทำซ้ำ (เคยตัดสต๊อกบิลเดียว 2 รอบ)
+const onceBusy=new Set();   // งานทำครั้งเดียวอื่น ๆ ที่กำลังทำอยู่ (ยกเลิกบิล/ยกเลิกใบรับ/ตีเสีย) — กดซ้ำระหว่างนั้นไม่ทำซ้ำ
+// ฐานข้อมูลห้ามทำซ้ำ (mix888-once-guard.sql) ส่ง "ALREADY_xxx|ข้อความ" → คืนข้อความไทย · อย่างอื่นคืน null
+function onceMsg(err){const m=String((err&&err.message)||'');return /^ALREADY_[A-Z]+\|/.test(m)?m.slice(m.indexOf('|')+1):null;}
 async function shipBillUI(id){
   if(shipBusy.has(id))return;
   const b=bills.find(x=>x.id===id);if(!b)return;
@@ -8248,6 +8259,8 @@ async function shipBillUI(id){
   const whName=(whList.find(w=>w.id===wid)||{}).name||'';
   const {error}=await db.rpc('ship_bill',{p_bill_id:id,p_warehouse:wid});
   if(error){
+    const om=onceMsg(error);
+    if(om){toast('บิล '+b.bill_no+': '+om);done=true;loadBills();return;}
     if(error.message.includes('WH_STOCK')){
       const p=error.message.split('|'); toast('สต๊อกไม่พอ: '+(p[1]||'')+' '+(p[2]||''));
     }else toast('ทำไม่สำเร็จ: '+error.message);
@@ -8272,8 +8285,12 @@ async function shipBillUI(id){
 async function cancelBillUI(id){
   const b=bills.find(x=>x.id===id);if(!b)return;
   if(!confirm('ยกเลิกบิล '+b.bill_no+' ?\nระบบจะคืนของที่จองกลับเข้าสต๊อกพร้อมขาย และปิดออเดอร์นี้'))return;
-  const {error}=await db.rpc('cancel_bill',{p_bill_id:id});
-  if(error){toast('ยกเลิกไม่สำเร็จ: '+error.message);return;}
+  if(onceBusy.has('cancel:'+id))return;
+  onceBusy.add('cancel:'+id);
+  let res;
+  try{res=await db.rpc('cancel_bill',{p_bill_id:id});}finally{onceBusy.delete('cancel:'+id);}
+  const {error}=res;
+  if(error){const om=onceMsg(error);toast(om?'บิล '+b.bill_no+': '+om:'ยกเลิกไม่สำเร็จ: '+error.message);if(om)loadBills();return;}
   try{await db.rpc('fifo_return_order',{p_order:b.order_id});}catch(e){console.warn('fifo return',e);}
   toast('ยกเลิกบิล '+b.bill_no+' และคืนของจองแล้ว');
   notifySalesCancel(b);   // แจ้งกลุ่มสรุปออเดอร์ว่าบิลนี้ถูกยกเลิก
@@ -10292,7 +10309,7 @@ async function tfConfirmReceive(id,btn){
   if(!confirm('ยืนยันรับเข้า '+t.tf_no+' ('+items.length+' รายการ'+(edited?' · มีแก้ไขจำนวน':'')+')?\nสต๊อกจะถูกย้าย '+ (t.wf?.name||'') +' → '+(t.wt?.name||'')))return;
   btn.disabled=true;
   const {error}=await db.rpc('transfer_receive',{p_transfer:id,p_items:items,p_by:staff});
-  if(error){toast('รับเข้าไม่สำเร็จ: '+error.message);btn.disabled=false;return;}
+  if(error){const om=onceMsg(error);toast(om?t.tf_no+': '+om:'รับเข้าไม่สำเร็จ: '+error.message);if(om)loadTransfers();else btn.disabled=false;return;}
   toast('รับเข้า '+t.tf_no+' เรียบร้อย ✓ สต๊อกย้ายแล้ว');
   loadTransfers(); loadProducts();
 }
