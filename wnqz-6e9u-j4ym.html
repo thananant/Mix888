@@ -208,8 +208,11 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 .mgroup .msub .mi .ic{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.55);margin:0 4px 0 2px}
 .mgroup .msub .mi.active .ic{background:#c0201f}
 .badge{background:#f5c542;color:#3d2b28}
-#side .foot{margin:6px 12px 12px;padding:12px 14px;border:1px solid rgba(255,255,255,.2);border-radius:16px;background:rgba(255,255,255,.10)}
-#side .foot button{border-radius:12px}
+/* ท้ายเมนูอยู่บนแสงส้ม → พื้นเข้มลง ตัวหนังสือขาวอ่านชัด (≥7:1) */
+#side .foot{margin:6px 12px 12px;padding:12px 14px;border:1px solid rgba(255,255,255,.2);border-radius:16px;background:rgba(70,6,4,.22)}
+#side .foot .nm{color:#fff}
+#side .foot button{border-radius:12px;background:rgba(70,6,4,.32)}
+#side .foot button:hover{background:rgba(70,6,4,.45)}
 /* เนื้อหา: หัวหน้า + การ์ด + ตัวเลข เป็นกระจกขาวโปร่ง */
 .page .card,.page .stat,.page .pagehead{background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow)}
 .page .card{border-radius:18px}
@@ -240,11 +243,16 @@ button{border-radius:12px}
   /* เมนูลอยห่างขอบจอ มุมโค้ง */
   #side{top:12px;left:12px;bottom:12px;width:236px;border-radius:24px;overflow:hidden;
     box-shadow:0 18px 48px rgba(110,18,12,.28),inset 0 1px 0 rgba(255,255,255,.18)}
-  #content{margin-left:260px}
+  /* พื้นที่เนื้อหากว้างเท่าเดิม (ตารางไม่ต้องเลื่อนข้างเพิ่ม) แม้เมนูจะลอยห่างขอบ */
+  #content{margin-left:248px;padding-left:14px;padding-right:14px}
+  .charts{grid-template-columns:minmax(0,1.7fr) 1fr}   /* จอคอมแคบ ๆ: การ์ดกราฟหดได้ ไม่ดันหน้าล้นข้าง */
 }
 @media(max-width:920px){
-  #side{border-width:0 0 1px;border-radius:0 0 18px 18px}
+  #side{border-width:0 0 1px;border-radius:0 0 18px 18px;max-height:100vh;max-height:100dvh}
   #side .logo{display:none}   /* มือถือใช้แถบบน (☰) แทนโลโก้ */
+  /* เปิดเมนูบนมือถือ: เมนูหดแล้วเลื่อนเอง ปุ่มออกจากระบบอยู่ในจอเสมอ */
+  #side.open .menu{flex:1 1 auto;min-height:0;max-height:none}
+  #side .foot{flex:none;margin:4px 10px 10px}
 }
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
