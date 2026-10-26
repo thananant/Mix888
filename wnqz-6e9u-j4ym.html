@@ -305,6 +305,17 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
     <div class="stat amber"><div class="ic">🗑️</div><div><div class="l">มูลค่าของเสีย (ช่วงที่เลือก)</div><div class="v" id="d-waste">—</div></div></div>
     <div class="stat" style="cursor:pointer" onclick="openNewCustModal()" title="กดดูรายชื่อลูกค้าใหม่"><div class="ic">🤝</div><div><div class="l">ลูกค้าใหม่ (ช่วงที่เลือก)</div><div class="v" id="d-newcust">—</div><div class="l">กดดูรายชื่อ ›</div></div></div>
   </div>
+  <!-- ขายราคาทุน (ลูกค้าภายใน): บิลส่งแล้วที่ราคาไม่ตรงทุน FIFO จริง — ระบบไม่แก้ราคาเอง พนักงานกดแก้บิลเอง -->
+  <div class="card" id="atc-card" style="display:none;border:1.5px solid #f0e0b8">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">
+      <h3 class="ct" style="margin:0">🏷️ บิลขายราคาทุน ที่ราคาไม่ตรงทุนจริง</h3>
+      <span class="count" id="atc-sum" style="font-weight:700"></span>
+    </div>
+    <p class="hint" style="margin:4px 0 8px">ลูกค้าของเซลล์ <b id="atc-sales"></b> · บิลที่ส่งแล้ว 60 วันล่าสุด เทียบราคาสินค้าในบิลกับทุน FIFO ที่ล็อกตอนกดส่ง · กด ✏️ แก้บิล แล้วกด "🏷️ ใส่ราคาตามทุน" ตรวจแล้วบันทึก <span id="atc-note" style="color:var(--warn)"></span></p>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>บิล</th><th>ร้าน</th><th>วันที่</th><th class="num">ราคาสินค้าในบิล</th><th class="num">ทุนจริง</th><th class="num">ต่าง</th><th></th></tr></thead>
+      <tbody id="atc-body"></tbody></table></div>
+  </div>
   <div class="charts">
     <div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap"><h3 class="ct">ยอดขายรายวัน (ช่วงที่เลือก)</h3><span id="d-avg" style="font-size:13px;font-weight:700;color:#b91c1c"></span></div><div class="chart-box"><canvas id="ch-sales"></canvas></div></div>
     <div class="card"><h3 class="ct">สินค้าขายดี (ช่วงที่เลือก)</h3><div class="chart-box"><canvas id="ch-top"></canvas></div></div>
@@ -1302,6 +1313,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
       <tbody id="rcv-body"><tr><td colspan="6" class="empty">ยังไม่มีรายการ — ค้นหาสินค้าด้านบนเพื่อเพิ่ม</td></tr></tbody>
     </table>
     </div>
+    <p class="hint" style="margin-top:8px">🏷️ ต้นทุน/หน่วย = ทุนจริงของรอบนี้ (รวมค่าส่ง หักส่วนลด/โค้ดแล้ว) — ลูกค้าขายราคาทุน (เช่น ร้านจริงใจหมูกระทะ) คิดราคาตามทุนล็อตนี้ · เว้นว่าง = ใช้ทุนล่าสุดแทน</p>
     <div class="row" style="margin-top:14px">
       <button class="btn-p" id="rcv-save" onclick="saveReceive()" disabled>✓ บันทึกรับเข้า (<span id="rcv-n">0</span> รายการ)</button>
       <button class="btn-g" onclick="clearRcv()">ล้างทั้งหมด</button>
@@ -2106,6 +2118,7 @@ details summary{cursor:pointer;font-size:13.5px;color:var(--accent);font-weight:
   <div class="card" style="max-width:760px;width:100%;margin-top:30px">
     <h3 style="margin:0 0 4px">✏️ แก้ไขบิล <span id="eb-no"></span> <span id="eb-rev" class="tag tag-low"></span></h3>
     <div id="eb-cust" style="color:var(--muted);font-size:13px;margin-bottom:10px"></div>
+    <div id="eb-atc" style="display:none;margin:0 0 10px;padding:8px 12px;border-radius:12px;background:#fdf6e3;border:1px solid #f0e0b8;font-size:13px"></div>
     <table><thead><tr><th>รายการ</th><th class="num" style="width:90px">จำนวน</th><th class="num" style="width:110px">ราคา</th><th class="num" style="width:110px">รวม</th><th style="width:40px"></th></tr></thead>
     <tbody id="eb-items"></tbody></table>
     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:flex-end">
@@ -2922,6 +2935,7 @@ function openSoldDetail(idx){
 }
 async function loadDashboard(){
   const dGen=++dashGen;
+  if(dashCoreReady)loadAtCostCheck();   // การ์ดขายราคาทุน (ไม่ขึ้นกับช่วงวันที่ — 60 วันล่าสุดเสมอ)
   const {today,dFrom,dTo}=dashRange();
   const fmtD=d=>d.toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'2-digit'});
   const sameDay=dFrom.toDateString()===dTo.toDateString();
@@ -5599,10 +5613,12 @@ function fillSaleSelect(){
 }
 function renderSales(){
   const counts={};customers.forEach(c=>{if(c.sale_id)counts[c.sale_id]=(counts[c.sale_id]||0)+1;});
+  const atc=atcSaleIds(), admin=ebIsAdmin();
   document.getElementById('s-count').textContent=sales.length+' คน';
   document.getElementById('s-body').innerHTML=sales.map(s=>`<tr>
     <td><b>${s.code?esc(s.code):'<span class="tag tag-low">ยังไม่มีรหัส</span>'}</b></td>
-    <td>${esc(s.name)}</td>
+    <td>${esc(s.name)}${atc.has(Number(s.id))?' <span class="tag tag-ok" title="ลูกค้าของเซลล์นี้ = ร้านของเราเอง ขายเท่าทุน FIFO ตามล็อต">🏷️ ขายราคาทุน</span>':''}
+      ${admin?`<button class="btn-g mini" style="margin-left:4px" onclick="toggleAtCostSale(${s.id})">${atc.has(Number(s.id))?'เลิกขายราคาทุน':'ตั้งขายราคาทุน'}</button>`:''}</td>
     <td style="font-variant-numeric:tabular-nums">${s.phone?esc(s.phone):'<span style="color:var(--muted)">—</span>'}</td>
     <td class="num">${counts[s.id]?'<span class="tag tag-ov">'+counts[s.id]+' ราย</span>':'<span style="color:var(--muted)">—</span>'}</td>
     <td style="white-space:nowrap">
@@ -6523,19 +6539,19 @@ async function loadOrders(){
   if(error){toast('โหลดออเดอร์ไม่ได้: '+error.message);return;}
   orders=data||[];
   initCutoffInput();
+  ordLotsReady=false;
   renderOrders();
   // FIFO preview: ดึงลอตคงเหลือของสินค้าในออเดอร์ค้าง เบื้องหลัง แล้วค่อยเติมตัวเลขต้นทุน
+  // (ไล่หน้าครบ — เดิมดึงครั้งเดียวติดเพดาน 1,000 แถว) · มีลูกค้าขายราคาทุน → ดึงบิลรอส่งมาหักล็อตก่อนด้วย
   (async()=>{
     try{
-      const lots={};
       const pids=[...new Set(orders.flatMap(o=>o.order_items.map(it=>it.product_id)))];
-      if(pids.length){
-        const {data:ls}=await db.from('stock_lots')
-          .select('product_id,remaining,unit_cost,created_at')
-          .in('product_id',pids).gt('remaining',0).order('created_at');
-        (ls||[]).forEach(l=>{(lots[l.product_id]=lots[l.product_id]||[]).push(l);});
+      const lots=pids.length?await atcLoadLots(pids):{};
+      let queue=null;
+      if(orders.some(o=>atcCustomer(o.customers?.id))){
+        try{queue=await atcLoadPendingBills();}catch(e){console.warn('atc queue',e);}
       }
-      ordLots=lots;
+      ordLots=lots;ordAtcQueue=queue;ordLotsReady=true;
       renderOrders();
     }catch(e){console.warn('ordLots',e);}
   })();
@@ -6543,7 +6559,7 @@ async function loadOrders(){
   bd.textContent=orders.length;
   bd.style.display=orders.length?'inline-block':'none';
 }
-let ordLots={};
+let ordLots={}, ordLotsReady=false, ordAtcQueue=null;
 // จำลองการตัดลอตแบบเดียวกับ fifo_take (ต่อออเดอร์ ไม่กระทบข้อมูลจริง)
 function estOrderCost(o){
   let total=0, estimated=false;
@@ -6564,6 +6580,367 @@ function estOrderCost(o){
   }
   return {cost:total, estimated};
 }
+
+/* ==================== ขายราคาทุน (ลูกค้าภายใน) ====================
+   ลูกค้าของเซลล์ที่ตั้งเป็น "ขายราคาทุน" (ค่าเริ่มต้น: เซลล์ชื่อ จริงใจหมูกระทะ) = ร้านของเราเอง ขายไม่บวกกำไร
+   ราคาในบิลต้องเท่าทุน FIFO ตามล็อตจริง เช่น ล็อต 10@100 แล้ว 10@110: สั่ง 5 = 5×100 · สั่งต่ออีก 15 = 5×100 + 10×110
+   ระบบแค่คำนวณ + เตือน — ราคาเปลี่ยนก็ต่อเมื่อพนักงานกดใส่ราคา แล้วกดบันทึกเอง (กฎเจ้าของ: ห้ามระบบแก้ราคาเอง)
+   ล็อตถูกตัดจริงตอนกด 🚚 ส่งแล้ว (fifo_consume_order: เก่า→ใหม่ รวมทุกคลัง) จึงตรวจซ้ำตอนกดส่ง และหลังส่ง */
+const ATC_DEFAULT_SALE='จริงใจหมูกระทะ';
+const ATC_TOL=0.05;   // ต่างไม่เกิน 5 สตางค์ต่อสินค้า = ถือว่าตรง (เศษปัดทศนิยม)
+const atcR2=n=>Math.round((Number(n)||0)*100)/100, atcR6=n=>Math.round((Number(n)||0)*1e6)/1e6;
+const atcNum=n=>Number(n).toLocaleString('th-TH',{maximumFractionDigits:3});
+/** เซลล์ขายราคาทุน: ตั้งที่หน้าเซลล์ (settings.atcost_sale_ids = id คั่นจุลภาค · 'none' = ปิด) · ยังไม่เคยตั้ง = เซลล์ชื่อ จริงใจหมูกระทะ */
+function atcSaleIds(){
+  const raw=String(appSettings?.atcost_sale_ids??'').trim();
+  if(raw)return new Set(raw.split(',').map(x=>Number(x.trim())).filter(n=>n>0));
+  const norm=s=>String(s||'').replace(/\s+/g,'');
+  return new Set(sales.filter(s=>norm(s.name)===ATC_DEFAULT_SALE).map(s=>Number(s.id)));
+}
+function atcSaleNames(){const ids=atcSaleIds();return sales.filter(s=>ids.has(Number(s.id))).map(s=>s.name).join(', ')||'-';}
+function atcCustomer(custId){
+  if(custId==null)return false;
+  const c=customers.find(x=>Number(x.id)===Number(custId));
+  return !!(c&&c.sale_id!=null&&atcSaleIds().has(Number(c.sale_id)));
+}
+function atcBill(b){
+  if(!b)return false;
+  const sid=b.customers?.sale_id;
+  return sid!=null?atcSaleIds().has(Number(sid)):atcCustomer(b.customer_id);
+}
+/** ดึงตามรายการ id ให้ครบทุกหน้า — ถ้าพลาดให้ throw (ห้ามคิดทุนจากข้อมูลครึ่ง ๆ กลาง ๆ) */
+async function atcFetchIn(ids,mq){
+  const uniq=[...new Set((ids||[]).filter(v=>v!=null))],out=[];
+  for(let i=0;i<uniq.length;i+=200){
+    const r=await fetchAllPages(()=>mq(uniq.slice(i,i+200)));
+    if(r.error)throw r.error;
+    out.push(...r);
+  }
+  return out;
+}
+/** ล็อตคงเหลือแยกตามสินค้า เรียงเก่า→ใหม่ (ลำดับเดียวกับที่ระบบตัดจริง) */
+function atcGroupLots(rows){
+  const pool={};
+  (rows||[]).forEach(l=>{(pool[l.product_id]=pool[l.product_id]||[]).push({id:l.id,remaining:Number(l.remaining)||0,unit_cost:Number(l.unit_cost)||0,created_at:l.created_at});});
+  for(const k in pool)pool[k].sort((a,b)=>String(a.created_at).localeCompare(String(b.created_at))||(Number(a.id)||0)-(Number(b.id)||0));
+  return pool;
+}
+async function atcLoadLots(pids){
+  return atcGroupLots(await atcFetchIn(pids,part=>db.from('stock_lots')
+    .select('id,product_id,remaining,unit_cost,created_at').in('product_id',part).gt('remaining',0)
+    .order('created_at').order('id')));
+}
+/** บิลที่ออกแล้วแต่ยังไม่ส่ง (เรียงตามเวลาออกบิล) + รายการสินค้า — ใช้เดาว่าล็อตไหนจะถูกตัดไปก่อน */
+async function atcLoadPendingBills(){
+  const bs=await fetchAllPages(()=>db.from('bills').select('id,order_id,created_at')
+    .or('ship_status.is.null,ship_status.eq.pending').order('created_at').order('id'));
+  if(bs.error)throw bs.error;
+  const its=bs.length?await atcFetchIn(bs.map(b=>b.order_id),part=>db.from('order_items').select('order_id,product_id,qty').in('order_id',part)):[];
+  const byO={};its.forEach(it=>{(byO[it.order_id]=byO[it.order_id]||[]).push(it);});
+  return bs.map(b=>({id:b.id,created_at:b.created_at,items:byO[b.order_id]||[]}));
+}
+function atcClone(pool){const o={};for(const k in pool)o[k]=pool[k].map(l=>({...l}));return o;}
+/** ตัดจำนวนจากล็อตเก่า→ใหม่ (ในสำเนา) → ก้อนทุน [{qty,unit_cost}] (ล็อตติดกันทุนเท่ากันรวมก้อนเดียว) + จำนวนที่ล็อตไม่พอ */
+function atcTake(pool,pid,qty){
+  const lots=pool[pid]||[];let need=atcR6(qty);const slices=[];
+  for(const l of lots){
+    if(need<=0)break;
+    if(l.remaining<=0)continue;
+    const take=atcR6(Math.min(l.remaining,need));
+    l.remaining=atcR6(l.remaining-take);need=atcR6(need-take);
+    const last=slices[slices.length-1];
+    if(last&&last.unit_cost===l.unit_cost)last.qty=atcR6(last.qty+take);
+    else slices.push({qty:take,unit_cost:l.unit_cost});
+  }
+  return {slices,short:need>0?need:0};
+}
+/** ให้ความต้องการที่น่าจะถูกส่งก่อน ตัดล็อตในสำเนาไปก่อน */
+function atcConsume(pool,itemLists){
+  for(const items of itemLists)for(const it of (items||[]))atcTake(pool,it.product_id,it.qty);
+  return pool;
+}
+/** รวมรายการเป็นรายสินค้า (สินค้าเดียวกันหลายแถวรวมกัน) */
+function atcAgg(items){
+  const list=[],by={};
+  for(const it of (items||[])){
+    const pid=it.product_id;
+    if(!by[pid]){by[pid]={pid,name:it.name||it.products?.name||'?',unit:it.unit||it.products?.unit||'',qty:0,billed:0,rows:[]};list.push(by[pid]);}
+    const p=by[pid],q=Number(it.qty)||0;
+    p.qty=atcR6(p.qty+q);
+    p.billed=atcR2(p.billed+(it.amount!=null?Number(it.amount):q*(Number(it.price)||0)));
+    p.rows.push(it);
+  }
+  return list;
+}
+function atcSum(list){
+  return {products:list,billed:atcR2(list.reduce((s,p)=>s+p.billed,0)),expected:atcR2(list.reduce((s,p)=>s+(Number(p.expected)||0),0)),
+    short:list.some(p=>p.short>0),unknown:list.some(p=>p.unknown),mismatch:list.some(p=>!p.ok&&!p.unknown)};
+}
+/** แถวราคาจากก้อนทุน: ทุน/หน่วยมีเศษเกิน 2 ตำแหน่ง → แยก 1 หน่วยไว้รับเศษ ให้ยอดรวมเท่าทุนพอดี */
+function atcRows(slices){
+  const out=[];
+  for(const s of slices){
+    const q=atcR6(s.qty),total=atcR2(q*s.unit_cost),p=atcR2(s.unit_cost);
+    if(q<=0)continue;
+    if(Math.abs(atcR2(q*p)-total)<0.005||q<=1||!Number.isInteger(q))out.push({qty:q,price:p});
+    else{out.push({qty:q-1,price:p});out.push({qty:1,price:atcR2(total-atcR2((q-1)*p))});}
+  }
+  return out.reduce((a,r)=>{const l=a[a.length-1];if(l&&l.price===r.price)l.qty=atcR6(l.qty+r.qty);else a.push({...r});return a;},[]);
+}
+/** แผนราคาตามทุนล็อต (ก่อนส่ง): ทุนที่ควรเป็น + แถวราคาที่ควรใส่ ต่อสินค้า */
+function atcPlan(pool,items){
+  const list=atcAgg(items);
+  for(const p of list){
+    const t=atcTake(pool,p.pid,p.qty);
+    p.slices=t.slices;p.short=t.short;p.unknown=false;
+    p.expected=atcR2(t.slices.reduce((s,x)=>s+x.qty*x.unit_cost,0));
+    p.want=t.short?null:atcRows(t.slices);   // ล็อตไม่พอ = ไม่เดาราคาให้ พนักงานใส่เอง
+    p.ok=!t.short&&Math.abs(p.billed-p.expected)<=ATC_TOL;
+  }
+  return atcSum(list);
+}
+/** บิลส่งแล้ว: ราคาในบิลเทียบทุนที่ล็อกจริงตอนส่ง (order_items.cost = ทุนรวมของแถว) — เทียบต่อสินค้า ไม่ใช่ต่อแถว */
+function atcLocked(rows){
+  const list=atcAgg(rows);
+  for(const p of list){
+    p.slices=[];p.short=0;
+    p.unknown=p.rows.some(r=>r.cost==null);
+    p.expected=p.unknown?null:atcR2(p.rows.reduce((s,r)=>s+Number(r.cost),0));
+    p.ok=!p.unknown&&Math.abs(p.billed-p.expected)<=ATC_TOL;
+    p.want=p.unknown?null:atcLockedRows(p);
+  }
+  return atcSum(list);
+}
+function atcLockedRows(p){
+  const rs=p.rows.map(r=>({qty:Number(r.qty)||0,cost:Number(r.cost)}));
+  // แยกแถวตามล็อตไว้แล้ว และทุน/หน่วยลงตัวทุกแถว → คงแถวเดิม · ไม่งั้นใช้ทุนเฉลี่ยต่อหน่วย (เศษไปลงหน่วยสุดท้าย)
+  if(rs.length>1&&rs.every(r=>r.qty>0&&Math.abs(atcR2(atcR2(r.cost/r.qty)*r.qty)-atcR2(r.cost))<0.005))
+    return rs.map(r=>({qty:r.qty,price:atcR2(r.cost/r.qty)}));
+  return atcRows([{qty:p.qty,unit_cost:p.qty>0?p.expected/p.qty:0}]);
+}
+const atcSlicesTxt=sl=>sl.map(s=>atcNum(s.qty)+'×฿'+fmt(s.unit_cost)).join(' + ');
+function atcDiffTag(p){
+  if(p.unknown)return '<span class="tag tag-low">ตรวจไม่ได้</span>';
+  if(p.ok)return '<span class="tag tag-ok">ตรงทุน</span>';
+  if(p.short)return '<span class="tag tag-out">ล็อตทุนไม่พอ '+atcNum(p.short)+' '+esc(p.unit)+'</span>';
+  const d=atcR2(p.billed-p.expected);
+  return '<span class="tag tag-out">ต่าง '+(d>0?'+':'−')+'฿'+fmt(Math.abs(d))+'</span>';
+}
+function atcPlanHtml(plan){
+  return plan.products.map(p=>{
+    const cost=p.unknown?'<span style="color:var(--muted)">ทุนจริงไม่ครบ หรือจำนวนเปลี่ยนจากตอนส่ง — ตรวจเอง</span>'
+      :(p.slices&&p.slices.length?'ทุน '+atcSlicesTxt(p.slices)+' = ฿'+fmt(p.expected):'ทุนจริง ฿'+fmt(p.expected));
+    return '<div style="padding:3px 0">• <b>'+esc(p.name)+'</b> '+atcNum(p.qty)+' '+esc(p.unit)+' — '+cost+' · ในบิล ฿'+fmt(p.billed)+' '+atcDiffTag(p)+'</div>';
+  }).join('');
+}
+function atcPlanText(plan){
+  return plan.products.filter(p=>!p.ok).map(p=>'• '+p.name+' '+atcNum(p.qty)+' '+p.unit+': '
+    +(p.short?'ล็อตทุนไม่พอ '+atcNum(p.short)+' '+p.unit+(p.slices.length?' (มีทุน '+atcSlicesTxt(p.slices)+')':'')
+      :'ทุน '+atcSlicesTxt(p.slices)+' = ฿'+fmt(p.expected)+' · ในบิล ฿'+fmt(p.billed))).join('\n');
+}
+/** การ์ดออเดอร์ (ทำบิล): ทุนรอบนี้แบบคาดการณ์ — หักบิลที่รอส่ง + ออเดอร์ที่เข้าก่อน ออกไปก่อน */
+function atcOrderBox(o){
+  if(!atcCustomer(o.customers?.id))return '';
+  const wrap=h=>'<div style="margin-top:8px;padding:8px 12px;border-radius:12px;background:#fdf6e3;border:1px solid #f0e0b8;font-size:13px">'+h+'</div>';
+  const head='<b>🏷️ ขายราคาทุน</b> <span style="color:var(--muted)">(ลูกค้าเซลล์ '+esc(atcSaleNames())+')</span>';
+  if(!ordLotsReady)return wrap(head+' · กำลังคำนวณทุนรอบนี้…');
+  const pool=atcClone(ordLots);
+  atcConsume(pool,(ordAtcQueue||[]).map(b=>b.items));
+  const earlier=orders.filter(x=>x.id!==o.id&&String(x.created_at)<String(o.created_at));
+  atcConsume(pool,earlier.map(x=>x.order_items));
+  const plan=atcPlan(pool,o.order_items);
+  const note='ทุนรอบนี้ (คาดการณ์จากล็อตที่เหลือ'+(ordAtcQueue&&ordAtcQueue.length?' หลังหักบิลรอส่ง '+ordAtcQueue.length+' ใบ':'')
+    +(earlier.length?' และออเดอร์ที่เข้าก่อน '+earlier.length+' ใบ':'')+') · ทุนจริงล็อกตอนกด 🚚 ส่งแล้ว — ระบบจะเช็คอีกรอบตอนนั้น';
+  return wrap(head+'<div style="color:var(--muted);margin:2px 0 4px">'+note+'</div>'+atcPlanHtml(plan)
+    +(plan.mismatch?'<button class="btn-s mini" style="margin-top:6px" onclick="atcOpenOrder('+o.id+')">🏷️ ใช้ราคาทุนรอบนี้</button> <span style="color:var(--muted)">เปิดหน้าแก้ออเดอร์พร้อมราคาตามทุน (ยังไม่บันทึก)</span>':''));
+}
+/* ---- หน้าต่างแก้ออเดอร์/แก้บิล: กล่องทุน + ปุ่มใส่ราคาตามทุน (พนักงานกดเอง แล้วกด 💾 เอง) ---- */
+let atcPendingOpts=null;   // ตัวเลือกให้รอบเปิดหน้าต่างถัดไป: {apply:true} = ใส่ราคาตามทุนทันทีหลังคำนวณ (ยังไม่บันทึก) · {shipNow:true} = คิดแบบส่งทันที
+async function atcOpenOrder(orderId){atcPendingOpts={apply:true};try{await openEditOrder(orderId);}finally{atcPendingOpts=null;}}
+async function atcOpenBill(billId,opts,bObj){atcPendingOpts=opts||{};try{await openEditBill(billId,bObj);}finally{atcPendingOpts=null;}}
+async function atcEditorInit(){
+  const box=document.getElementById('eb-atc');
+  const opts=atcPendingOpts||{};atcPendingOpts=null;
+  const st=ebState;
+  if(box){box.style.display='none';box.innerHTML='';}
+  if(!st||!box)return;
+  const custId=st.order?.customers?.id??st.order?.customer_id;
+  if(!(st.bill?atcBill(st.bill)||atcCustomer(custId):atcCustomer(custId)))return;
+  st.atc={mode:'loading'};atcRenderBox();
+  try{
+    if(st.bill&&st.bill.ship_status==='shipped'){
+      const {data:rows,error}=await db.from('order_items').select('product_id,qty,price,amount,cost').eq('order_id',st.order.id);
+      if(error)throw error;
+      if(ebState!==st)return;
+      st.atc={mode:'locked',locked:atcLocked(rows||[])};
+    }else{
+      const pool=await atcLoadLots(st.items.map(x=>x.product_id));
+      let queued=0,earlier=0;
+      if(!opts.shipNow){
+        const pend=await atcLoadPendingBills();
+        const before=st.bill?pend.filter(x=>x.id!==st.bill.id&&(String(x.created_at)<String(st.bill.created_at)||(x.created_at===st.bill.created_at&&x.id<st.bill.id))):pend;
+        atcConsume(pool,before.map(x=>x.items));queued=before.length;
+        if(!st.bill){
+          const ear=orders.filter(x=>x.id!==st.order.id&&String(x.created_at)<String(st.order.created_at));
+          atcConsume(pool,ear.map(x=>x.order_items));earlier=ear.length;
+        }
+      }
+      if(ebState!==st)return;
+      st.atc={mode:opts.shipNow?'shipnow':'forecast',pool,queued,earlier};
+    }
+    if(opts.apply)st.atc.applied=atcApplyToEditor(atcCurrentPlan());   // พนักงานกดสั่งมาเอง — ใส่ในหน้าต่าง ยังไม่บันทึก
+    atcRenderBox();
+  }catch(e){console.warn('atc editor',e);if(ebState===st){st.atc={mode:'error',msg:String(e.message||e)};atcRenderBox();}}
+}
+function atcCurrentPlan(){
+  const st=ebState;if(!st||!st.atc)return null;
+  if(st.atc.mode==='forecast'||st.atc.mode==='shipnow')return atcPlan(atcClone(st.atc.pool),st.items);
+  if(st.atc.mode!=='locked')return null;
+  const L=st.atc.locked,list=atcAgg(st.items);
+  for(const p of list){
+    const l=L.products.find(x=>x.pid===p.pid);
+    p.slices=[];p.short=0;
+    p.unknown=!l||l.unknown||Math.abs(l.qty-p.qty)>1e-6;   // สินค้าใหม่/จำนวนเปลี่ยนจากตอนส่ง = ไม่รู้ทุนจริงส่วนนั้น
+    p.expected=p.unknown?null:l.expected;
+    p.want=p.unknown?null:l.want;
+    p.ok=!p.unknown&&Math.abs(p.billed-p.expected)<=ATC_TOL;
+  }
+  return atcSum(list);
+}
+/** ใส่ราคาตามแผนลงหน้าต่าง (ยังไม่บันทึก) — คงแถวเดิม (id/จำนวนเดิม) ก่อน ที่ขาดเพิ่มแถวใหม่ ที่เกินเอาออก */
+function atcApplyToEditor(plan){
+  if(!ebState||!plan)return 0;
+  let n=0;
+  for(const p of plan.products){
+    if(p.ok||!p.want||!p.want.length)continue;
+    const rows=ebState.items.filter(it=>it.product_id===p.pid);
+    if(!rows.length)continue;
+    const at=ebState.items.indexOf(rows[0]);
+    const next=p.want.map((w,k)=>rows[k]?{...rows[k],qty:w.qty,price:w.price}
+      :{id:null,product_id:p.pid,name:rows[0].name,unit:rows[0].unit,qty:w.qty,price:w.price,orig_qty:0});
+    rows.slice(p.want.length).forEach(x=>{if(x.id)ebState.removed.push(x.id);});
+    ebState.items=ebState.items.filter(it=>it.product_id!==p.pid);
+    ebState.items.splice(Math.min(at,ebState.items.length),0,...next);
+    n++;
+  }
+  ebRender();
+  return n;
+}
+function atcEditorApply(){
+  const n=atcApplyToEditor(atcCurrentPlan());
+  if(ebState&&ebState.atc)ebState.atc.applied=(ebState.atc.applied||0)+n;
+  atcRenderBox();
+}
+function atcRenderBox(){
+  const box=document.getElementById('eb-atc');if(!box)return;
+  const st=ebState;
+  if(!st||!st.atc){box.style.display='none';return;}
+  box.style.display='block';
+  const head='<b>🏷️ ลูกค้าขายราคาทุน</b> <span style="color:var(--muted)">(เซลล์ '+esc(atcSaleNames())+')</span>';
+  if(st.atc.mode==='loading'){box.innerHTML=head+' · กำลังคำนวณทุนจากล็อต…';return;}
+  if(st.atc.mode==='error'){box.innerHTML=head+' · <span style="color:var(--danger)">คำนวณทุนไม่สำเร็จ: '+esc(st.atc.msg)+'</span>';return;}
+  const plan=atcCurrentPlan();if(!plan){box.style.display='none';return;}
+  const src=st.atc.mode==='locked'?'เทียบกับทุนจริงที่ล็อกตอนกดส่งของ'
+    :st.atc.mode==='shipnow'?'ทุนของล็อตที่จะถูกตัด ถ้ากดส่งบิลนี้ตอนนี้'
+    :'คาดการณ์จากล็อตที่เหลือ'+(st.atc.queued?' หลังหักบิลรอส่งก่อนหน้า '+st.atc.queued+' ใบ':'')+(st.atc.earlier?' และออเดอร์ที่เข้าก่อน '+st.atc.earlier+' ใบ':'')+' · ทุนจริงล็อกตอนกดส่ง';
+  const canApply=plan.products.some(p=>!p.ok&&p.want&&p.want.length);
+  box.innerHTML=head+'<div style="color:var(--muted);margin:2px 0 4px">'+src+'</div>'+atcPlanHtml(plan)
+    +(canApply?'<button class="btn-s mini" style="margin-top:6px" onclick="atcEditorApply()">🏷️ ใส่ราคาตามทุน</button>':'')
+    +(st.atc.applied?'<div style="margin-top:6px;color:var(--warn,#c47d2a);font-weight:600">ใส่ราคาตามทุนในหน้าต่างนี้แล้ว — ยังไม่บันทึก ตรวจแล้วกด 💾 บันทึก</div>':'');
+}
+/** ก่อนกด 🚚 ส่ง: ราคาในบิลตรงทุนล็อตที่จะถูกตัดตอนนี้ไหม → 'ship' | 'edit' | 'abort' */
+async function atcShipCheck(b){
+  let plan;
+  try{
+    const {data:its,error}=await db.from('order_items').select('product_id,qty,price,amount,products(name,unit)').eq('order_id',b.order_id);
+    if(error)throw error;
+    plan=atcPlan(await atcLoadLots((its||[]).map(x=>x.product_id)),its||[]);
+  }catch(e){
+    console.warn('atc ship check',e);
+    return confirm('บิล '+b.bill_no+' เป็นลูกค้าขายราคาทุน แต่ตรวจทุนล็อตไม่สำเร็จ ('+(e.message||e)+')\n\nส่งต่อเลยไหม? (ตรวจราคาทีหลังได้ที่การ์ด 🏷️ หน้าภาพรวม)')?'ship':'abort';
+  }
+  if(!plan.mismatch)return 'ship';
+  const msg='🏷️ บิล '+b.bill_no+' เป็นลูกค้าขายราคาทุน แต่ราคายังไม่ตรงทุนของล็อตที่จะถูกตัดตอนนี้\n\n'+atcPlanText(plan)
+    +'\n\nรวมทุน ฿'+fmt(plan.expected)+' · ราคาสินค้าในบิล ฿'+fmt(plan.billed);
+  if(confirm(msg+'\n\nกด OK = เปิดแก้บิล พร้อมใส่ราคาตามทุนให้ (ยังไม่ส่ง · ตรวจแล้วกดบันทึกเอง)\nกด Cancel = ไม่แก้ตอนนี้'))return 'edit';
+  return confirm('ส่งบิล '+b.bill_no+' ทั้งที่ราคายังไม่ตรงทุนเลยไหม?\n(แก้ทีหลังได้ที่ ✏️ แก้บิล — บิลส่งแล้วพนักงานต้องรอ admin อนุมัติ)')?'ship':'abort';
+}
+/** หลังส่ง: เทียบราคากับทุนที่เพิ่งล็อก → ข้อความเตือนต่อท้าย toast ('' = ตรง/ตรวจไม่ได้) */
+async function atcVerifyShipped(b){
+  try{
+    const {data:rows,error}=await db.from('order_items').select('product_id,qty,price,amount,cost').eq('order_id',b.order_id);
+    if(error)throw error;
+    const lp=atcLocked(rows||[]);
+    if(lp.mismatch){
+      const d=atcR2(lp.products.filter(p=>!p.unknown).reduce((s,p)=>s+p.billed-p.expected,0));
+      return ' · ⚠️ ขายราคาทุน: ราคาไม่ตรงทุนจริง (ต่าง '+(d>0?'+':'−')+'฿'+fmt(Math.abs(d))+') — แก้ที่ ✏️ แก้บิล';
+    }
+  }catch(e){console.warn('atc verify',e);}
+  return '';
+}
+/* ---- การ์ดหน้าภาพรวม: บิลขายราคาทุน (ส่งแล้ว 60 วันล่าสุด) ที่ราคาไม่ตรงทุนจริง ---- */
+let atcGen=0, atcBillCache={};
+async function loadAtCostCheck(){
+  const card=document.getElementById('atc-card');if(!card)return;
+  const g=++atcGen;
+  const ids=atcSaleIds();
+  const custIds=customers.filter(c=>c.sale_id!=null&&ids.has(Number(c.sale_id))).map(c=>c.id);
+  if(!custIds.length){card.style.display='none';return;}
+  card.style.display='block';
+  document.getElementById('atc-sales').textContent=atcSaleNames();
+  const body=document.getElementById('atc-body'),sum=document.getElementById('atc-sum');
+  try{
+    const since=new Date(Date.now()-60*86400000).toISOString();
+    const bs=await atcFetchIn(custIds,part=>db.from('bills')
+      .select('*, customers(code,name,branch_name,line_group_id,delivery_method,sale_name,sale_id), orders(order_no,pinned,op_note,carrier,extra_cost,extra_note,created_by,deliver_date)')
+      .in('customer_id',part).eq('ship_status','shipped').gte('created_at',since).order('created_at',{ascending:false}));
+    const its=bs.length?await atcFetchIn(bs.map(b=>b.order_id),part=>db.from('order_items').select('order_id,product_id,qty,price,amount,cost').in('order_id',part)):[];
+    if(g!==atcGen)return;
+    const byO={};its.forEach(it=>{(byO[it.order_id]=byO[it.order_id]||[]).push(it);});
+    const rows=[];let unknown=0;
+    atcBillCache={};
+    for(const b of bs){
+      const lp=atcLocked(byO[b.order_id]||[]);
+      if(lp.unknown&&!lp.mismatch){unknown++;continue;}
+      if(!lp.mismatch)continue;
+      atcBillCache[b.id]=b;
+      const known=lp.products.filter(p=>!p.unknown);
+      rows.push({b,billed:atcR2(known.reduce((s,p)=>s+p.billed,0)),cost:atcR2(known.reduce((s,p)=>s+p.expected,0))});
+    }
+    rows.sort((a,b)=>Math.abs(b.billed-b.cost)-Math.abs(a.billed-a.cost));
+    sum.textContent=rows.length?rows.length+' บิลไม่ตรง':'ตรงทุกบิล ✓';
+    sum.style.color=rows.length?'var(--danger,#b52020)':'var(--ok,#159b78)';
+    body.innerHTML=rows.length?rows.map(r=>{const d=atcR2(r.billed-r.cost);
+      return `<tr><td>${esc(r.b.bill_no)}</td><td>${esc(r.b.customers?.name||'')}</td>
+        <td>${new Date(r.b.created_at).toLocaleDateString('th-TH',{day:'numeric',month:'short'})}</td>
+        <td class="num">${fmt(r.billed)}</td><td class="num">${fmt(r.cost)}</td>
+        <td class="num" style="color:var(--danger,#b52020);font-weight:700">${d>0?'+':'−'}${fmt(Math.abs(d))}</td>
+        <td><button class="btn-s mini" onclick="atcEditBill(${r.b.id})">✏️ แก้บิล</button></td></tr>`;}).join('')
+      :'<tr><td colspan="7" class="empty">บิลขายราคาทุนที่ส่งแล้ว 60 วันล่าสุด ราคาตรงทุนจริงทุกบิล ✓</td></tr>';
+    document.getElementById('atc-note').textContent=unknown?'มี '+unknown+' บิลที่ทุนยังไม่ล็อก (ตรวจไม่ได้)':'';
+  }catch(e){
+    if(g!==atcGen)return;
+    console.warn('atc card',e);
+    sum.textContent='';body.innerHTML='<tr><td colspan="7" class="empty">โหลดไม่สำเร็จ: '+esc(e.message||e)+'</td></tr>';
+  }
+}
+function atcEditBill(id){atcOpenBill(id,{},bills.find(x=>x.id===id)||atcBillCache[id]);}
+/** หน้าเซลล์: admin ตั้ง/เลิก เซลล์ขายราคาทุน (เก็บใน settings ตัวเดียวทั้งร้าน) */
+async function toggleAtCostSale(id){
+  if(!ebIsAdmin()){toast('เฉพาะ admin ตั้งค่านี้ได้');return;}
+  const s=sales.find(x=>x.id===id);if(!s)return;
+  const cur=atcSaleIds(),on=cur.has(Number(id));
+  if(!confirm((on?'เลิกตั้ง':'ตั้ง')+' "'+s.name+'" เป็นเซลล์ขายราคาทุน?\n\n'
+    +'ลูกค้าของเซลล์นี้ = ร้านของเราเอง ขายเท่าทุน FIFO ตามล็อต\n'
+    +'ระบบจะโชว์ทุนรอบนี้ + เตือนตอนกดส่งของถ้าราคาไม่ตรง (ไม่แก้ราคาเอง)'))return;
+  if(on)cur.delete(Number(id));else cur.add(Number(id));
+  const value=[...cur].join(',')||'none';
+  const {error}=await db.from('settings').upsert({key:'atcost_sale_ids',value},{onConflict:'key'});
+  if(error){toast('บันทึกไม่สำเร็จ: '+error.message);return;}
+  appSettings.atcost_sale_ids=value;
+  renderSales();if(orders.length)renderOrders();loadAtCostCheck();
+  toast((on?'เลิก':'ตั้ง')+'ขายราคาทุน: '+s.name+' ✓');
+}
 function renderOrders(){
   const el=document.getElementById('orders-list');
   if(!orders.length){el.innerHTML='<div class="card empty">ไม่มีออเดอร์ค้างทำบิล 🎉</div>';return;}
@@ -6578,6 +6955,7 @@ function renderOrders(){
       </div>
       ${(()=>{const e=estOrderCost(o);const profit=Number(o.total)-e.cost;const mg=Number(o.total)>0?(profit/Number(o.total)*100):0;
         return `<div style="font-size:12.5px;color:var(--muted);margin-top:4px">💡 ต้นทุน (FIFO) ~฿${fmt(e.cost)} · กำไรขั้นต้น ~<b style="color:${profit<0?'var(--danger,#b52020)':'var(--ok,#159b78)'}">฿${fmt(profit)}</b> (${mg.toFixed(1)}%)${e.estimated?' · บางส่วนประมาณจากราคาซื้อล่าสุด':''} — เห็นเฉพาะหลังบ้าน ไม่แสดงในบิล</div>`;})()}
+      ${atcOrderBox(o)}
       <table style="margin-top:8px">
         <thead><tr><th>รายการ</th><th class="num">จำนวน</th><th class="num">ราคา</th><th class="num">รวม</th></tr></thead>
         <tbody>${o.order_items.map(it=>`<tr>
@@ -8256,6 +8634,12 @@ async function shipBillUI(id){
     toast('บิล '+b.bill_no+' '+(cur.ship_status==='shipped'?'ส่งไปแล้ว':'ถูกยกเลิกแล้ว')+' — ไม่ตัดสต๊อกซ้ำ');
     b.ship_status=cur.ship_status;done=true;loadBills();return;
   }
+  // ลูกค้าขายราคาทุน: ราคาในบิลต้องตรงทุนของล็อตที่จะถูกตัด "ตอนนี้" — ไม่ตรงให้พนักงานเลือก (ระบบไม่แก้ราคาเอง)
+  if(atcBill(b)){
+    const go=await atcShipCheck(b);
+    if(go==='edit'){atcOpenBill(id,{shipNow:true,apply:true},b);return;}
+    if(go!=='ship')return;
+  }
   const whName=(whList.find(w=>w.id===wid)||{}).name||'';
   const {error}=await db.rpc('ship_bill',{p_bill_id:id,p_warehouse:wid});
   if(error){
@@ -8272,7 +8656,9 @@ async function shipBillUI(id){
   try{const {error:fe}=await db.rpc('fifo_consume_order',{p_order:b.order_id});
     if(fe){console.warn('fifo',fe);fifoWarn=' · ⚠️ ล็อกต้นทุน FIFO ไม่สำเร็จ ('+fe.message+') แจ้ง admin';}}
   catch(e){console.warn('fifo',e);fifoWarn=' · ⚠️ ล็อกต้นทุน FIFO ไม่สำเร็จ แจ้ง admin';}
-  toast('บิล '+b.bill_no+' → ส่งแล้ว ตัดสต๊อกจาก'+whName+'เรียบร้อย'+fifoWarn);
+  let atcWarn='';
+  if(atcBill(b)){if(!fifoWarn)atcWarn=await atcVerifyShipped(b);loadAtCostCheck();}
+  toast('บิล '+b.bill_no+' → ส่งแล้ว ตัดสต๊อกจาก'+whName+'เรียบร้อย'+fifoWarn+atcWarn);
   const r=await notifyCustomer(b.customers?.line_group_id,
     shopTag(b.customers)+'🚚 บิลเลขที่ '+b.bill_no+'\nสถานะ: จัดส่งแล้ว กำลังนำส่งถึงมือลูกค้า\nยอด ฿'+fmt(b.total));
   if(b.customers?.line_group_id&&!r.ok) toast('ส่งแล้ว แต่แจ้ง LINE ไม่สำเร็จ');
@@ -10361,6 +10747,7 @@ async function openEditOrder(orderId){
   ebModeUI(true,o);
   ebRender();
   document.getElementById('editbill-modal').style.display='flex';
+  await atcEditorInit();   // ลูกค้าขายราคาทุน: กล่องทุนรอบนี้ + ปุ่มใส่ราคาตามทุน
 }
 
 async function saveEditOrder(btn){
@@ -10447,8 +10834,8 @@ async function cancelOrder(orderId,btn){
 }
 function ebIsAdmin(){return !!(currentUser&&currentUser.role==='admin');}
 function ebNeedsApproval(b){return b.ship_status==='shipped'||Number(b.paid_amount||0)>0.009||b.payment_status==='paid';}
-async function openEditBill(billId){
-  const b=bills.find(x=>x.id===billId);if(!b)return;
+async function openEditBill(billId,bObj){
+  const b=bills.find(x=>x.id===billId)||(bObj&&bObj.id===billId?bObj:null);if(!b)return;   // bObj: บิลนอกรายการที่โหลดไว้ (เช่น จากการ์ดหน้าภาพรวม)
   if((b.ship_status||'pending')==='cancelled'){toast('บิลถูกยกเลิกแล้ว แก้ไม่ได้');return;}
   // บิลส่งแล้ว/รับยอดแล้ว: พนักงานแก้เป็น "คำขอ" รอ admin — ถ้ามีคำขอค้างอยู่แล้ว ไม่ให้ยื่นซ้ำ
   if(ebNeedsApproval(b)&&!ebIsAdmin()){
@@ -10487,6 +10874,7 @@ async function openEditBill(billId){
   const saveBtn=document.getElementById('eb-save');
   if(saveBtn)saveBtn.textContent=(needAppr&&!admin)?'📨 ส่งคำขอแก้บิล (รอ admin อนุมัติ)':'💾 บันทึก + ออกบิลใหม่ (v.ถัดไป)';
   document.getElementById('editbill-modal').style.display='flex';
+  await atcEditorInit();   // ลูกค้าขายราคาทุน: กล่องเทียบทุน + ปุ่มใส่ราคาตามทุน
 }
 function closeEditBill(){document.getElementById('editbill-modal').style.display='none';ebState=null;}
 function ebRender(){
@@ -10504,6 +10892,7 @@ function ebRender(){
     <td class="num">${fmt(it.qty*it.price)}</td>
     <td><button class="btn-d mini" onclick="ebRemove(${i})">✕</button></td></tr>`).join('');
   ebTotals();
+  if(ebState.atc)atcRenderBox();   // ลูกค้าขายราคาทุน: เทียบราคาที่แก้อยู่กับทุนสด ๆ
 }
 function ebQty(i,v){ebState.items[i].qty=Math.max(1,Number(v)||1);ebRender();}
 function ebPrice(i,v){ebState.items[i].price=Math.max(0,Number(v)||0);ebRender();}
@@ -10599,6 +10988,7 @@ async function saveEditBill(btn){
       const res=await applyBillEdit(p,{interactive:true});
       toast('แก้บิล '+b.bill_no+' เป็น v.'+res.newRev+' แล้ว ✓'+(res.payNote||''));
       closeEditBill(); loadBills(); loadProducts();
+      if(atcBill(b))loadAtCostCheck();
     }
   }catch(e){toast(String(e.message||e).replace('NEED_APPROVAL|','')+(String(e.message||'').startsWith('NEED_APPROVAL')?' — กดบันทึกอีกครั้งเพื่อส่งเป็นคำขอ':''));}
   btn.disabled=false;btn.textContent='💾 บันทึก + ออกบิลใหม่ (v.ถัดไป)';
@@ -14511,6 +14901,7 @@ async function startApp(){
   await Promise.all([loadProducts(),loadCustomers(),loadSales(),loadWhList(),loadSuppliers().catch(()=>{})]);  // ข้อมูลหลัก โหลดพร้อมกัน
   await Promise.all([loadOrders(),loadBills()]).catch(e=>toast('โหลดข้อมูลบางส่วนไม่สำเร็จ: '+(e?.message||e)));
   dashCoreReady=true; dashLocalCards();                   // การ์ดที่อิงข้อมูลหลัก ขึ้นตอนนี้
+  loadAtCostCheck();                                      // บิลขายราคาทุนที่ราคาไม่ตรงทุน (ต้องรู้ลูกค้า/เซลล์ก่อน)
   loadRcvHistory();loadUsers();loadTransfers();loadQuotes();loadSkuCats();refreshEditReqBadge();
   // ไฟล์ที่ NAS สำรองไม่ได้: ป้ายจำนวนบนปุ่ม + ส่งไลน์กลุ่มรีพอร์ตแทน ถ้าโปรแกรม NAS ส่งเองไม่ได้ (เช็คทุก 15 นาที)
   if(!nasTickTimer){setTimeout(nasIssueTick,45000);nasTickTimer=setInterval(nasIssueTick,15*60000);}
